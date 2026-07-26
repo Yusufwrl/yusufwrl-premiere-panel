@@ -23,7 +23,9 @@ function cancelAll() {
 // ve oto-güncelleme config'i ezse bile bozulmaz.
 function loadConfig(extRoot) {
   var os = require("os");
-  var cfg = JSON.parse(fs.readFileSync(path.join(extRoot, "config.json"), "utf8"));
+  var rawCfg = fs.readFileSync(path.join(extRoot, "config.json"), "utf8");
+  if (rawCfg.charCodeAt(0) === 0xFEFF) rawCfg = rawCfg.slice(1); // BOM'a dayaniklilik
+  var cfg = JSON.parse(rawCfg);
   var home = os.homedir();
   var engineRoot = "";
   try {

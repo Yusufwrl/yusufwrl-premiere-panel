@@ -14,7 +14,8 @@ const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
 
-function readJson(p, def) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return def; } }
+function stripBom(s) { return (s && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s; }
+function readJson(p, def) { try { return JSON.parse(stripBom(fs.readFileSync(p, "utf8"))); } catch (e) { return def; } }
 
 // "v1.2.0" / "1.2" karşılaştırması → 1: a yeni, -1: b yeni, 0: eşit
 function cmpVer(a, b) {
