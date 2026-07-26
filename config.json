@@ -1,0 +1,14 @@
+{
+  "engineExe": "%ENGINE%\\Faster-Whisper-XXL\\faster-whisper-xxl.exe",
+  "ffmpegExe": "%ENGINE%\\Faster-Whisper-XXL\\ffmpeg.exe",
+  "workDir": "%ENGINE%\\work",
+  "model": "large-v3",
+  "language": "tr",
+  "device": "cuda",
+  "computeType": "float16",
+  "audioStreamIndex": 0,
+  "maxWordsPerCue": 3,
+  "fontName": "Poetsen One",
+  "stylesDir": "%ENGINE%\\styles",
+  "graphicsTrackIndex": -1
+}

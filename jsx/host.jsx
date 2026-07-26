@@ -1,0 +1,661 @@
+/*
+ * ExtendScript — Premiere Pro içinde çalışır.
+ * Panel (main.js) bu fonksiyonları CSInterface.evalScript ile çağırır.
+ */
+
+function _jsonEsc(s) {
+    if (s === null || s === undefined) return "";
+    s = String(s);
+    s = s.replace(/\\/g, "\\\\");
+    s = s.replace(/"/g, '\\"');
+    s = s.replace(/[\r\n]/g, " ");
+    return s;
+}
+
+// Bağlantı testi
+function ping() {
+    return "Premiere bağlı: " + app.appName + " " + app.version;
+}
+
+// Aktif sekans + seçilen ses kanalının kliplerini JSON olarak döndürür.
+// trackIdx: 0 = A1, 1 = A2, 2 = A3 ...
+function getA1ClipsJSON(trackIdx) {
+    if (trackIdx === undefined || trackIdx === null) trackIdx = 0;
+    var seq = app.project.activeSequence;
+    if (!seq) return '{"error":"no_sequence"}';
+    if (!seq.audioTracks || seq.audioTracks.numTracks <= trackIdx) {
+        return '{"error":"no_audio_track"}';
+    }
+    var track = seq.audioTracks[trackIdx];
+    var parts = [];
+    for (var i = 0; i < track.clips.numItems; i++) {
+        var clip = track.clips[i];
+        var mediaPath = "";
+        try { mediaPath = clip.projectItem.getMediaPath(); } catch (e) { mediaPath = ""; }
+        var startSec = 0, inSec = 0, durSec = 0;
+        try { startSec = clip.start.seconds; } catch (e) {}
+        try { inSec = clip.inPoint.seconds; } catch (e) {}
+        try { durSec = clip.duration.seconds; } catch (e) {}
+        parts.push(
+            '{"mediaPath":"' + _jsonEsc(mediaPath) + '",' +
+            '"timelineStartSec":' + startSec + ',' +
+            '"inPointSec":' + inSec + ',' +
+            '"durationSec":' + durSec + '}'
+        );
+    }
+    return '{"sequenceName":"' + _jsonEsc(seq.name) + '",' +
+           '"clipCount":' + track.clips.numItems + ',' +
+           '"clips":[' + parts.join(",") + ']}';
+}
+
+function _basename(p) { return String(p).replace(/^.*[\\\/]/, ""); }
+
+// SRT'yi projeye alır ve caption track olarak timeline'a (0 anına) ekler.
+function addCaptionsToTimeline(srtPath) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+
+        var root = app.project.rootItem;
+        var before = root.children.numItems;
+        app.project.importFiles([srtPath], true, root, false);
+        var after = root.children.numItems;
+
+        // İçe alınan caption öğesini bul (dosya adına göre)
+        var baseName = _basename(srtPath).replace(/\.[^.]+$/, "");
+        var item = null;
+        for (var i = root.children.numItems - 1; i >= 0; i--) {
+            var ch = root.children[i];
+            if (ch && ch.name && ch.name.indexOf(baseName) !== -1) { item = ch; break; }
+        }
+        if (!item && after > before) item = root.children[root.children.numItems - 1];
+        if (!item) return "err:Altyazı öğesi projede bulunamadı";
+
+        // Caption track oluştur (0 anına). Farklı sürümlerde imza değişebilir; sırayla dene.
+        if (typeof seq.createCaptionTrack === "function") {
+            try { seq.createCaptionTrack(item, "0"); return "ok:Timeline'a eklendi"; }
+            catch (e1) {
+                try { seq.createCaptionTrack(item, 0); return "ok:Timeline'a eklendi"; }
+                catch (e2) {
+                    try {
+                        var t = new Time(); t.ticks = "0";
+                        seq.createCaptionTrack(item, t);
+                        return "ok:Timeline'a eklendi";
+                    } catch (e3) {
+                        return "imported_only:Project panelinde. createCaptionTrack hata: " + e3.toString();
+                    }
+                }
+            }
+        }
+        return "imported_only:Project panelinde (bu sürümde otomatik yerleştirme yok). Öğeyi timeline'a sürükle.";
+    } catch (e) {
+        return "err:" + e.toString();
+    }
+}
+
+function _readFileUTF8(p) {
+    var f = new File(p);
+    f.encoding = "UTF-8";
+    f.open("r");
+    var s = f.read();
+    f.close();
+    return s;
+}
+
+function _writeFileUTF8(p, s) {
+    try { var f = new File(p); f.encoding = "UTF-8"; f.open("w"); f.write(s); f.close(); return true; }
+    catch (e) { return false; }
+}
+
+// TrackItem'in tüm bileşen/özelliklerini metne döker (teşhis).
+function _dumpTrackItem(ti) {
+    var out = [];
+    try { ti.setSelected(1, 1); } catch (esel) { out.push("setSelected err: " + esel.toString()); }
+    try { out.push("getMGTComponent tipi: " + (typeof ti.getMGTComponent)); } catch (e) {}
+    try {
+        var mc = ti.getMGTComponent();
+        out.push("mgtComp: " + (mc ? "obj" : "null"));
+        if (mc && mc.properties) {
+            out.push("mgtComp.props: " + mc.properties.numItems);
+            for (var m = 0; m < mc.properties.numItems; m++) {
+                out.push("  mgt.p" + m + ": " + ("" + (mc.properties[m].displayName || "?")));
+            }
+        }
+    } catch (e) { out.push("mgtComp err: " + e.toString()); }
+    try {
+        out.push("components: " + ti.components.numItems);
+        for (var i = 0; i < ti.components.numItems; i++) {
+            var comp = ti.components[i];
+            var cn = "?";
+            try { cn = "" + (comp.displayName || comp.matchName || "?"); } catch (ee) {}
+            out.push("[" + i + "] " + cn);
+            try {
+                for (var j = 0; j < comp.properties.numItems; j++) {
+                    var p = comp.properties[j];
+                    var pn = "?";
+                    try { pn = "" + (p.displayName || "?"); } catch (e3) {}
+                    var extra = "";
+                    if (/source text/i.test(pn)) {
+                        try {
+                            var gv = p.getValue();
+                            extra = "  ==VALUE[" + (typeof gv) + "]== " + String(gv).substring(0, 400);
+                        } catch (egv) { extra = "  getValue err: " + egv.toString(); }
+                    }
+                    out.push("    p" + j + ": " + pn + extra);
+                }
+            } catch (e2) { out.push("    props err: " + e2.toString()); }
+        }
+    } catch (e) { out.push("components err: " + e.toString()); }
+    return out.join("\n");
+}
+
+// TrackItem'in metnini olası her yoldan ayarlamayı dener; hangi yolun tuttuğunu döndürür.
+function _setTextAllWays(ti, text) {
+    try { ti.setSelected(1, 1); } catch (esel) {}
+    // 1) getMGTComponent
+    try {
+        var mc = ti.getMGTComponent();
+        if (mc && mc.properties) {
+            for (var m = 0; m < mc.properties.numItems; m++) {
+                var mp = mc.properties[m];
+                var mdn = "" + (mp.displayName || "");
+                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test(mdn)) {
+                    try { mp.setValue(text, true); return "mgt:" + mdn; } catch (e1) {}
+                }
+            }
+            if (mc.properties.numItems === 1) {
+                try { mc.properties[0].setValue(text, true); return "mgt:tek"; } catch (e2) {}
+            }
+        }
+    } catch (e) {}
+    // 2) components üzerinden
+    try {
+        for (var i = 0; i < ti.components.numItems; i++) {
+            var comp = ti.components[i];
+            for (var j = 0; j < comp.properties.numItems; j++) {
+                var p = comp.properties[j];
+                var dn = "" + (p.displayName || "");
+                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test(dn)) {
+                    try { p.setValue(text, true); return "comp[" + i + "]:" + dn; } catch (e3) {}
+                }
+            }
+        }
+    } catch (e) {}
+    return "notfound";
+}
+
+function _setEndSec(ti, endSec, TICKS) {
+    try { var t = new Time(); t.ticks = String(Math.round(endSec * TICKS)); ti.end = t; } catch (e) {}
+}
+
+// vTrack'te başlangıcı startSec'e en yakın klibi bulur (yeni yerleştirilen).
+function _findClipNear(vTrack, startSec, TICKS) {
+    var target = Math.round(startSec * TICKS);
+    var best = null, bd = 1e18;
+    for (var k = 0; k < vTrack.clips.numItems; k++) {
+        var cl = vTrack.clips[k];
+        var st = parseFloat(cl.start.ticks);
+        var d = Math.abs(st - target);
+        if (d < bd) { bd = d; best = cl; }
+    }
+    return best;
+}
+
+/*
+ * Her altyazı satırını MOGRT stiliyle timeline'a koyar (importMGT ile).
+ * İlk klipte MOGRT'nin tüm iç yapısını dosyaya döker (teşhis).
+ */
+function addStyledSubtitles(cuesFilePath, mogrtPath, vTrackIndex) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var mf = new File(mogrtPath);
+        if (!mf.exists) return "err:MOGRT yok: " + mogrtPath;
+
+        var raw = _readFileUTF8(cuesFilePath);
+        var lines = raw.split(/\r?\n/);
+        var cues = [];
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 3) continue;
+            var s = parseFloat(p[0]), e = parseFloat(p[1]);
+            if (isNaN(s)) continue;
+            cues.push({ s: s, e: e, t: p.slice(2).join("|") });
+        }
+        if (!cues.length) return "err:cue yok";
+
+        var TICKS = 254016000000;
+        var vIdx = vTrackIndex;
+        if (vIdx === undefined || vIdx === null || vIdx < 0) vIdx = seq.videoTracks.numTracks - 1;
+
+        // 1) ÖNCE TEK KLİPLE DOĞRULA: metin ayarlanabiliyor mu?
+        var t0 = null;
+        try { t0 = seq.importMGT(mogrtPath, String(Math.round(cues[0].s * TICKS)), vIdx, -1); }
+        catch (e) { return "err:importMGT: " + e.toString(); }
+        if (!t0) return "err:importMGT null";
+        try {
+            var diagDir = new File(cuesFilePath).parent;
+            _writeFileUTF8(diagDir.fsName + "/mogrt_props.txt", _dumpTrackItem(t0));
+        } catch (ed) {}
+        var setInfo = _setTextAllWays(t0, cues[0].t);
+        var ok0 = (setInfo.indexOf("mgt:") === 0 || setInfo.indexOf("comp") === 0);
+        if (!ok0) {
+            try { t0.remove(false, false); } catch (er0) {}
+            return "err:Bu MOGRT'de DUZENLENEBILIR METIN YOK (setText=" + setInfo +
+                   "). Yaziyi duzenlenebilir alan olacak sekilde yeniden export etmen gerek.";
+        }
+
+        // 2) Doğrulandı → hedef kanalı temizle, hepsini yerleştir
+        try {
+            var vt0 = seq.videoTracks[vIdx];
+            for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
+                try { vt0.clips[k].remove(false, false); } catch (er) {}
+            }
+        } catch (ec) {}
+
+        var placed = 0, failed = 0;
+        for (var c = 0; c < cues.length; c++) {
+            var ti = null;
+            try { ti = seq.importMGT(mogrtPath, String(Math.round(cues[c].s * TICKS)), vIdx, -1); }
+            catch (e2) { failed++; continue; }
+            if (!ti) { failed++; continue; }
+            _setTextAllWays(ti, cues[c].t);
+            _setEndSec(ti, cues[c].e, TICKS);
+            placed++;
+        }
+
+        return "ok:" + placed + " eklendi" + (failed ? (", " + failed + " hata") : "") + " | metin: " + setInfo;
+    } catch (e) {
+        return "err:" + e.toString();
+    }
+}
+
+/*
+ * Seçili yazı grafiğini şablon alıp her altyazı satırı için çoğaltır (MOGRT'siz).
+ * Kullanıcı orijinal "Tofi Text Deneme" grafiğine tıklar (seçer), sonra bu çalışır.
+ */
+function addStyledFromSelected(cuesFilePath, vTrackIndex) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+
+        // seçili klibi bul
+        var tmpl = null;
+        try {
+            if (typeof seq.getSelection === "function") {
+                var sa = seq.getSelection();
+                if (sa && sa.length) tmpl = sa[0];
+            }
+        } catch (e) {}
+        if (!tmpl) {
+            for (var v = seq.videoTracks.numTracks - 1; v >= 0 && !tmpl; v--) {
+                var tr = seq.videoTracks[v];
+                for (var i = 0; i < tr.clips.numItems; i++) {
+                    var s = false;
+                    try { s = tr.clips[i].isSelected(); } catch (e2) {}
+                    if (s) { tmpl = tr.clips[i]; break; }
+                }
+            }
+        }
+        if (!tmpl) return "err:Once 'Tofi Text Deneme' yazina TIKLA (sec), sonra bas";
+
+        // teşhis: seçili klibin yapısını dök
+        var projItem = null;
+        try { projItem = tmpl.projectItem; } catch (e) {}
+        try {
+            var diagDir = new File(cuesFilePath).parent;
+            _writeFileUTF8(diagDir.fsName + "/selected_props.txt",
+                "SECILI KLIP:\n" + _dumpTrackItem(tmpl) +
+                "\nprojItem: " + (projItem ? (projItem.name || "var") : "null"));
+        } catch (ed) {}
+
+        if (!projItem) return "err:Grafik cogaltilamiyor (projectItem yok) | selected_props yazildi";
+
+        // cue oku
+        var raw = _readFileUTF8(cuesFilePath);
+        var lines = raw.split(/\r?\n/);
+        var cues = [];
+        for (var k = 0; k < lines.length; k++) {
+            var ln = lines[k]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 3) continue;
+            var ss = parseFloat(p[0]), ee = parseFloat(p[1]);
+            if (isNaN(ss)) continue;
+            cues.push({ s: ss, e: ee, t: p.slice(2).join("|") });
+        }
+        if (!cues.length) return "err:cue yok";
+
+        var TICKS = 254016000000;
+        var vIdx = (vTrackIndex === undefined || vTrackIndex === null || vTrackIndex < 0)
+                     ? seq.videoTracks.numTracks - 1 : vTrackIndex;
+        var vTrack = seq.videoTracks[vIdx];
+
+        // hedef kanalı temizle
+        try { for (var q = vTrack.clips.numItems - 1; q >= 0; q--) { try { vTrack.clips[q].remove(false, false); } catch (er) {} } } catch (ec) {}
+
+        var placed = 0, failed = 0, setInfo = "";
+        for (var c = 0; c < cues.length; c++) {
+            var okc = false;
+            try { okc = vTrack.overwriteClip(projItem, cues[c].s); }
+            catch (eo) { if (!setInfo) setInfo = "overwrite:" + eo.toString(); }
+            var ti = okc ? _findClipNear(vTrack, cues[c].s, TICKS) : null;
+            if (!ti) { failed++; continue; }
+            var r = _setTextAllWays(ti, cues[c].t);
+            if (c === 0) setInfo = "text:" + r;
+            _setEndSec(ti, cues[c].e, TICKS);
+            placed++;
+        }
+        return "ok:" + placed + " eklendi, " + failed + " hata | " + setInfo;
+    } catch (e) {
+        return "err:" + e.toString();
+    }
+}
+
+/*
+ * Çoklu-stil yerleştirme: her cue satırı "startSec|endSec|mogrtPath|metin".
+ * Farklı konuşmacılar farklı MOGRT ile timeline'a gelir.
+ */
+function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Altyazı"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var raw = _readFileUTF8(cuesFilePath);
+        var lines = raw.split(/\r?\n/);
+        var cues = [];
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 4) continue;
+            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], txt = p.slice(3).join("|");
+            if (isNaN(s) || !mg) continue;
+            cues.push({ s: s, e: e, mg: mg, t: txt });
+        }
+        if (!cues.length) return "err:cue yok";
+
+        var TICKS = 254016000000;
+        // vTrackIndex: -1 = en üst kanal, -2 = bir altı, 0+ = doğrudan indeks
+        var vIdx;
+        if (vTrackIndex === undefined || vTrackIndex === null) vIdx = seq.videoTracks.numTracks - 1;
+        else if (vTrackIndex < 0) vIdx = seq.videoTracks.numTracks + vTrackIndex;
+        else vIdx = vTrackIndex;
+        if (vIdx < 0) vIdx = 0;
+
+        // hedef kanalı temizle
+        try {
+            var vt0 = seq.videoTracks[vIdx];
+            for (var k = vt0.clips.numItems - 1; k >= 0; k--) { try { vt0.clips[k].remove(false, false); } catch (er) {} }
+        } catch (ec) {}
+
+        var placed = 0, failed = 0, firstErr = "";
+        for (var c = 0; c < cues.length; c++) {
+            var mf = new File(cues[c].mg);
+            if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
+            var ti = null;
+            try { ti = seq.importMGT(cues[c].mg, String(Math.round(cues[c].s * TICKS)), vIdx, -1); }
+            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
+            if (!ti) { failed++; continue; }
+            _setTextAllWays(ti, cues[c].t);
+            _setEndSec(ti, cues[c].e, TICKS);
+            placed++;
+        }
+        return "ok:" + placed + " eklendi" + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
+}
+
+// Klibi ekranda yukarı kaydırır (üst üste konuşmada istifleme). Başarılıysa true döner.
+// Position özelliğini önce Motion/Vector Motion'da, bulamazsa herhangi bir bileşende arar (S8).
+function _shiftUp(ti, offsetPx) {
+    if (!offsetPx || offsetPx <= 0) return false;
+    try {
+        var posProp = null;
+        // 1. tur: adı Motion/Vector Motion olan bileşen; 2. tur: Position'ı olan herhangi bileşen
+        for (var pass = 0; pass < 2 && !posProp; pass++) {
+            for (var j = 0; j < ti.components.numItems; j++) {
+                var comp = ti.components[j];
+                var cn = "" + (comp.displayName || "");
+                if (pass === 0 && !/motion/i.test(cn)) continue;
+                try {
+                    for (var k = 0; k < comp.properties.numItems; k++) {
+                        if (/position/i.test("" + (comp.properties[k].displayName || ""))) { posProp = comp.properties[k]; break; }
+                    }
+                } catch (ep) {}
+                if (posProp) break;
+            }
+        }
+        if (!posProp) return false;
+        var pos = posProp.getValue();
+        if (!pos || pos.length < 2) return false;
+        var x = pos[0], y = pos[1];
+        // normalize (0-1) mi yoksa piksel mi: küçük değerler normalize kabul edilir
+        var norm = (Math.abs(x) <= 2 && Math.abs(y) <= 2);
+        var dy = norm ? (offsetPx / 1080.0) : offsetPx;
+        posProp.setValue([x, y - dy], true);
+        return true;
+    } catch (e) { return false; }
+}
+
+/*
+ * İstifli yerleştirme: her cue "start|end|mogrt|lane|metin".
+ * lane 0 = en üst kanal (taban konum), lane 1 = bir alt kanal + ekranda yukarı, ...
+ * Böylece üst üste konuşmalar çakışmaz ve renkleriyle üst üste dizilir.
+ */
+function addLanedSubtitles(cuesFilePath, yOffsetPx) {
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Altyazı"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        yOffsetPx = parseFloat(yOffsetPx) || 130;
+        var raw = _readFileUTF8(cuesFilePath);
+        var lines = raw.split(/\r?\n/);
+        var cues = [], maxLane = 0;
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 5) continue;
+            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], lane = parseInt(p[3], 10) || 0, txt = p.slice(4).join("|");
+            if (isNaN(s) || !mg) continue;
+            if (lane > maxLane) maxLane = lane;
+            cues.push({ s: s, e: e, mg: mg, lane: lane, t: txt });
+        }
+        if (!cues.length) return "err:cue yok";
+
+        var TICKS = 254016000000;
+        var top = seq.videoTracks.numTracks - 1;
+        // kullanılacak kanalları temizle
+        for (var L = 0; L <= maxLane; L++) {
+            var idx = top - L; if (idx < 0) continue;
+            try { var vt = seq.videoTracks[idx]; for (var k = vt.clips.numItems - 1; k >= 0; k--) { try { vt.clips[k].remove(false, false); } catch (er) {} } } catch (ec) {}
+        }
+
+        var placed = 0, failed = 0, firstErr = "", needShift = 0, shifted = 0;
+        for (var c = 0; c < cues.length; c++) {
+            var idx2 = top - cues[c].lane; if (idx2 < 0) idx2 = 0;
+            var mf = new File(cues[c].mg);
+            if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
+            var ti = null;
+            try { ti = seq.importMGT(cues[c].mg, String(Math.round(cues[c].s * TICKS)), idx2, -1); }
+            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
+            if (!ti) { failed++; continue; }
+            _setTextAllWays(ti, cues[c].t);
+            _setEndSec(ti, cues[c].e, TICKS);
+            if (cues[c].lane > 0) { needShift++; if (_shiftUp(ti, cues[c].lane * yOffsetPx)) shifted++; }
+            placed++;
+        }
+        return "ok:" + placed + " eklendi" + (needShift ? (", " + shifted + "/" + needShift + " kaydırıldı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
+}
+
+/*
+ * AutoCut: verilen sessiz aralıkları timeline'dan ripple-delete eder (boşluğu kapatır).
+ * intervals dosyası: her satır "startSec|endSec".
+ * SONDAN BAŞA doğru işlenir ki önceki zamanlar kaymasın.
+ */
+function _seqDuration(seq) {
+    var maxEnd = 0;
+    try { for (var v = 0; v < seq.videoTracks.numTracks; v++) { var t = seq.videoTracks[v]; if (t.clips.numItems > 0) { var e = t.clips[t.clips.numItems - 1].end.seconds; if (e > maxEnd) maxEnd = e; } } } catch (er) {}
+    try { for (var a = 0; a < seq.audioTracks.numTracks; a++) { var t2 = seq.audioTracks[a]; if (t2.clips.numItems > 0) { var e2 = t2.clips[t2.clips.numItems - 1].end.seconds; if (e2 > maxEnd) maxEnd = e2; } } } catch (er2) {}
+    return maxEnd;
+}
+
+function _p2(n) { n = String(n); return n.length < 2 ? "0" + n : n; }
+
+// Drop-frame timecode (29.97 / 59.94). frame = gerçek kare sayısı, nominal = 30 veya 60.
+function _dfTimecode(frame, nominal) {
+    var dropPerMin = (nominal >= 59) ? 4 : 2;
+    var framesPer10Min = nominal * 600 - dropPerMin * 9;   // 29.97 -> 17982
+    var framesPerMin = nominal * 60 - dropPerMin;          // 29.97 -> 1798
+    var d = Math.floor(frame / framesPer10Min);
+    var mo = frame % framesPer10Min;
+    if (mo >= dropPerMin) frame += dropPerMin * 9 * d + dropPerMin * Math.floor((mo - dropPerMin) / framesPerMin);
+    else frame += dropPerMin * 9 * d;
+    var ff = frame % nominal, rest = Math.floor(frame / nominal);
+    var ss = rest % 60, mm = Math.floor(rest / 60) % 60, hh = Math.floor(rest / 3600) % 24;
+    return _p2(hh) + ":" + _p2(mm) + ":" + _p2(ss) + ";" + _p2(ff);  // ';' = drop-frame
+}
+
+// saniye -> timecode. fpsFrac = GERÇEK (kesirli) fps; 29.97/59.94'te drop-frame üretir.
+// Yuvarlanmış tam-sayı fps ile üretmek qe.razor'da zamanla artan kayma yapıyordu (H5).
+function _secToTC(sec, fpsFrac) {
+    if (!fpsFrac || fpsFrac < 1) fpsFrac = 30;
+    var nominal = Math.round(fpsFrac);
+    var frame = Math.round(sec * fpsFrac);                 // gerçek kare sayısı
+    // tolerans 0.02: 29.97'yi yakalar ama gerçek 30.0'ı (fark 0.03) drop-frame sanmaz
+    var isDF = (Math.abs(fpsFrac - 29.97) < 0.02) || (Math.abs(fpsFrac - 59.94) < 0.02);
+    if (isDF) return _dfTimecode(frame, nominal);
+    var ff = frame % nominal, rest = Math.floor(frame / nominal);
+    var ss = rest % 60, mm = Math.floor(rest / 60) % 60, hh = Math.floor(rest / 3600);
+    return _p2(hh) + ":" + _p2(mm) + ":" + _p2(ss) + ":" + _p2(ff);
+}
+
+// Bir kanalda [s,e] aralığındaki (ortadaki) klipleri ripple-siler. Silinen klip sayısını döndürür (H4).
+function _ripTrack(tr, s, e, eps) {
+    var removed = 0;
+    for (var i = tr.clips.numItems - 1; i >= 0; i--) {
+        var cl = tr.clips[i], cs, ce;
+        try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er) { continue; }
+        if (cs >= s - eps && ce <= e + eps) { try { cl.remove(true, false); removed++; } catch (er2) {} }
+    }
+    return removed;
+}
+// eps'i fps'e bağla (H9): 0.75/fps hem razor kare-yuvarlamasını kapsar hem komşu klibi korur.
+function _rippleDeleteRange(seq, s, e, fps) {
+    var eps = (fps && fps > 0) ? (0.75 / fps) : 0.04, v, removed = 0;
+    for (v = 0; v < seq.videoTracks.numTracks; v++) removed += _ripTrack(seq.videoTracks[v], s, e, eps);
+    for (v = 0; v < seq.audioTracks.numTracks; v++) removed += _ripTrack(seq.audioTracks[v], s, e, eps);
+    return removed;
+}
+// [s,e] aralığını tek bir klip tam kaplıyor mu? (kayıt sürekliliği kontrolü, H2/H3)
+function _trackCovers(tr, s, e, eps) {
+    for (var i = 0; i < tr.clips.numItems; i++) {
+        var cl = tr.clips[i], cs, ce;
+        try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er) { continue; }
+        if (cs <= s + eps && ce >= e - eps) return true;
+    }
+    return false;
+}
+
+// TAM KESME: tüm kanalları razorla + ortadaki parçayı ripple-sil (bulunan tüm boşluklar).
+function autoCut(intervalsFilePath) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        app.enableQE();
+        var qeSeq = qe.project.getActiveSequence();
+        if (!qeSeq) return "err:QE sekansı alınamadı";
+        // Kesirli fps'i koru (H5): TC üretimi bununla, eps için yuvarlanmış fps ile.
+        var fpsFrac = 30; try { fpsFrac = 254016000000 / parseFloat(seq.timebase); } catch (ef) {}
+        var fps = Math.round(fpsFrac);
+        var seqDur = _seqDuration(seq);
+
+        // Senkron riski uyarısı (H2/H3): V0 dışında dolu video kanalı (overlay/altyazı) varsa
+        // per-track ripple desenkron üretebilir — kullanıcıya belirt.
+        var overlay = 0;
+        try { for (var vt = 1; vt < seq.videoTracks.numTracks; vt++) { if (seq.videoTracks[vt].clips.numItems > 0) overlay++; } } catch (eov) {}
+
+        var diag = [];
+        function pr(x) { diag.push(x); }
+        pr("fps: " + fpsFrac.toFixed(4) + " | overlay kanal: " + overlay + " | Sekans süresi ÖNCE: " + seqDur.toFixed(2) + " sn");
+
+        var raw = _readFileUTF8(intervalsFilePath);
+        var lines = raw.split(/\r?\n/);
+        var ivs = [], skipped = 0;
+        for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 2) continue;
+            var s = parseFloat(p[0]), e = parseFloat(p[1]);
+            if (isNaN(s) || isNaN(e) || e <= s) continue;
+            if (s < 0) { skipped++; continue; }
+            if (e > seqDur) e = seqDur;                          // sondaki sessizliği sekans sonuna kelepçele (A7)
+            if (e - s < 0.05) { skipped++; continue; }           // GÜVENLİK: geçersiz/çok kısa aralığı atla
+            ivs.push({ s: s, e: e });
+        }
+        if (!ivs.length) return "err:Sekans içinde geçerli boşluk yok (sekans " + seqDur.toFixed(1) + " sn).";
+        ivs.sort(function (a, b) { return b.s - a.s; }); // SONDAN BAŞA (zamanlar kaymasın)
+
+        pr("Kesilecek boşluk: " + ivs.length);
+
+        // Tek Ctrl+Z ile geri alınabilsin (destekleniyorsa)
+        try { app.beginUndoGroup("Yusufwrl AutoCut"); } catch (eug) {}
+
+        // A1 (audio track 0) sürekli kayıt referansıdır; bir aralığı tam kaplamıyorsa
+        // (kayıtta gerçek boşluk) o kesimi atla — desenkron üretme (H2/H3).
+        var refTrack = (seq.audioTracks.numTracks > 0) ? seq.audioTracks[0] : null;
+
+        var done = 0, failed = 0, noop = 0, skippedCover = 0, firstErr = "";
+        for (var k = 0; k < ivs.length; k++) {
+            var cs = ivs[k].s, ce = ivs[k].e;
+            if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04)) { skippedCover++; continue; }
+            var tcS = _secToTC(cs, fpsFrac), tcE = _secToTC(ce, fpsFrac);
+            try {
+                for (var v = 0; v < seq.videoTracks.numTracks; v++) { var qv = qeSeq.getVideoTrackAt(v); qv.razor(tcS); qv.razor(tcE); }
+                for (var a = 0; a < seq.audioTracks.numTracks; a++) { var qa = qeSeq.getAudioTrackAt(a); qa.razor(tcS); qa.razor(tcE); }
+                var rem = _rippleDeleteRange(seq, cs, ce, fps);
+                if (rem > 0) done++; else noop++;              // hiçbir klip silinmediyse "done" sayma (H4)
+            } catch (e1) { failed++; if (!firstErr) firstErr = e1.toString(); }
+        }
+        try { app.endUndoGroup(); } catch (eug2) {}
+        var durAfter = _seqDuration(seq);
+        pr("Sekans süresi SONRA: " + durAfter.toFixed(2) + " sn | done=" + done + " noop=" + noop + " skipCover=" + skippedCover + " failed=" + failed + (firstErr ? " err=" + firstErr : ""));
+        try { var dir = new File(intervalsFilePath).parent; _writeFileUTF8(dir.fsName + "/autocut_diag.txt", diag.join("\n")); } catch (ed) {}
+        return "ok:" + done + " boşluk kesildi (" + seqDur.toFixed(1) + " → " + durAfter.toFixed(1) + " sn)"
+            + (noop ? (", " + noop + " boş geçti") : "")
+            + (skippedCover ? (", " + skippedCover + " atlandı (kayıt boşluğu)") : "")
+            + (failed ? (", " + failed + " hata") : "")
+            + (overlay ? (" | UYARI: " + overlay + " overlay video kanalı var — senkron için AutoCut'ı altyazıdan ÖNCE çalıştır") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    }
+}
+
+// Projeyi kaydet (kesim/altyazı öncesi güvenlik ağı).
+function saveProject() {
+    try {
+        if (app.project.path) { app.project.save(); return "ok:proje kaydedildi"; }
+        return "warn:proje henüz diske kaydedilmemiş (önce Farklı Kaydet)";
+    } catch (e) { return "err:" + e.toString(); }
+}
+
+// Son kaydedilen sürüme dön = kaydetmeden kapat + diskteki sürümü yeniden aç.
+// Kesimden önce otomatik kaydedildiği için bu, son işlemi (kesim/altyazı) geri alır.
+function revertToSaved() {
+    try {
+        var pth = app.project.path;
+        if (!pth) return "err:proje kaydedilmemiş — dönülecek sürüm yok";
+        var pf = new File(pth);
+        if (!pf.exists) return "err:kaydedilmiş proje dosyası bulunamadı";
+        app.project.closeDocument(0, 0);   // kaydetmeden kapat (son işlem diske yazılmadıysa iptal olur)
+        app.openDocument(pth);             // diskteki (işlem öncesi kaydedilmiş) sürümü aç
+        return "ok:kaydedilen sürüme dönüldü";
+    } catch (e) { return "err:" + e.toString() + " — proje diskte güvende, gerekirse elle aç"; }
+}
+
+// Projedeki en son eklenen öğenin adını döndürür (doğrulama için)
+function lastProjectItemName() {
+    try {
+        var n = app.project.rootItem.children.numItems;
+        if (n < 1) return "";
+        return app.project.rootItem.children[n - 1].name;
+    } catch (e) { return "error:" + e.toString(); }
+}

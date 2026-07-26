@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yusufwrl Premiere</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="bg-orbs"><span></span><span></span><span></span></div>
+  <div class="app">
+
+    <header class="topbar">
+      <button class="back-btn" id="backBtn" hidden aria-label="Geri">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 15h16M4 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2M8 19h8M9 11h2M13 11h2"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">Yusufwrl <span>Premiere</span></div>
+          <div class="brand-sub" id="brandSub"></div>
+        </div>
+      </div>
+      <div class="status">
+        <button class="undo-btn" id="undoBtn" title="Kesim öncesi kaydedilen sürüme dön">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9a6 6 0 0 1 0 12H7"/><path d="M6 4L3 8l3 4"/></svg>
+          Geri Al
+        </button>
+        <span class="pill" id="pillHost"><i class="dot"></i>Premiere</span>
+        <span class="pill" id="pillGpu"><i class="dot"></i>GPU</span>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <!-- ================= ANA MENÜ (KARTLAR) ================= -->
+      <div class="view active" id="viewHome">
+        <div class="home-head">Ne yapmak istersin?</div>
+        <div class="home-cards">
+          <button class="tool-card" data-view="altyazi">
+            <div class="tc-icon grad-a">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15h16M4 15a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2M8 19h8M9 11h2M13 11h2"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Altyazı</div>
+              <div class="tc-desc">Otomatik Türkçe altyazı — karakterlere göre renkli, animasyonlu</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+
+          <button class="tool-card" data-view="autocut">
+            <div class="tc-icon grad-b">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">AutoCut</div>
+              <div class="tc-desc">Sessiz boşlukları ve nefesleri otomatik kes</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+        </div>
+        <div class="home-foot">Yeni araçlar zamanla eklenecek.</div>
+      </div>
+
+      <!-- ================= ALTYAZI ================= -->
+      <div class="view" id="viewAltyazi" hidden>
+
+        <div class="seg seg-mode" id="segMode">
+          <button class="seg-btn active" data-mode="single">Tek Stil</button>
+          <button class="seg-btn" data-mode="speaker">Konuşmacıya Göre</button>
+        </div>
+
+        <div class="card" id="panelSingle">
+          <div class="card-title">Kaynak Ses</div>
+          <div class="seg" id="segTrack">
+            <button class="seg-btn active" data-track="0">A1</button>
+            <button class="seg-btn" data-track="1">A2</button>
+            <button class="seg-btn" data-track="2">A3</button>
+            <button class="seg-btn" data-track="mix">Mix</button>
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label>Stil</label>
+            <div class="select"><select id="selStyleSingle"><option value="">Düz altyazı (caption)</option></select></div>
+          </div>
+        </div>
+
+        <div class="card" id="panelSpeaker" hidden>
+          <div class="card-title">Konuşmacı Eşleme</div>
+          <div class="row-speaker">
+            <div class="rs-label"><i class="chip chip-you"></i>Sen <small>(A1)</small></div>
+            <div class="select sm"><select id="selStyleA1"></select></div>
+          </div>
+          <div class="row-speaker">
+            <div class="rs-label"><i class="chip chip-friends"></i>Arkadaşlar <small>(A2)</small></div>
+            <div class="rs-note">AI otomatik ayıracak</div>
+          </div>
+          <p class="note">A1 hep sen; A2'deki arkadaşları yapay zeka ayırır, üretimden sonra her birine renk atarsın.</p>
+        </div>
+
+        <div class="field">
+          <label>Model</label>
+          <div class="select">
+            <select id="selModel">
+              <option value="large-v3">large-v3 · en doğru</option>
+              <option value="medium">medium · hızlı</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="switch-row"><span>Küfür sansürü <small>(apt*l)</small></span><input type="checkbox" id="chkCensor"></label>
+
+        <button class="btn-primary btn-lg" id="btnRun">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
+          <span>Altyazı Oluştur</span>
+        </button>
+
+        <div class="progress-box" id="progressBox" hidden>
+          <div class="progress-head">
+            <span class="spinner" id="spinner"></span>
+            <span id="progressLabel">Hazırlanıyor…</span>
+            <span class="progress-pct" id="progressPct"></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-actions">
+            <button class="log-toggle" id="logToggle">Ayrıntılar ▾</button>
+            <button class="cancel-btn" id="btnCancel" hidden>✕ İptal</button>
+          </div>
+          <pre class="log" id="log" hidden></pre>
+        </div>
+
+        <div class="card speakers" id="speakerMap" hidden>
+          <div class="card-title">A2'deki Konuşmacılar</div>
+          <div id="speakerRows"></div>
+          <div class="row-speaker" style="margin-top:12px;gap:10px;align-items:center">
+            <div class="rs-label">İstif aralığı <small>(üst üste konuşma)</small></div>
+            <input type="range" id="stackGap" min="60" max="240" step="10" value="130" style="flex:1;min-width:80px">
+            <span id="stackGapVal" class="rs-note">130px</span>
+          </div>
+        </div>
+
+        <div class="result" id="result" hidden>
+          <div class="result-head">
+            <div class="result-info"><strong id="segCount">0</strong> altyazı</div>
+            <div class="result-actions">
+              <button class="btn-ghost" id="btnAddTimeline">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                Timeline'a Ekle
+              </button>
+              <button class="btn-ghost" id="btnExportSrt" title="Altyazı dosyası (.srt)">SRT</button>
+              <button class="btn-ghost" id="btnExportTxt" title="Düz metin (.txt)">TXT</button>
+              <button class="btn-ghost" id="btnExportChapters" title="YouTube bölüm zaman damgaları">Bölümler</button>
+              <input id="chapInterval" type="number" min="10" value="60" title="Bölüm aralığı (sn)" style="width:52px">
+            </div>
+          </div>
+          <p class="note" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce).</p>
+          <div class="transcript" id="transcript"></div>
+        </div>
+      </div>
+
+      <!-- ================= AUTOCUT ================= -->
+      <div class="view" id="viewAutocut" hidden>
+        <div class="card">
+          <div class="card-title">Ayarlar</div>
+          <div class="field-row">
+            <div class="field">
+              <label>Hassasiyet</label>
+              <div class="select"><select id="acSens">
+                <option value="10">Az agresif</option>
+                <option value="14" selected>Normal</option>
+                <option value="18">Agresif</option>
+              </select></div>
+            </div>
+            <div class="field">
+              <label>En kısa boşluk</label>
+              <div class="select"><select id="acMin">
+                <option value="0.1">0.1 sn (en kısa)</option>
+                <option value="0.15">0.15 sn</option>
+                <option value="0.2">0.2 sn</option>
+                <option value="0.3">0.3 sn</option>
+                <option value="0.35">0.35 sn</option>
+                <option value="0.5" selected>0.5 sn</option>
+                <option value="0.8">0.8 sn</option>
+                <option value="1.2">1.2 sn</option>
+              </select></div>
+            </div>
+          </div>
+          <p class="note">Konuşma kanalları (A1 + A2) analiz edilir; oyun sesi (A3) sayılmaz. Boşluk = kimse konuşmuyorsa. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.</p>
+        </div>
+
+        <button class="btn-primary btn-lg" id="acAnalyze">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <span>Analiz Et</span>
+        </button>
+
+        <div class="progress-box" id="acProgress" hidden>
+          <div class="progress-head">
+            <span class="spinner"></span>
+            <span id="acLabel">Analiz ediliyor…</span>
+            <span class="progress-pct" id="acPct"></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="acFill"></div></div>
+          <div class="progress-actions">
+            <button class="log-toggle" id="acLogToggle">Ayrıntılar ▾</button>
+            <button class="cancel-btn" id="acCancel" hidden>✕ İptal</button>
+          </div>
+          <pre class="log" id="acLog" hidden></pre>
+        </div>
+
+        <div class="card ac-result" id="acResult" hidden>
+          <div class="ac-summary">
+            <div class="ac-stat"><strong id="acCount">0</strong><span>boşluk bulundu</span></div>
+            <div class="ac-stat accent"><strong id="acSaved">0 sn</strong><span>kısalacak</span></div>
+          </div>
+          <button class="btn-primary" id="acCut">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+            <span>Boşlukları Kes</span>
+          </button>
+          <p class="note" id="acCutNote" style="margin-top:12px;">Kesim geri alınabilir (Ctrl+Z). Önce bir yedek almak istersen projeyi kaydet.</p>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Temalı modal (native confirm/alert yerine) -->
+  <div class="modal-overlay" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <div class="modal-title" id="modalTitle">Onay</div>
+      <div class="modal-msg" id="modalMsg"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="modalCancel">İptal</button>
+        <button class="btn-primary" id="modalOk">Devam</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/CSInterface.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

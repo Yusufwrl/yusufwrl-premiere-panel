@@ -1,0 +1,18 @@
+# Kurulum cikti/gecici dosyalari
+installer/dist/
+installer/staging/
+installer/panel.zip
+installer/YusufwrlKur.exe
+
+# Makineye ozel
+engine-root.txt
+
+# Motor ASLA repoya girmez (~3 GB)
+engine/
+YusufwrlEngine/
+
+# Genel
+node_modules/
+*.log
+Thumbs.db
+desktop.ini

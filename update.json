@@ -1,0 +1,5 @@
+{
+  "_aciklama": "Oto-guncelleme ayari. 'repo' degerini kendi GitHub deponla degistir (ornek: yusufwrl/yusufwrl-premiere-panel). Degistirmezsen guncelleme kapali kalir.",
+  "repo": "GITHUB_KULLANICI/REPO-ADI",
+  "asset": "panel.zip"
+}
