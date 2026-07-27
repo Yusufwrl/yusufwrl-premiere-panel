@@ -72,8 +72,10 @@
         <div class="seg seg-mode" id="segMode">
           <button class="seg-btn active" data-mode="single">Tek Stil</button>
           <button class="seg-btn" data-mode="speaker">Konuşmacıya Göre</button>
+          <button class="seg-btn" data-mode="recolor">Renk Değiştir</button>
         </div>
 
+        <div id="genArea">
         <div class="card" id="panelSingle">
           <div class="card-title">Kaynak Ses</div>
           <div class="seg" id="segTrack">
@@ -147,6 +149,7 @@
         <div class="progress-box" id="progressBox" hidden>
           <div class="progress-head">
             <span class="spinner" id="spinner"></span>
+            <span class="prog-badge" id="progressBadge" hidden></span>
             <span id="progressLabel">Hazırlanıyor…</span>
             <span class="progress-pct" id="progressPct"></span>
           </div>
@@ -161,11 +164,6 @@
         <div class="card speakers" id="speakerMap" hidden>
           <div class="card-title">A2'deki Konuşmacılar</div>
           <div id="speakerRows"></div>
-          <div class="row-speaker" style="margin-top:12px;gap:10px;align-items:center">
-            <div class="rs-label">İstif aralığı <small>(üst üste konuşma)</small></div>
-            <input type="range" id="stackGap" min="60" max="240" step="10" value="130" style="flex:1;min-width:80px">
-            <span id="stackGapVal" class="rs-note">130px</span>
-          </div>
         </div>
 
         <div class="result" id="result" hidden>
@@ -186,12 +184,19 @@
           <div class="transcript" id="transcript"></div>
         </div>
 
-        <div class="card" id="recolorCard">
-          <div class="card-title">Timeline'da renk değiştir</div>
-          <p class="note">Yerleştirdikten sonra bir altyazının rengi yanlışsa: timeline'da o klip(ler)i seç, aşağıdan doğru rengi/stili seç, "Değiştir"e bas. (Metin ve konum korunur.)</p>
-          <div class="row-speaker" style="gap:10px;align-items:center">
-            <div class="select sm" style="flex:1"><select id="selRecolor"></select></div>
-            <button class="btn-ghost" id="btnRecolor">Değiştir</button>
+        </div><!-- /genArea -->
+
+        <!-- ================= RENK DEĞİŞTİR (3. sekme) ================= -->
+        <div id="panelRecolor" hidden>
+          <div class="card">
+            <div class="card-title">Timeline'da Renk Değiştir</div>
+            <p class="note" style="margin-top:0;line-height:1.75">
+              <b style="color:var(--text)">1.</b> Timeline'da rengini değiştireceğin altyazı klip(ler)ini seç.<br>
+              <b style="color:var(--text)">2.</b> Aşağıdan yeni rengi seç — metin ve konum korunur.
+            </p>
+            <div class="color-grid" id="recolorBtns"></div>
+            <div class="recolor-status" id="recolorStatus" hidden></div>
+            <p class="note" id="recolorHint"></p>
           </div>
         </div>
       </div>
@@ -233,7 +238,8 @@
 
         <div class="progress-box" id="acProgress" hidden>
           <div class="progress-head">
-            <span class="spinner"></span>
+            <span class="spinner" id="acSpinner"></span>
+            <span class="prog-badge" id="acBadge" hidden></span>
             <span id="acLabel">Analiz ediliyor…</span>
             <span class="progress-pct" id="acPct"></span>
           </div>
