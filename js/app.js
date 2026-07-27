@@ -7,8 +7,8 @@
     "#ff8c42", "#6c5ce7", "#f9ca24", "#48dbfb"];
   var fileCounter = 0;
 
-  var state = { mode: "single", track: "0", running: false, cancelled: false, styles: [],
-    singleCues: [], a1Cues: [], a2Cues: [], speakers: [] };
+  var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
+    singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "" };
 
   function $(id) { return document.getElementById(id); }
   // Ayar kalıcılığı (localStorage) — panel her açılışta son ayarları hatırlar.
@@ -47,22 +47,82 @@
   function trimLog(s) { var lines = String(s).split("\n"); return (lines.length > 200 ? lines.slice(0, 200) : lines).join("\n"); }
   function logLine(msg) { var el = $("log"); var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
   function setPill(id, on) { var el = $(id); el.classList.remove("on", "off"); el.classList.add(on ? "on" : "off"); }
-  function setProgress(pct, label) { $("progressBox").hidden = false; if (label) $("progressLabel").textContent = label;
-    if (pct >= 0) { $("progressFill").style.width = pct + "%"; $("progressPct").textContent = Math.round(pct) + "%"; } }
+  // ---------- İlerleme (yüzde + tahmini süre + bitti/hata durumu) ----------
+  // _pg.max: yüzde geri gitmesin (monotonik). _pg.transT0: transkripsiyon başlangıç zamanı (ETA için).
+  var _pg = { base: "", max: 0, transT0: 0 };
+  function _fmtEta(sec) { sec = Math.max(0, Math.round(sec)); var m = Math.floor(sec / 60), s = sec % 60; return "~" + m + ":" + (s < 10 ? "0" : "") + s; }
+  function setProgress(pct, label, eta) {
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    var sp = $("spinner"); if (sp) sp.hidden = false;
+    var bd = $("progressBadge"); if (bd) bd.hidden = true;
+    if (label != null) _pg.base = label;
+    var lbl = $("progressLabel"); lbl.textContent = "";
+    lbl.appendChild(document.createTextNode(_pg.base || ""));
+    if (eta) { var e = document.createElement("span"); e.className = "prog-eta"; e.textContent = "  " + eta + " kaldı"; lbl.appendChild(e); }
+    if (pct >= 0) {
+      if (pct < _pg.max) pct = _pg.max; else _pg.max = pct;   // geri gitmesin
+      $("progressFill").style.width = pct + "%"; $("progressPct").textContent = Math.round(pct) + "%";
+    }
+  }
+  function progressReset(label) {
+    _pg.base = label || ""; _pg.max = 0; _pg.transT0 = 0;
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
+    $("progressLabel").style.color = ""; $("progressLabel").textContent = _pg.base;
+    $("progressFill").style.width = "0%"; $("progressPct").textContent = "0%";
+  }
+  function progressBusy(label) {
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
+    $("progressLabel").style.color = ""; if (label != null) { _pg.base = label; $("progressLabel").textContent = label; }
+  }
+  function progressDone(label) {
+    var box = $("progressBox"); box.hidden = false; box.classList.add("done"); box.classList.remove("error");
+    $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✓"; bd.className = "prog-badge ok"; }
+    _pg.max = 100; $("progressFill").style.width = "100%"; $("progressPct").textContent = "100%";
+    $("progressLabel").style.color = "var(--good)"; $("progressLabel").textContent = label || "Bitti";
+  }
+  function progressFail(label, kind) {
+    var box = $("progressBox"); box.hidden = false; box.classList.add("error"); box.classList.remove("done");
+    $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✕"; bd.className = "prog-badge bad"; }
+    $("progressLabel").style.color = (kind === "warn") ? "var(--warn)" : "var(--bad)"; $("progressLabel").textContent = label || "Hata";
+  }
+  // Whisper transkripsiyon yüzdesini (0-100) genel ilerlemeye [lo,hi] eşler + kalan süreyi tahmin eder.
+  function transProgress(rawPct, lo, hi) {
+    if (rawPct < 0) return;
+    var overall = lo + (hi - lo) * (rawPct / 100), eta = "";
+    if (_pg.transT0 && rawPct >= 2 && rawPct < 99) {
+      var el = (Date.now() - _pg.transT0) / 1000;
+      if (el > 1.5) eta = _fmtEta(el * (100 - rawPct) / rawPct);   // doğrusal tahmin
+    }
+    setProgress(overall, null, eta);
+  }
   function esPath(p) { return String(p).replace(/\\/g, "\\\\"); }
   function evalES(code) { return new Promise(function (res) { if (!cs) { res('{"error":"no_cep"}'); return; } cs.evalScript(code, function (r) { res(r); }); }); }
   function speakerColor(i) { return SP_COLORS[i % SP_COLORS.length]; }
   function fmtShort(sec) { var m = Math.floor(sec / 60), s = Math.floor(sec % 60); return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s; }
-  function whenLog(line) { var s = String(line).trim(); if (s) logLine(s.length > 80 ? s.slice(-80) : s); var mm = s.match(/(\d+)%/); return mm ? +mm[1] : -1; }
+  function whenLog(line) { var s = String(line).trim(); if (s) logLine(s.length > 80 ? s.slice(-80) : s);
+    var re = /(\d+)%/g, m, last = -1; while ((m = re.exec(s)) !== null) last = +m[1]; return last; }   // en son yüzdeyi al (tqdm \r ile üst üste yazar)
 
   // ---------- mod ve track ----------
   var modeBtns = document.querySelectorAll("#segMode .seg-btn");
   for (var i = 0; i < modeBtns.length; i++) modeBtns[i].addEventListener("click", function () {
     document.querySelector("#segMode .seg-btn.active").classList.remove("active");
     this.classList.add("active"); state.mode = this.dataset.mode; lsSet("mode", state.mode);
+    var isRecolor = (state.mode === "recolor");
+    $("genArea").hidden = isRecolor;               // üretim alanı (Model/aralık/oluştur/sonuç) sadece renk-dışı modda
+    $("panelRecolor").hidden = !isRecolor;
     $("panelSingle").hidden = (state.mode !== "single");
     $("panelSpeaker").hidden = (state.mode !== "speaker");
-    $("result").hidden = true; $("speakerMap").hidden = true;
+    if (isRecolor) refreshRecolorBtns();
+    else {
+      // Cue'ları üreten moda dönerken transkript/sonuç kartını koru (ör. renk sekmesine gidip
+      // gelince kaybolmasın); farklı üretim moduna geçişte gizle.
+      var hasCur = (state.mode === "single") ? state.singleCues.length : (state.a1Cues.length || state.a2Cues.length);
+      var keep = (state.genMode === state.mode) && hasCur;
+      $("result").hidden = !keep;
+      $("speakerMap").hidden = !(keep && state.mode === "speaker" && state.speakers.length);
+    }
   });
   var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
   for (var j = 0; j < trackBtns.length; j++) trackBtns[j].addEventListener("click", function () {
@@ -250,6 +310,7 @@
 
   // ---------- TEK STİL ----------
   async function runSingle() {
+    state.genMode = "single";
     var trackIdx = (state.track === "mix") ? 0 : parseInt(state.track, 10);
     setProgress(8, "Sekans okunuyor…");
     var data = await getClips(trackIdx);
@@ -258,24 +319,27 @@
     setProgress(20, "Ses hazırlanıyor…");
     var prep = await prepAudio(data.clips, trackIdx, "single");
     setProgress(45, "Yazıya dökülüyor (GPU)…");
-    var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(45 + Math.min(50, p * 0.5)); },
+    _pg.transT0 = Date.now();
+    var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); },
       { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) });
     offsetCues(cues, prep.offset);
     cleanupFiles(prep.cleanup);
-    state.singleCues = cues; state.speakers = []; $("speakerMap").hidden = true;
+    state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
     renderTranscript(cues, null);
-    setProgress(100, "Bitti ✓");
+    progressDone("Bitti — " + cues.length + " altyazı hazır");
   }
 
   // ---------- KONUŞMACIYA GÖRE ----------
   async function runSpeaker() {
+    state.genMode = "speaker"; state.singleCues = [];
     pipeline.ensureDir(cfg.workDir);
     setProgress(8, "A1 (sen) okunuyor…");
     var a1 = await getClips(0);
     setProgress(15, "A1 sesi hazırlanıyor…");
     var prep1 = await prepAudio(a1.clips, 0, "a1");
     setProgress(25, "A1 yazıya dökülüyor…");
-    state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { whenLog(l); },
+    _pg.transT0 = Date.now();
+    state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 25, 48); },
       { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) }), prep1.offset);
     cleanupFiles(prep1.cleanup);
     logLine("A1: " + state.a1Cues.length + " satır");
@@ -287,7 +351,8 @@
     var numSpk = parseInt($("selNumSpk") && $("selNumSpk").value, 10) || 0;
     if (numSpk > 0) logLine("A2: " + numSpk + " konuşmacıya ayrılacak");
     setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
-    state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(65 + Math.min(30, p * 0.3)); },
+    _pg.transT0 = Date.now();
+    state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 65, 93); },
       { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked), numSpeakers: numSpk }), prep2.offset);
     cleanupFiles(prep2.cleanup);
 
@@ -302,7 +367,7 @@
     all.sort(function (a, b) { return a.start - b.start; });
     renderTranscript(all, color);
     logLine("A2: " + state.a2Cues.length + " satır, " + speakers.length + " konuşmacı");
-    setProgress(100, "Bitti ✓");
+    progressDone("Bitti — " + speakers.length + " konuşmacı, " + (state.a1Cues.length + state.a2Cues.length) + " satır");
   }
 
   // ---------- yerleştirme ----------
@@ -316,30 +381,32 @@
   }
   function showResult(r) {
     var msg = String(r).replace(/^[a-z_]+:/, "");
-    if (String(r).indexOf("ok:") === 0) { $("progressLabel").textContent = "✓ " + msg; $("progressLabel").style.color = "var(--good)"; }
-    else { $("progressLabel").textContent = "⚠ " + msg; $("progressLabel").style.color = "var(--warn)"; uiAlert(msg, "Sonuç"); }
-    $("progressBox").hidden = false;
+    if (String(r).indexOf("ok:") === 0) progressDone("Bitti — " + msg);
+    else { progressFail("⚠ " + msg, "warn"); uiAlert(msg, "Sonuç"); }
   }
 
+  // Timeline'a yerleştirir; ham sonuç metnini döndürür (null = iptal, zaten uyarıldı).
   async function placeSingle(range) {
     var stylePath = $("selStyleSingle").value;
+    if (stylePath) state.singleStyle = stylePath;   // son gerçek stili hatırla (renk değiştirmede komşu cue'lar için yedek)
     var cues = range ? state.singleCues.filter(function (c) { return c.end > range.start && c.start < range.end; }) : state.singleCues;
-    if (!cues.length) { uiAlert("Önce altyazı oluştur."); return; }
-    $("progressLabel").style.color = ""; $("progressBox").hidden = false;
-    $("progressLabel").textContent = "Timeline'a ekleniyor…";
-    if (stylePath) {
-      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || stylePath), text: c.text }; }));
-      showResult(await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)'));
-    } else {
-      var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
-      fs.writeFileSync(srtFile, pipeline.cuesToSrt(state.singleCues), "utf8");
-      showResult(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
+    if (!cues.length) { uiAlert("Önce altyazı oluştur."); return null; }
+    // Herhangi bir cue renk override taşıyorsa (renk değiştirme), "Düz altyazı" seçili olsa bile
+    // MOGRT yolunu kullan — override yok sayılıp caption track dökülmesin.
+    var hasOv = false; for (var oi = 0; oi < cues.length; oi++) { if (cues[oi]._ovMogrt) { hasOv = true; break; } }
+    if (stylePath || hasOv) {
+      var fb = stylePath || state.singleStyle || (state.styles[0] && state.styles[0].path) || "";   // override'sız komşulara stil
+      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || fb), text: c.text }; }));
+      return await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)');
     }
+    var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
+    fs.writeFileSync(srtFile, pipeline.cuesToSrt(cues), "utf8");
+    return await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")');
   }
   async function placeSpeaker(range) {
     var a1Style = $("selStyleA1").value;
     var spStyle = {}; state.speakers.forEach(function (sp) { spStyle[sp.id] = sp.styleSel.value; });
-    var _gap = 130; var _sg = $("stackGap"); if (_sg) _gap = parseInt(_sg.value, 10) || 130;
+    var _gap = 130;   // istifleme sabit: A1 ile çakışan A2 altyazısı 130px yukarı kayar
 
     // Yerleştirilecek A1 aralıkları — A2'nin A1 ile üst üste GELİP GELMEDİĞİNİ bulmak için.
     var a1Iv = [];
@@ -353,7 +420,7 @@
     state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 }); });
     state.a2Cues.forEach(function (c) { var mg = c._ovMogrt || spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: overlapsA1(c.start, c.end) ? _gap : 0 }); });
     if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
-    if (!combined.length) { uiAlert("Stil atanmadı."); return; }
+    if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
 
     combined.sort(function (a, b) { return a.start - b.start; });
     var body = combined.map(function (c) {
@@ -361,67 +428,108 @@
     }).join("\n");
     var file = path.join(cfg.workDir, "laned_" + Date.now() + ".txt");
     fs.writeFileSync(file, body, "utf8");
-    $("progressBox").hidden = false; $("progressLabel").style.color = ""; $("progressLabel").textContent = "Timeline'a ekleniyor…";
     logLine(combined.length + " altyazı · A1 üst / A2 alt (çakışanlar istiflenir)");
-    showResult(await evalES('addLanedSubtitles("' + esPath(file) + '")'));
+    return await evalES('addLanedSubtitles("' + esPath(file) + '")');
   }
 
   // ---------- butonlar ----------
   $("btnRun").addEventListener("click", async function () {
     if (state.running) return; state.running = true; state.cancelled = false;
     var btn = this; btn.disabled = true; $("result").hidden = true; $("speakerMap").hidden = true;
-    $("log").textContent = ""; $("progressLabel").style.color = ""; setProgress(0, "Başlıyor…");
+    $("log").textContent = ""; progressReset("Başlıyor…");
     $("btnCancel").hidden = false;
     try { if (!CEP) await runMock(); else if (state.mode === "speaker") await runSpeaker(); else await runSingle(); }
     catch (e) {
-      if (state.cancelled) { setProgress(-1, "İptal edildi"); $("progressLabel").style.color = "var(--warn)"; }
-      else { setProgress(-1, "❌ " + (e.message || e)); $("progressLabel").style.color = "var(--bad)"; logLine("HATA: " + (e.message || e)); }
+      if (state.cancelled) progressFail("İptal edildi", "warn");
+      else { progressFail("❌ " + (e.message || e), "bad"); logLine("HATA: " + (e.message || e)); }
     }
     finally { state.running = false; btn.disabled = false; $("btnCancel").hidden = true; }
   });
-  // Timeline'da SEÇİLİ altyazıların rengini değiştir — GÜVENLİ yol: seçili kliplerin
-  // zamanlarını al, panel cue listesinde eşle, o cue'lara renk override ata ve TÜM bölgeyi
-  // temiz yeniden yerleştir (importMGT'nin komşuyu ezme sorununa girmeden).
-  (function () {
-    var b = $("btnRecolor"); if (!b) return;
-    b.addEventListener("click", async function () {
-      if (b.disabled) return;
-      var mg = $("selRecolor") && $("selRecolor").value;
-      if (!mg) { uiAlert("Önce bir renk/stil seç.", "Renk değiştir"); return; }
+  // ---------- RENK DEĞİŞTİR (3. sekme) ----------
+  // Timeline'da SEÇİLİ altyazı kliplerini, tıklanan renge/stile GÜVENLİ yolla çevirir:
+  // seçili kliplerin zamanlarını al → panel cue listesinde eşle → o cue'lara renk override ata →
+  // seçili en erken noktadan SONA kadar TEMİZ yeniden yerleştir (importMGT komşuyu ezmesin).
+  var _recoloring = false;
+  // Stil adından renk tahmini (görsel ipucu); ad renk içermiyorsa palet sırasıyla ayırt et.
+  // Kullanıcının stil adlarına göre gerçek renkler (buton swatch'ı stilin rengini göstersin).
+  var _STYLE_COLORS = { "dora": "#35c26a", "mimi": "#ff7ac2", "moni": "#4b8bff", "niko": "#f9ca24",
+    "tofi": "#e5544b", "sen": "#f5f5f5" };
+  var _COLORWORDS = { "beyaz": "#f5f5f5", "kırmızı": "#e5544b", "kirmizi": "#e5544b", "mavi": "#4b8bff",
+    "sarı": "#f9ca24", "sari": "#f9ca24", "yeşil": "#35c26a", "yesil": "#35c26a", "mor": "#b06dfc",
+    "pembe": "#ff7ac2", "turuncu": "#ff8c42", "lacivert": "#3b5bdb", "gri": "#9aa0b5", "altın": "#e0a63a",
+    "altin": "#e0a63a", "turkuaz": "#3fc6c6", "yeşilimsi": "#9ac44b" };
+  function styleColor(name, i) {
+    var n = String(name).toLowerCase();
+    for (var s in _STYLE_COLORS) { if (_STYLE_COLORS.hasOwnProperty(s) && n.indexOf(s) >= 0) return _STYLE_COLORS[s]; }
+    for (var k in _COLORWORDS) { if (_COLORWORDS.hasOwnProperty(k) && n.indexOf(k) >= 0) return _COLORWORDS[k]; }
+    return speakerColor(i);
+  }
+  function setRecolorStatus(r) {
+    var el = $("recolorStatus"); if (!el) return; el.hidden = false;
+    var s = String(r), msg = s.replace(/^[a-z_]+:/, "");
+    if (s.indexOf("ok:") === 0) { el.textContent = "✓ " + msg; el.style.color = "var(--good)"; }
+    else { el.textContent = "⚠ " + msg; el.style.color = "var(--warn)"; }
+  }
+  function updateRecolorHint() {
+    var h = $("recolorHint"); if (!h) return;
+    var has = state.singleCues.length || state.a1Cues.length || state.a2Cues.length;
+    if (has) { h.style.color = ""; h.textContent = "İpucu: birden çok klip seçip tek renge çevirebilirsin. Değişiklik geri alınabilir (Ctrl+Z)."; }
+    else { h.style.color = "var(--warn)"; h.textContent = "⚠ Önce \"Tek Stil\" veya \"Konuşmacıya Göre\" ile altyazı oluşturup timeline'a ekle — renk değiştirme o listeyi kullanır (panel kapanınca sıfırlanır)."; }
+  }
+  function refreshRecolorBtns() {
+    var box = $("recolorBtns"); if (!box) return; box.innerHTML = "";
+    var st = $("recolorStatus"); if (st) st.hidden = true;
+    if (!state.styles.length) { box.innerHTML = '<p class="note" style="margin:0">Stil bulunamadı. Stil (.mogrt) klasörünü kontrol et.</p>'; updateRecolorHint(); return; }
+    state.styles.forEach(function (s, i) {
+      var btn = document.createElement("button"); btn.className = "color-btn"; btn.type = "button"; btn.title = s.name;
+      var sw = document.createElement("span"); sw.className = "color-swatch"; sw.style.background = styleColor(s.name, i);
+      var nm = document.createElement("span"); nm.className = "color-name"; nm.textContent = s.name;
+      btn.appendChild(sw); btn.appendChild(nm);
+      (function (mgPath, button) { button.addEventListener("click", function () { doRecolor(mgPath, button); }); })(s.path, btn);
+      box.appendChild(btn);
+    });
+    updateRecolorHint();
+  }
+  async function doRecolor(mogrt, btn) {
+    if (!CEP) { uiAlert("Önizleme modu. Premiere'de renk değişir."); return; }
+    if (_recoloring) return; _recoloring = true;
+    if (btn) btn.classList.add("busy");
+    var st = $("recolorStatus");
+    try {
       var raw = await evalES("getSelectedSubTimes()");
       var times = []; try { times = JSON.parse(raw) || []; } catch (e) {}
-      if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra Değiştir'e bas.", "Renk değiştir"); return; }
-      var cues = (state.mode === "speaker") ? state.a1Cues.concat(state.a2Cues) : state.singleCues;
-      if (!cues.length) { uiAlert("Panelde altyazı listesi boş. Panel kapanınca liste sıfırlanır — o videoyu tekrar 'Altyazı Oluştur'.", "Renk değiştir"); return; }
+      if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra bir renk seç.", "Renk değiştir"); return; }
+      var isSpk = (state.genMode === "speaker");
+      var cues = isSpk ? state.a1Cues.concat(state.a2Cues) : state.singleCues;
+      if (!cues.length) { uiAlert("Panelde altyazı listesi boş. Panel kapanınca liste sıfırlanır — o videoyu tekrar 'Altyazı Oluştur'.", "Renk değiştir"); updateRecolorHint(); return; }
       var matched = [];
       for (var t = 0; t < times.length; t++) {
         var best = null, bd = 0.3;
         for (var i = 0; i < cues.length; i++) { var d = Math.abs(cues[i].start - times[t]); if (d < bd) { bd = d; best = cues[i]; } }
-        if (best) { best._ovMogrt = mg; matched.push(best); }
+        if (best) { best._ovMogrt = mogrt; matched.push(best); }
       }
       if (!matched.length) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
-      // GÜVENLİK: importMGT yeni klibi varsayılan süresiyle koyup ileri taşarak komşu klipleri
-      // EZER. Bu yüzden seçili en erken noktadan SONUNA KADAR temizleyip yeniden yerleştiririz →
-      // import taşması hep temizlenmiş/boş alana düşer, komşu SİLİNMEZ. (Seçtiğin klip sona ne
-      // kadar yakınsa o kadar az klip yenilenir = o kadar hızlı.)
+      // importMGT komşu ezmesin diye seçili en erken noktadan SONA kadar temiz yerleştir.
       var spanStart = matched[0].start;
-      for (var mI = 1; mI < matched.length; mI++) { if (matched[mI].start < spanStart) spanStart = matched[mI].start; }
+      for (var mI = 1; mI < matched.length; mI++) if (matched[mI].start < spanStart) spanStart = matched[mI].start;
       var range = { start: spanStart - 0.05, end: Infinity };
-      b.disabled = true;
-      logLine(matched.length + " altyazının rengi değiştiriliyor…");
-      try { if (state.mode === "speaker") await placeSpeaker(range); else await placeSingle(range); }
-      catch (e) { showResult("err:" + (e.message || e)); }
-      finally { b.disabled = false; }
-    });
-  })();
+      if (st) { st.hidden = false; st.style.color = "var(--muted)"; st.textContent = "⏳ " + matched.length + " altyazının rengi değiştiriliyor…"; }
+      await evalES('saveProject()');   // renk değişimi öncesi kaydet (Geri Al için)
+      var r = isSpk ? await placeSpeaker(range) : await placeSingle(range);
+      if (r != null) setRecolorStatus(r); else if (st) st.hidden = true;
+    } catch (e) { if (st) { st.hidden = false; st.style.color = "var(--bad)"; st.textContent = "✕ " + (e.message || e); } }
+    finally { _recoloring = false; if (btn) btn.classList.remove("busy"); }
+  }
   $("btnAddTimeline").addEventListener("click", async function () {
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de timeline'a eklenir."); return; }
     var btn = this; if (btn.disabled) return; btn.disabled = true;   // çift-tık koruması (mükerrer yerleştirmeyi önler)
     try {
       await evalES('saveProject()');   // yerleştirmeden önce kaydet (Geri Al için)
-      if (state.mode === "speaker") await placeSpeaker(); else await placeSingle();
+      progressBusy("Timeline'a ekleniyor…");
+      var r = (state.mode === "speaker") ? await placeSpeaker() : await placeSingle();
+      if (r != null) showResult(r); else $("progressBox").hidden = true;
     }
-    catch (e) { uiAlert((e.message || e) + "", "Hata"); }
+    catch (e) { progressFail("❌ " + (e.message || e), "bad"); uiAlert((e.message || e) + "", "Hata"); }
     finally { btn.disabled = false; }
   });
   // Geri Al: son işlemden önce kaydedilen sürüme dön (proje yeniden açılır)
@@ -486,8 +594,24 @@
   $("acCancel").addEventListener("click", cancelOp);
 
   // ---------- AUTOCUT ----------
-  var acCuts = [], acLast = null;
-  function acSetProgress(pct, label) { $("acProgress").hidden = false; if (label) $("acLabel").textContent = label; if (pct >= 0) { $("acFill").style.width = pct + "%"; $("acPct").textContent = Math.round(pct) + "%"; } }
+  var acCuts = [], acLast = null, _acMax = 0;
+  function acSetProgress(pct, label) {
+    var box = $("acProgress"); box.hidden = false; box.classList.remove("done", "error");
+    var sp = $("acSpinner"); if (sp) sp.hidden = false; var bd = $("acBadge"); if (bd) bd.hidden = true;
+    if (label) $("acLabel").textContent = label;
+    if (pct >= 0) { if (pct < _acMax) pct = _acMax; else _acMax = pct; $("acFill").style.width = pct + "%"; $("acPct").textContent = Math.round(pct) + "%"; }
+  }
+  function acDone(label) {
+    var box = $("acProgress"); box.hidden = false; box.classList.add("done"); box.classList.remove("error");
+    var sp = $("acSpinner"); if (sp) sp.hidden = true; var bd = $("acBadge"); if (bd) { bd.hidden = false; bd.textContent = "✓"; bd.className = "prog-badge ok"; }
+    _acMax = 100; $("acFill").style.width = "100%"; $("acPct").textContent = "100%";
+    $("acLabel").style.color = "var(--good)"; $("acLabel").textContent = label || "Bitti";
+  }
+  function acFail(label, kind) {
+    var box = $("acProgress"); box.hidden = false; box.classList.add("error"); box.classList.remove("done");
+    var sp = $("acSpinner"); if (sp) sp.hidden = true; var bd = $("acBadge"); if (bd) { bd.hidden = false; bd.textContent = "✕"; bd.className = "prog-badge bad"; }
+    $("acLabel").style.color = (kind === "warn") ? "var(--warn)" : "var(--bad)"; $("acLabel").textContent = label || "Hata";
+  }
   function acLogLine(msg) { var el = $("acLog"); var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
   $("acLogToggle").addEventListener("click", function () { var l = $("acLog"); l.hidden = !l.hidden; this.textContent = l.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴"; });
 
@@ -495,9 +619,9 @@
     if (!CEP) {
       acCuts = [{ start: 1, end: 2 }, { start: 5, end: 8 }];
       $("acCount").textContent = "142"; $("acSaved").textContent = "178 sn"; $("acResult").hidden = false;
-      acSetProgress(100, "Bitti ✓ (önizleme)"); return;
+      _acMax = 0; acDone("Bitti (önizleme) — 142 boşluk"); return;
     }
-    var btn = this; btn.disabled = true; state.cancelled = false; $("acResult").hidden = true; $("acLog").textContent = ""; $("acLabel").style.color = "";
+    var btn = this; btn.disabled = true; state.cancelled = false; $("acResult").hidden = true; $("acLog").textContent = ""; $("acLabel").style.color = ""; _acMax = 0;
     $("acCancel").hidden = false;
     acSetProgress(8, "Sekans okunuyor…");
     try {
@@ -531,10 +655,10 @@
       // küçük toplamlarda 0 sn görünmesin: 1 sn altında ondalık göster
       $("acSaved").textContent = (res.totalCut >= 1 ? Math.round(res.totalCut) : res.totalCut.toFixed(1)) + " sn";
       $("acResult").hidden = false;
-      acSetProgress(100, "Analiz bitti ✓ (eşik " + res.threshold + "dB)");
+      acDone("Bitti — " + res.count + " boşluk bulundu (eşik " + res.threshold + "dB)");
     } catch (e) {
-      if (state.cancelled) { acSetProgress(-1, "İptal edildi"); $("acLabel").style.color = "var(--warn)"; }
-      else { acSetProgress(-1, "❌ " + (e.message || e)); $("acLabel").style.color = "var(--bad)"; acLogLine("HATA: " + (e.message || e)); }
+      if (state.cancelled) acFail("İptal edildi", "warn");
+      else { acFail("❌ " + (e.message || e), "bad"); acLogLine("HATA: " + (e.message || e)); }
     }
     finally { btn.disabled = false; $("acCancel").hidden = true; }
   });
@@ -548,6 +672,7 @@
     if (!(await uiConfirm(acCuts.length + " boşluk kesilecek (~" + _secTxt + " kısalır).\n\nSekans dışı / kayıt boşluğu olanlar otomatik atlanır. Kesimden ÖNCE kaydet; geri almak için Ctrl+Z (birden çok kez gerekebilir).", "Boşlukları Kes"))) return;
     btn.disabled = true;   // çift-tık koruması: kesim sürerken tekrar tetiklenmesin
     try {
+      _acMax = 0; $("acLabel").style.color = "";
       acSetProgress(25, "Proje kaydediliyor…");   // kesimden önce her zaman kaydet (Geri Al için)
       acLogLine("Kaydet: " + (await evalES('saveProject()')));
       var body = acCuts.map(function (c) { return c.start.toFixed(3) + "|" + c.end.toFixed(3); }).join("\n");
@@ -557,34 +682,42 @@
       var r = await evalES('autoCut("' + esPath(file) + '")');
       acLogLine("Sonuç: " + r);
       var msg = String(r).replace(/^[a-z_]+:/, "");
-      if (String(r).indexOf("ok:") === 0) { acSetProgress(100, "✓ " + msg); $("acLabel").style.color = "var(--good)"; }
-      else { acSetProgress(-1, "⚠ " + msg); $("acLabel").style.color = "var(--warn)"; uiAlert(msg, "Sonuç"); }
+      if (String(r).indexOf("ok:") === 0) acDone("Bitti — " + msg);
+      else { acFail("⚠ " + msg, "warn"); uiAlert(msg, "Sonuç"); }
     } finally { btn.disabled = false; }
   });
 
   // ---------- MOCK (tarayıcı önizleme) ----------
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   async function runMock() {
+    state.genMode = (state.mode === "speaker") ? "speaker" : "single";
     var steps = state.mode === "speaker"
       ? [[15, "A1 yazıya dökülüyor…"], [45, "A2 okunuyor…"], [70, "Konuşmacılar ayrılıyor (AI)…"], [95, "Bitiriliyor…"]]
       : [[20, "Ses hazırlanıyor…"], [55, "Yazıya dökülüyor (GPU)…"], [90, "Bitiriliyor…"]];
-    for (var k = 0; k < steps.length; k++) { setProgress(steps[k][0], steps[k][1]); logLine(steps[k][1]); await sleep(500); }
-    setProgress(100, "Bitti ✓ (önizleme)");
+    _pg.transT0 = Date.now();
+    for (var k = 0; k < steps.length; k++) { _pg.base = steps[k][1]; transProgress(steps[k][0], 0, 100); logLine(steps[k][1]); await sleep(500); }
     if (state.mode === "speaker") {
+      state.singleCues = [];
       state.speakers = [{ id: "SPEAKER_00", sample: "Ya nasıl sahte ya" }, { id: "SPEAKER_01", sample: "Gelme sen gelme" }];
       renderSpeakerMap();
       var color = { SPEAKER_00: speakerColor(0), SPEAKER_01: speakerColor(1), __A1__: "#e5544b" };
-      renderTranscript([
-        { start: 0, text: "Hepinize merhaba", speaker: "__A1__" },
-        { start: 3, text: "Gelme sen gelme", speaker: "SPEAKER_01" },
-        { start: 5, text: "Ya nasıl sahte ya", speaker: "SPEAKER_00" },
-        { start: 8, text: "İnceleyin işte", speaker: "SPEAKER_00" }
-      ], color);
+      state.a1Cues = [{ start: 0, end: 2, text: "Hepinize merhaba", speaker: "__A1__" }];
+      state.a2Cues = [
+        { start: 3, end: 4.5, text: "Gelme sen gelme", speaker: "SPEAKER_01" },
+        { start: 5, end: 7, text: "Ya nasıl sahte ya", speaker: "SPEAKER_00" },
+        { start: 8, end: 9.5, text: "İnceleyin işte", speaker: "SPEAKER_00" }
+      ];
+      var all = state.a1Cues.concat(state.a2Cues);
+      renderTranscript(all, color);
+      progressDone("Bitti (önizleme) — 2 konuşmacı, 4 satır");
     } else {
-      renderTranscript([
-        { start: 0, text: "Hepinize merhaba" }, { start: 2, text: "arkadaşlar" },
-        { start: 3, text: "Bugün var ya" }, { start: 5, text: "harika bir şey" }
-      ], null);
+      state.a1Cues = []; state.a2Cues = [];
+      state.singleCues = [
+        { start: 0, end: 1.8, text: "Hepinize merhaba" }, { start: 2, end: 2.9, text: "arkadaşlar" },
+        { start: 3, end: 4.8, text: "Bugün var ya" }, { start: 5, end: 6.8, text: "harika bir şey" }
+      ];
+      renderTranscript(state.singleCues, null);
+      progressDone("Bitti (önizleme) — 4 altyazı hazır");
     }
   }
 
@@ -617,7 +750,7 @@
     loadStyles();
     fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
     fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
-    fillStyleOptions($("selRecolor"), false); preselect($("selRecolor"), "tofi");
+    refreshRecolorBtns();   // Renk Değiştir sekmesi buton grid'i
     if (state.styles.length) logLine(state.styles.length + " stil: " + state.styles.map(function (s) { return s.name; }).join(", "));
     // Oto-güncelleme (arka planda, sessiz — internet yoksa/başarısızsa paneli etkilemez)
     try {
@@ -632,9 +765,11 @@
   }
   function initMock() {
     setPill("pillHost", false); setPill("pillGpu", true);
-    state.styles = [{ name: "Tofi Text", path: "tofi" }, { name: "Moni Text", path: "moni" }];
+    state.styles = [{ name: "Tofi Text", path: "tofi" }, { name: "Moni Text", path: "moni" },
+      { name: "Kırmızı", path: "kirmizi" }, { name: "Mavi", path: "mavi" }, { name: "Sarı", path: "sari" }, { name: "Yeşil", path: "yesil" }];
     fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
     fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
+    refreshRecolorBtns();
   }
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
@@ -645,14 +780,6 @@
     // Küfür sansürü toggle — varsayılan AÇIK
     var cc = $("chkCensor");
     if (cc) { cc.checked = lsGet("censor", "1") === "1"; cc.addEventListener("change", function () { lsSet("censor", cc.checked ? "1" : "0"); }); }
-    // istif aralığı kaydırıcısı (konuşmacı modu) — kalıcı + canlı etiket
-    var sg = $("stackGap"), lbl = $("stackGapVal");
-    if (sg) {
-      var sv = lsGet("stackGap", null); if (sv != null) sg.value = sv;
-      function updSg() { if (lbl) lbl.textContent = sg.value + "px"; }
-      updSg();
-      sg.addEventListener("input", function () { updSg(); lsSet("stackGap", sg.value); });
-    }
   }
 
   try { if (CEP) initCEP(); else initMock(); wirePersistence(); }
