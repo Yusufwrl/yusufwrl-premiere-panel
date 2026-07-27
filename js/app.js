@@ -8,7 +8,7 @@
   var fileCounter = 0;
 
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
-    singleCues: [], a1Cues: [], a2Cues: [], speakers: [] };
+    singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "" };
 
   function $(id) { return document.getElementById(id); }
   // Ayar kalıcılığı (localStorage) — panel her açılışta son ayarları hatırlar.
@@ -115,7 +115,14 @@
     $("panelSingle").hidden = (state.mode !== "single");
     $("panelSpeaker").hidden = (state.mode !== "speaker");
     if (isRecolor) refreshRecolorBtns();
-    else { $("result").hidden = true; $("speakerMap").hidden = true; }
+    else {
+      // Cue'ları üreten moda dönerken transkript/sonuç kartını koru (ör. renk sekmesine gidip
+      // gelince kaybolmasın); farklı üretim moduna geçişte gizle.
+      var hasCur = (state.mode === "single") ? state.singleCues.length : (state.a1Cues.length || state.a2Cues.length);
+      var keep = (state.genMode === state.mode) && hasCur;
+      $("result").hidden = !keep;
+      $("speakerMap").hidden = !(keep && state.mode === "speaker" && state.speakers.length);
+    }
   });
   var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
   for (var j = 0; j < trackBtns.length; j++) trackBtns[j].addEventListener("click", function () {
@@ -381,14 +388,19 @@
   // Timeline'a yerleştirir; ham sonuç metnini döndürür (null = iptal, zaten uyarıldı).
   async function placeSingle(range) {
     var stylePath = $("selStyleSingle").value;
+    if (stylePath) state.singleStyle = stylePath;   // son gerçek stili hatırla (renk değiştirmede komşu cue'lar için yedek)
     var cues = range ? state.singleCues.filter(function (c) { return c.end > range.start && c.start < range.end; }) : state.singleCues;
     if (!cues.length) { uiAlert("Önce altyazı oluştur."); return null; }
-    if (stylePath) {
-      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || stylePath), text: c.text }; }));
+    // Herhangi bir cue renk override taşıyorsa (renk değiştirme), "Düz altyazı" seçili olsa bile
+    // MOGRT yolunu kullan — override yok sayılıp caption track dökülmesin.
+    var hasOv = false; for (var oi = 0; oi < cues.length; oi++) { if (cues[oi]._ovMogrt) { hasOv = true; break; } }
+    if (stylePath || hasOv) {
+      var fb = stylePath || state.singleStyle || (state.styles[0] && state.styles[0].path) || "";   // override'sız komşulara stil
+      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || fb), text: c.text }; }));
       return await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)');
     }
     var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
-    fs.writeFileSync(srtFile, pipeline.cuesToSrt(state.singleCues), "utf8");
+    fs.writeFileSync(srtFile, pipeline.cuesToSrt(cues), "utf8");
     return await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")');
   }
   async function placeSpeaker(range) {

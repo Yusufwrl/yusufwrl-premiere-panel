@@ -296,6 +296,7 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 /* ---------- İlerleme: bitti / hata rozeti + durum ---------- */
 .prog-badge { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
   font-size: 12px; font-weight: 800; color: #fff; line-height: 1; }
+.prog-badge[hidden] { display: none; }   /* display:grid, [hidden]'ı ezer — bu olmadan rozet asla gizlenmez */
 .prog-badge.ok { background: var(--good); box-shadow: 0 0 10px rgba(52,211,153,.6); }
 .prog-badge.bad { background: var(--bad); box-shadow: 0 0 10px rgba(248,113,113,.55); }
 #progressLabel, #acLabel { flex: 1 1 auto; min-width: 0; line-height: 1.4; }
