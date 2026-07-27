@@ -379,10 +379,18 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
         else vIdx = vTrackIndex;
         if (vIdx < 0) vIdx = 0;
 
-        // hedef kanalı temizle
+        // SADECE basılacak zaman aralığındaki klipleri temizle — parça parça (süre aralığı)
+        // yerleştirmede önceki bölümleri silmesin. Aralık = ilk cue başı .. son cue sonu.
+        var spanS = cues[0].s, spanE = cues[0].e;
+        for (var si = 1; si < cues.length; si++) { if (cues[si].s < spanS) spanS = cues[si].s; if (cues[si].e > spanE) spanE = cues[si].e; }
         try {
             var vt0 = seq.videoTracks[vIdx];
-            for (var k = vt0.clips.numItems - 1; k >= 0; k--) { try { vt0.clips[k].remove(false, false); } catch (er) {} }
+            for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
+                try {
+                    var cl0 = vt0.clips[k], cs0 = cl0.start.seconds, ce0 = cl0.end.seconds;
+                    if (ce0 > spanS + 0.05 && cs0 < spanE - 0.05) cl0.remove(false, false);
+                } catch (er) {}
+            }
         } catch (ec) {}
 
         var placed = 0, failed = 0, firstErr = "";
@@ -461,10 +469,20 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
 
         var TICKS = 254016000000;
         var top = seq.videoTracks.numTracks - 1;
-        // kullanılacak kanalları temizle
+        // SADECE basılacak zaman aralığındaki klipleri temizle (parça parça yerleştirme korunur)
+        var spanS = cues[0].s, spanE = cues[0].e;
+        for (var s8 = 1; s8 < cues.length; s8++) { if (cues[s8].s < spanS) spanS = cues[s8].s; if (cues[s8].e > spanE) spanE = cues[s8].e; }
         for (var L = 0; L <= maxLane; L++) {
             var idx = top - L; if (idx < 0) continue;
-            try { var vt = seq.videoTracks[idx]; for (var k = vt.clips.numItems - 1; k >= 0; k--) { try { vt.clips[k].remove(false, false); } catch (er) {} } } catch (ec) {}
+            try {
+                var vt = seq.videoTracks[idx];
+                for (var k = vt.clips.numItems - 1; k >= 0; k--) {
+                    try {
+                        var clx = vt.clips[k], csx = clx.start.seconds, cex = clx.end.seconds;
+                        if (cex > spanS + 0.05 && csx < spanE - 0.05) clx.remove(false, false);
+                    } catch (er) {}
+                }
+            } catch (ec) {}
         }
 
         var placed = 0, failed = 0, firstErr = "", needShift = 0, shifted = 0;
