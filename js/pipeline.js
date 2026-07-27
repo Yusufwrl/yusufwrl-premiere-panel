@@ -77,29 +77,70 @@ function run(exe, args, onLog, o) {
   });
 }
 
-/* clips -> timeline'a hizalı 16kHz mono WAV. streamIndex = ses akışı (0=A1,1=A2,2=A3) */
-async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) {
-  const sIdx = Number.isInteger(streamIndex) ? streamIndex : 0;
-  const valid = clips.filter((c) => c.mediaPath && c.durationSec > 0);
-  if (valid.length === 0) throw new Error("Bu kanalda ses klibi bulunamadı.");
-
+/* Tek parça (klip grubu) -> timeline'a hizalı 16kHz mono WAV. Tüm klipler ffmpeg'e argüman
+   olur, o yüzden ÇAĞIRAN parça boyutunu komut satırı sınırının altında tutmalı (bkz. _chunkSize). */
+async function _renderTimelineChunk(clips, ffmpegExe, outWav, sIdx) {
   const inputArgs = [], filters = [], labels = [];
-  valid.forEach((c, i) => {
+  clips.forEach((c, i) => {
     const inPoint = Math.max(0, c.inPointSec || 0);
     inputArgs.push("-ss", String(inPoint), "-t", String(c.durationSec), "-i", c.mediaPath);
     const delayMs = Math.round(Math.max(0, c.timelineStartSec || 0) * 1000);
     filters.push(`[${i}:a:${sIdx}]aresample=16000,adelay=${delayMs}|${delayMs}[a${i}]`);
     labels.push(`[a${i}]`);
   });
-
   let filterComplex, mapLabel;
-  if (valid.length === 1) { filterComplex = filters[0]; mapLabel = "[a0]"; }
-  else { filterComplex = filters.join(";") + ";" + labels.join("") + `amix=inputs=${valid.length}:normalize=0[mix]`; mapLabel = "[mix]"; }
-
+  if (clips.length === 1) { filterComplex = filters[0]; mapLabel = "[a0]"; }
+  else { filterComplex = filters.join(";") + ";" + labels.join("") + `amix=inputs=${clips.length}:normalize=0[mix]`; mapLabel = "[mix]"; }
   const args = [...inputArgs, "-filter_complex", filterComplex, "-map", mapLabel,
     "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-y", outWav];
-  if (onLog) onLog("[ffmpeg] ses hazırlanıyor (" + valid.length + " klip)...\n");
   await run(ffmpegExe, args, null, { cwd: path.dirname(ffmpegExe) });
+  if (!fs.existsSync(outWav)) throw new Error("WAV üretilemedi: " + outWav);
+  return outWav;
+}
+
+// Windows komut satırı sınırına (~32767 karakter) takılmadan bir ffmpeg çağrısına kaç klip
+// sığdırılabilir? Yol uzunluğuna göre uyarlanır; güvenli tarafta kalınır.
+function _chunkSize(clips) {
+  let sum = 0;
+  for (let i = 0; i < clips.length; i++) sum += (clips[i].mediaPath || "").length;
+  const avgPath = clips.length ? (sum / clips.length) : 60;
+  const perClip = avgPath + 95;   // -ss/-t/-i bayrakları + filter_complex payı
+  const n = Math.floor(22000 / perClip);   // 32767'nin güvenli altı
+  return Math.max(20, Math.min(100, n));
+}
+
+/* clips -> timeline'a hizalı 16kHz mono WAV. streamIndex = ses akışı (0=A1,1=A2,2=A3).
+   Çok klipli timeline'da (ör. 300+ klip) tek ffmpeg komutu Windows sınırını aşıp
+   "spawn ENAMETOOLONG" verir; bu yüzden klipler parçalara bölünür, her parça tam-uzunluk
+   konumlandırılmış WAV üretir, sonra parçalar amix (mixWavs) ile birleştirilir. */
+async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) {
+  const sIdx = Number.isInteger(streamIndex) ? streamIndex : 0;
+  const valid = clips.filter((c) => c.mediaPath && c.durationSec > 0);
+  if (valid.length === 0) throw new Error("Bu kanalda ses klibi bulunamadı.");
+  if (onLog) onLog("[ffmpeg] ses hazırlanıyor (" + valid.length + " klip)...\n");
+
+  const chunkN = _chunkSize(valid);
+  if (valid.length <= chunkN) {
+    await _renderTimelineChunk(valid, ffmpegExe, outWav, sIdx);
+    return outWav;
+  }
+
+  // Çok klip: parça parça üret, sonra birleştir.
+  const dir = path.dirname(outWav);
+  const base = path.basename(outWav, path.extname(outWav));
+  const parts = [];
+  try {
+    for (let start = 0, ci = 0; start < valid.length; start += chunkN, ci++) {
+      const chunk = valid.slice(start, start + chunkN);
+      const partWav = path.join(dir, base + "__part" + ci + ".wav");
+      await _renderTimelineChunk(chunk, ffmpegExe, partWav, sIdx);
+      parts.push(partWav);
+      if (onLog) onLog("[ffmpeg] parça " + (ci + 1) + "/" + Math.ceil(valid.length / chunkN) + " (" + chunk.length + " klip)\n");
+    }
+    await mixWavs(parts, ffmpegExe, outWav);
+  } finally {
+    for (let i = 0; i < parts.length; i++) { try { fs.unlinkSync(parts[i]); } catch (e) {} }
+  }
   if (!fs.existsSync(outWav)) throw new Error("WAV üretilemedi: " + outWav);
   return outWav;
 }
