@@ -239,7 +239,32 @@ function _getMGTText(ti) {
     return null;
 }
 
+// Timeline'da SEÇİLİ altyazı (MOGRT) kliplerinin başlangıç saniyelerini JSON dizi döndürür.
+// Panel bunları kendi cue listesiyle eşleyip TEMİZ yeniden yerleştirme yapar (importMGT'nin
+// komşu klipleri ezme sorununa girmeden).
+function getSelectedSubTimes() {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "[]";
+        var TICKS = 254016000000, out = [];
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
+            var tr = seq.videoTracks[v];
+            for (var i = 0; i < tr.clips.numItems; i++) {
+                var cl = tr.clips[i];
+                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
+                if (!sel) continue;
+                var mc = null; try { mc = cl.getMGTComponent(); } catch (e) {}
+                if (!mc) continue; // sadece MOGRT altyazı klipleri
+                out.push(parseFloat(cl.start.ticks) / TICKS);
+            }
+        }
+        return "[" + out.join(",") + "]";
+    } catch (e) { return "[]"; }
+}
+
 /*
+ * (ARTIK KULLANILMIYOR — importMGT komşu klipleri ezdiği için panel-taraflı temiz
+ *  yeniden yerleştirmeye geçildi. Referans için bırakıldı.)
  * Timeline'da SEÇİLİ altyazı (MOGRT) kliplerini verilen stille (renkle) değiştirir.
  * Aynı zaman + aynı metin korunur; klip silinip yeni stil aynı yere konur.
  * Yanlış renk/konuşmacı atanan altyazıları yerleştirdikten SONRA düzeltmek için.

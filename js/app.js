@@ -327,7 +327,7 @@
     $("progressLabel").style.color = ""; $("progressBox").hidden = false;
     $("progressLabel").textContent = "Timeline'a ekleniyor…";
     if (stylePath) {
-      var file = writeCuesMulti(state.singleCues.map(function (c) { return { start: c.start, end: c.end, mogrt: stylePath, text: c.text }; }));
+      var file = writeCuesMulti(state.singleCues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || stylePath), text: c.text }; }));
       showResult(await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)'));
     } else {
       var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
@@ -339,8 +339,8 @@
     var a1Style = $("selStyleA1").value;
     var spStyle = {}; state.speakers.forEach(function (sp) { spStyle[sp.id] = sp.styleSel.value; });
     var combined = [];
-    if (a1Style) state.a1Cues.forEach(function (c) { combined.push({ start: c.start, end: c.end, mogrt: a1Style, text: c.text, src: "a1" }); });
-    state.a2Cues.forEach(function (c) { var mg = spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a2" }); });
+    state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a1" }); });
+    state.a2Cues.forEach(function (c) { var mg = c._ovMogrt || spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a2" }); });
     if (!combined.length) { uiAlert("Stil atanmadı."); return; }
 
     // A1 HEP üst track (lane 0), A2 HEP bir alt track (lane 1). Ekran konumu DEĞİŞMEZ (kayma=0).
@@ -369,15 +369,30 @@
     }
     finally { state.running = false; btn.disabled = false; $("btnCancel").hidden = true; }
   });
-  // Timeline'da SEÇİLİ altyazıların rengini/stilini değiştir (yerleştirmeden sonra düzeltme)
+  // Timeline'da SEÇİLİ altyazıların rengini değiştir — GÜVENLİ yol: seçili kliplerin
+  // zamanlarını al, panel cue listesinde eşle, o cue'lara renk override ata ve TÜM bölgeyi
+  // temiz yeniden yerleştir (importMGT'nin komşuyu ezme sorununa girmeden).
   (function () {
     var b = $("btnRecolor"); if (!b) return;
     b.addEventListener("click", async function () {
+      if (b.disabled) return;
       var mg = $("selRecolor") && $("selRecolor").value;
       if (!mg) { uiAlert("Önce bir renk/stil seç.", "Renk değiştir"); return; }
-      if (b.disabled) return; b.disabled = true;
-      $("progressBox").hidden = false; $("progressLabel").style.color = ""; $("progressLabel").textContent = "Renk değiştiriliyor…";
-      try { showResult(await evalES('recolorSelected("' + esPath(mg) + '")')); }
+      var raw = await evalES("getSelectedSubTimes()");
+      var times = []; try { times = JSON.parse(raw) || []; } catch (e) {}
+      if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra Değiştir'e bas.", "Renk değiştir"); return; }
+      var cues = (state.mode === "speaker") ? state.a1Cues.concat(state.a2Cues) : state.singleCues;
+      if (!cues.length) { uiAlert("Panelde altyazı listesi boş. Panel kapanınca liste sıfırlanır — o videoyu tekrar 'Altyazı Oluştur'.", "Renk değiştir"); return; }
+      var n = 0;
+      for (var t = 0; t < times.length; t++) {
+        var best = null, bd = 0.3;
+        for (var i = 0; i < cues.length; i++) { var d = Math.abs(cues[i].start - times[t]); if (d < bd) { bd = d; best = cues[i]; } }
+        if (best) { best._ovMogrt = mg; n++; }
+      }
+      if (!n) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
+      b.disabled = true;
+      logLine(n + " altyazının rengi değiştiriliyor (temiz yeniden yerleştirme)…");
+      try { if (state.mode === "speaker") await placeSpeaker(); else await placeSingle(); }
       catch (e) { showResult("err:" + (e.message || e)); }
       finally { b.disabled = false; }
     });
