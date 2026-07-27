@@ -339,28 +339,21 @@
     var a1Style = $("selStyleA1").value;
     var spStyle = {}; state.speakers.forEach(function (sp) { spStyle[sp.id] = sp.styleSel.value; });
     var combined = [];
-    if (a1Style) state.a1Cues.forEach(function (c) { combined.push({ start: c.start, end: c.end, mogrt: a1Style, text: c.text }); });
-    state.a2Cues.forEach(function (c) { var mg = spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text }); });
+    if (a1Style) state.a1Cues.forEach(function (c) { combined.push({ start: c.start, end: c.end, mogrt: a1Style, text: c.text, src: "a1" }); });
+    state.a2Cues.forEach(function (c) { var mg = spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a2" }); });
     if (!combined.length) { uiAlert("Stil atanmadı."); return; }
 
-    // lane ata: çakışan altyazılar farklı kanala + ekranda yukarı istiflenir
+    // A1 HEP üst track (lane 0), A2 HEP bir alt track (lane 1). Ekran konumu DEĞİŞMEZ (kayma=0).
     combined.sort(function (a, b) { return a.start - b.start; });
-    var laneEnds = [];
-    combined.forEach(function (c) {
-      var lane = -1;
-      for (var i = 0; i < laneEnds.length; i++) { if (c.start >= laneEnds[i] - 0.02) { lane = i; break; } }
-      if (lane < 0) { lane = laneEnds.length; laneEnds.push(0); }
-      laneEnds[lane] = c.end; c.lane = lane;
-    });
+    combined.forEach(function (c) { c.lane = (c.src === "a1") ? 0 : 1; });
     var body = combined.map(function (c) {
       return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + String(c.text).replace(/[\r\n|]/g, " ");
     }).join("\n");
     var file = path.join(cfg.workDir, "laned_" + Date.now() + ".txt");
     fs.writeFileSync(file, body, "utf8");
     $("progressBox").hidden = false; $("progressLabel").style.color = ""; $("progressLabel").textContent = "Timeline'a ekleniyor…";
-    logLine(combined.length + " altyazı · " + laneEnds.length + " kanal (istifleme)");
-    var _gap = 130; var _sg = $("stackGap"); if (_sg) _gap = parseInt(_sg.value, 10) || 130;
-    showResult(await evalES('addLanedSubtitles("' + esPath(file) + '",' + _gap + ')'));
+    logLine(combined.length + " altyazı · A1 üst / A2 alt track");
+    showResult(await evalES('addLanedSubtitles("' + esPath(file) + '",0)'));
   }
 
   // ---------- butonlar ----------

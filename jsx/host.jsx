@@ -252,7 +252,8 @@ function recolorSelected(mogrtPath) {
         var mf = new File(mogrtPath);
         if (!mf.exists) return "err:Stil dosyası yok: " + mogrtPath;
         var TICKS = 254016000000;
-        // Seçili MOGRT kliplerinin bilgisini ÖNCE topla (silince koleksiyon kayar).
+        // PASS 1: SADECE seçili MOGRT kliplerinin bilgisini DEĞER olarak topla (referans TUTMA —
+        // timeline değişince eski TrackItem referansı kayıp YANLIŞ klibi siliyordu, bug buydu).
         var jobs = [];
         for (var v = 0; v < seq.videoTracks.numTracks; v++) {
             var tr = seq.videoTracks[v];
@@ -261,16 +262,29 @@ function recolorSelected(mogrtPath) {
                 var sel = false; try { sel = cl.isSelected(); } catch (es) {}
                 if (!sel) continue;
                 var mc = null; try { mc = cl.getMGTComponent(); } catch (em) {}
-                if (!mc) continue; // MOGRT değil (video/ses vb.) -> dokunma
+                if (!mc) continue; // MOGRT değil (video/ses/gameplay) -> ASLA dokunma
                 var txt = _getMGTText(cl);
-                jobs.push({ ti: cl, startTicks: "" + cl.start.ticks, endSec: parseFloat(cl.end.ticks) / TICKS, text: (txt != null ? txt : ""), vIdx: v });
+                jobs.push({ startTicks: "" + cl.start.ticks, endSec: parseFloat(cl.end.ticks) / TICKS, text: (txt != null ? txt : ""), vIdx: v });
             }
         }
         if (!jobs.length) return "err:Timeline'da altyazı klibi seçili değil (klibe tıkla, sonra bas)";
+        // PASS 2: SADECE seçili MOGRT klipleri kaldır — TERS iterasyon (indeks kaymaz), ripple YOK
+        // (false = gap bırak, sonraki klipleri kaydırma/silme). Sadece seçili+MOGRT olanlara dokunur.
+        for (var v2 = 0; v2 < seq.videoTracks.numTracks; v2++) {
+            var tr2 = seq.videoTracks[v2];
+            for (var k = tr2.clips.numItems - 1; k >= 0; k--) {
+                var c2 = tr2.clips[k];
+                var s2 = false; try { s2 = c2.isSelected(); } catch (e) {}
+                if (!s2) continue;
+                var m2 = null; try { m2 = c2.getMGTComponent(); } catch (e) {}
+                if (!m2) continue;
+                try { c2.remove(false, false); } catch (er) {}
+            }
+        }
+        // PASS 3: yeni stili aynı zamana/track'e koy, metni ve süreyi geri yaz.
         var done = 0, failed = 0, firstErr = "";
         for (var j = 0; j < jobs.length; j++) {
             var job = jobs[j];
-            try { job.ti.remove(false, false); } catch (er) {}
             var ni = null;
             try { ni = seq.importMGT(mogrtPath, job.startTicks, job.vIdx, -1); }
             catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
