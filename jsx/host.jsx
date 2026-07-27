@@ -50,6 +50,18 @@ function getA1ClipsJSON(trackIdx) {
 
 function _basename(p) { return String(p).replace(/^.*[\\\/]/, ""); }
 
+// Playhead'i (CTI) verilen saniyeye taşır — konuşmacının ilk göründüğü ana atlamak için.
+function seekTo(sec) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var s = parseFloat(sec); if (isNaN(s) || s < 0) s = 0;
+        var ticks = Math.round(s * 254016000000);
+        seq.setPlayerPosition(String(ticks));
+        return "ok";
+    } catch (e) { return "err:" + e.toString(); }
+}
+
 // SRT'yi projeye alır ve caption track olarak timeline'a (0 anına) ekler.
 function addCaptionsToTimeline(srtPath) {
     try {

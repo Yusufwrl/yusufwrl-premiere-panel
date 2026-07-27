@@ -43,6 +43,15 @@ function loadConfig(extRoot) {
   var out = {};
   for (var k in cfg) { if (cfg.hasOwnProperty(k)) out[k] = exp(cfg[k]); }
   out._engineRoot = engineRoot;
+  // Diarization cihazı (MAKİNEYE ÖZEL): reverb/pyannote PyTorch kullanır. Blackwell (RTX 50xx)
+  // GPU'da torch kerneli yok → cpu şart. Çalışan GPU'da cuda çok daha hızlı (reverb ağır).
+  // Varsayılan cpu (her yerde güvenli); makinede diarize-device.txt "cuda" yazıyorsa GPU.
+  var diarDev = "cpu";
+  try {
+    var ddf = path.join(extRoot, "diarize-device.txt");
+    if (fs.existsSync(ddf)) { var dv = fs.readFileSync(ddf, "utf8").trim().toLowerCase(); if (dv) diarDev = dv; }
+  } catch (e) {}
+  out.diarizeDevice = diarDev;
   return out;
 }
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
@@ -411,9 +420,11 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   // (torch o mimari için derlenmemiş). Diarization'ı CPU'da çalıştırırız — her GPU'da güvenli.
   // Ana transkripsiyon (CTranslate2) GPU'da hızlı kalır.
   if (opts.diarize) {
-    args.push("--diarize", "pyannote_v3.1", "--diarize_device", "cpu");
+    // reverb_v2: WavLM gömlekli, benzer sesleri pyannote'tan daha iyi ayırır (en iyi built-in).
+    // Cihaz makineye özel: çalışan GPU'da cuda (hızlı), Blackwell/desteksiz GPU'da cpu.
+    args.push("--diarize", "reverb_v2", "--diarize_device", (cfg.diarizeDevice || "cpu"));
     // Otomatik kümeleme benzer sesleri birleştirebilir (5 kişi -> 2). Kullanıcı sayıyı
-    // verirse pyannote'u tam o kadar konuşmacıya zorlarız (daha hassas ayırma).
+    // verirse modeli tam o kadar konuşmacıya zorlarız (daha hassas ayırma).
     var ns = parseInt(opts.numSpeakers, 10);
     if (ns > 0) args.push("--num_speakers", String(ns));
     args.push("--output_format", "json", "srt");

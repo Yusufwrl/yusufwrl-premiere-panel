@@ -3,7 +3,8 @@
   "use strict";
   var CEP = (typeof window.__adobe_cep__ !== "undefined");
   var cs = null, pipeline = null, cfg = null, path = null, fs = null, extRoot = "";
-  var SP_COLORS = ["#4b8bff", "#35c26a", "#e0a63a", "#b06dfc", "#3fc6c6", "#ff7ac2", "#e5544b", "#9ac44b"];
+  var SP_COLORS = ["#4b8bff", "#35c26a", "#e0a63a", "#b06dfc", "#3fc6c6", "#ff7ac2", "#e5544b", "#9ac44b",
+    "#ff8c42", "#6c5ce7", "#f9ca24", "#48dbfb"];
   var fileCounter = 0;
 
   var state = { mode: "single", track: "0", running: false, cancelled: false, styles: [],
@@ -99,13 +100,53 @@
   }
 
   // ---------- transkript ----------
+  // Konuşmacı düzeltme seçici: bir satırın noktasına tıklayınca konuşmacıları renkli
+  // yuvarlaklarla gösterir; birine tıklayınca o satırı O konuşmacıya (renge) atar.
+  // Model kesin olmadığı yerleri elle düzeltmek için (örn. 0:54 aslında Moni).
+  function _pickerOutside(e) { var p = $("spPicker"); if (p && !p.contains(e.target)) closeSpeakerPicker(); }
+  function closeSpeakerPicker() { var p = $("spPicker"); if (p) p.remove(); document.removeEventListener("mousedown", _pickerOutside); }
+  function openSpeakerPicker(dotEl, cue) {
+    closeSpeakerPicker();
+    if (!state.speakers.length) return;
+    var pop = document.createElement("div"); pop.id = "spPicker";
+    pop.style.cssText = "position:absolute;z-index:60;background:var(--surface-solid,#1d1829);border:1px solid var(--border-strong,#5a49a8);border-radius:9px;padding:7px;display:flex;flex-wrap:wrap;gap:6px;box-shadow:0 8px 24px rgba(0,0,0,.55);max-width:220px";
+    state.speakers.forEach(function (sp, i) {
+      var col = speakerColor(i);
+      var chip = document.createElement("button");
+      chip.type = "button"; chip.title = "Konuşmacı " + (i + 1); chip.textContent = String(i + 1);
+      chip.style.cssText = "width:27px;height:27px;border-radius:50%;border:2px solid " + (cue.speaker === sp.id ? "#fff" : "transparent") + ";background:" + col + ";color:#fff;font-weight:700;font-size:12px;cursor:pointer;line-height:1";
+      chip.addEventListener("click", function () {
+        cue.speaker = sp.id; if (cue._ref) cue._ref.speaker = sp.id;
+        dotEl.style.background = col; closeSpeakerPicker();
+      });
+      pop.appendChild(chip);
+    });
+    document.body.appendChild(pop);
+    var r = dotEl.getBoundingClientRect();
+    var w = pop.offsetWidth || 200;
+    pop.style.left = Math.max(6, Math.min(r.left, window.innerWidth - w - 6)) + "px";
+    pop.style.top = (r.bottom + 4) + "px";
+    setTimeout(function () { document.addEventListener("mousedown", _pickerOutside); }, 0);
+  }
+
   function renderTranscript(cues, colorMap) {
     $("segCount").textContent = cues.length;
     var box = $("transcript"); box.innerHTML = "";
     cues.forEach(function (c) {
       var row = document.createElement("div"); row.className = "tr-row";
-      if (colorMap) { var d = document.createElement("div"); d.className = "tr-sp"; d.style.background = (c.speaker && colorMap[c.speaker]) || "#666"; row.appendChild(d); }
-      var t = document.createElement("div"); t.className = "tr-time"; t.textContent = fmtShort(c.start); row.appendChild(t);
+      if (colorMap) {
+        var d = document.createElement("div"); d.className = "tr-sp"; d.style.background = (c.speaker && colorMap[c.speaker]) || "#666";
+        // A2 satırları elle düzeltilebilir (A1 = tek kişi, sen; değiştirilmez)
+        if (c.speaker && c.speaker !== "__A1__") {
+          d.style.cursor = "pointer"; d.title = "Konuşmacıyı/rengi değiştir";
+          (function (dot, cue) { dot.addEventListener("click", function (ev) { ev.stopPropagation(); openSpeakerPicker(dot, cue); }); })(d, c);
+        }
+        row.appendChild(d);
+      }
+      var t = document.createElement("div"); t.className = "tr-time"; t.textContent = fmtShort(c.start);
+      t.style.cursor = "pointer"; t.title = "Bu ana git (Premiere)";
+      (function (sec) { t.addEventListener("click", function () { evalES("seekTo(" + sec + ")"); }); })(c.start);
+      row.appendChild(t);
       var x = document.createElement("div"); x.className = "tr-text"; x.textContent = c.text;
       x.contentEditable = "true"; x.spellcheck = false;
       (function (cue, node) {
@@ -128,6 +169,13 @@
       var dot = document.createElement("div"); dot.className = "sp-dot"; dot.style.background = speakerColor(i); row.appendChild(dot);
       var info = document.createElement("div"); info.className = "sp-info";
       var nm = document.createElement("div"); nm.className = "sp-name"; nm.textContent = "Konuşmacı " + (i + 1);
+      if (sp.start != null) {
+        var jt = document.createElement("span"); jt.className = "sp-jump";
+        jt.textContent = " ▶ " + fmtShort(sp.start);
+        jt.title = "İlk konuştuğu ana git (Premiere)";
+        (function (sec) { jt.addEventListener("click", function () { evalES("seekTo(" + sec + ")"); }); })(sp.start);
+        nm.appendChild(jt);
+      }
       var sm = document.createElement("div"); sm.className = "sp-sample"; sm.textContent = "\"" + (sp.sample || "") + "\"";
       info.appendChild(nm); info.appendChild(sm); row.appendChild(info);
       var wrap = document.createElement("div"); wrap.className = "select sm";
@@ -244,7 +292,7 @@
     cleanupFiles(prep2.cleanup);
 
     var seen = {}, speakers = [];
-    state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text }); } });
+    state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text, start: c.start }); } });
     state.speakers = speakers;
     renderSpeakerMap();
 
