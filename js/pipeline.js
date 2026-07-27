@@ -405,12 +405,19 @@ async function transcribe(cfg, wavPath, onLog, opts) {
     "--compute_type", cfg.computeType || "float16",
     "--task", "transcribe",
     "--word_timestamps", "true",
+    "--beep_off",   // motorun bitişte çaldığı bip sesini kapat
   ];
   // Konuşmacı ayırma (pyannote) PyTorch kullanır; bazı GPU'larda "no kernel image" verir
   // (torch o mimari için derlenmemiş). Diarization'ı CPU'da çalıştırırız — her GPU'da güvenli.
   // Ana transkripsiyon (CTranslate2) GPU'da hızlı kalır.
-  if (opts.diarize) args.push("--diarize", "pyannote_v3.1", "--diarize_device", "cpu", "--output_format", "json", "srt");
-  else args.push("--output_format", "json");
+  if (opts.diarize) {
+    args.push("--diarize", "pyannote_v3.1", "--diarize_device", "cpu");
+    // Otomatik kümeleme benzer sesleri birleştirebilir (5 kişi -> 2). Kullanıcı sayıyı
+    // verirse pyannote'u tam o kadar konuşmacıya zorlarız (daha hassas ayırma).
+    var ns = parseInt(opts.numSpeakers, 10);
+    if (ns > 0) args.push("--num_speakers", String(ns));
+    args.push("--output_format", "json", "srt");
+  } else args.push("--output_format", "json");
   args.push("--output_dir", outDir);
 
   const engDir = path.dirname(cfg.engineExe);

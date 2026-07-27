@@ -236,9 +236,11 @@
     var a2 = await getClips(1);
     setProgress(55, "A2 sesi hazırlanıyor…");
     var prep2 = await prepAudio(a2.clips, 1, "a2");
+    var numSpk = parseInt($("selNumSpk") && $("selNumSpk").value, 10) || 0;
+    if (numSpk > 0) logLine("A2: " + numSpk + " konuşmacıya ayrılacak");
     setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
     state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(65 + Math.min(30, p * 0.3)); },
-      { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked) }), prep2.offset);
+      { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked), numSpeakers: numSpk }), prep2.offset);
     cleanupFiles(prep2.cleanup);
 
     var seen = {}, speakers = [];
@@ -550,7 +552,7 @@
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
   function wirePersistence() {
-    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1"];
+    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk"];
     for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
     restoreSegs();
     // Küfür sansürü toggle — varsayılan AÇIK
