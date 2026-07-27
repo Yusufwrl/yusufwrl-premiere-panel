@@ -420,9 +420,9 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   // (torch o mimari için derlenmemiş). Diarization'ı CPU'da çalıştırırız — her GPU'da güvenli.
   // Ana transkripsiyon (CTranslate2) GPU'da hızlı kalır.
   if (opts.diarize) {
-    // reverb_v2: WavLM gömlekli, benzer sesleri pyannote'tan daha iyi ayırır (en iyi built-in).
+    // pyannote_v3.1: kullanıcı testinde reverb_v2'den daha iyi sonuç verdi (+MIT lisanslı, ticari-güvenli).
     // Cihaz makineye özel: çalışan GPU'da cuda (hızlı), Blackwell/desteksiz GPU'da cpu.
-    args.push("--diarize", "reverb_v2", "--diarize_device", (cfg.diarizeDevice || "cpu"));
+    args.push("--diarize", "pyannote_v3.1", "--diarize_device", (cfg.diarizeDevice || "cpu"));
     // Otomatik kümeleme benzer sesleri birleştirebilir (5 kişi -> 2). Kullanıcı sayıyı
     // verirse modeli tam o kadar konuşmacıya zorlarız (daha hassas ayırma).
     var ns = parseInt(opts.numSpeakers, 10);
