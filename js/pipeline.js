@@ -406,7 +406,10 @@ async function transcribe(cfg, wavPath, onLog, opts) {
     "--task", "transcribe",
     "--word_timestamps", "true",
   ];
-  if (opts.diarize) args.push("--diarize", "pyannote_v3.1", "--output_format", "json", "srt");
+  // Konuşmacı ayırma (pyannote) PyTorch kullanır; bazı GPU'larda "no kernel image" verir
+  // (torch o mimari için derlenmemiş). Diarization'ı CPU'da çalıştırırız — her GPU'da güvenli.
+  // Ana transkripsiyon (CTranslate2) GPU'da hızlı kalır.
+  if (opts.diarize) args.push("--diarize", "pyannote_v3.1", "--diarize_device", "cpu", "--output_format", "json", "srt");
   else args.push("--output_format", "json");
   args.push("--output_dir", outDir);
 
