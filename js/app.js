@@ -321,13 +321,14 @@
     $("progressBox").hidden = false;
   }
 
-  async function placeSingle() {
+  async function placeSingle(range) {
     var stylePath = $("selStyleSingle").value;
-    if (!state.singleCues.length) { uiAlert("Önce altyazı oluştur."); return; }
+    var cues = range ? state.singleCues.filter(function (c) { return c.end > range.start && c.start < range.end; }) : state.singleCues;
+    if (!cues.length) { uiAlert("Önce altyazı oluştur."); return; }
     $("progressLabel").style.color = ""; $("progressBox").hidden = false;
     $("progressLabel").textContent = "Timeline'a ekleniyor…";
     if (stylePath) {
-      var file = writeCuesMulti(state.singleCues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || stylePath), text: c.text }; }));
+      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || stylePath), text: c.text }; }));
       showResult(await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)'));
     } else {
       var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
@@ -335,25 +336,34 @@
       showResult(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
     }
   }
-  async function placeSpeaker() {
+  async function placeSpeaker(range) {
     var a1Style = $("selStyleA1").value;
     var spStyle = {}; state.speakers.forEach(function (sp) { spStyle[sp.id] = sp.styleSel.value; });
+    var _gap = 130; var _sg = $("stackGap"); if (_sg) _gap = parseInt(_sg.value, 10) || 130;
+
+    // Yerleştirilecek A1 aralıkları — A2'nin A1 ile üst üste GELİP GELMEDİĞİNİ bulmak için.
+    var a1Iv = [];
+    state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
+    function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
+
+    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1); SADECE A1 ile aynı anda
+    // görünüyorsa (çakışıyorsa) ekranda _gap kadar yukarı kayar (çakışma okunmaz olmasın),
+    // çakışmıyorsa normal konumda kalır ("ekran aynı kalsın").
     var combined = [];
-    state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a1" }); });
-    state.a2Cues.forEach(function (c) { var mg = c._ovMogrt || spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, src: "a2" }); });
+    state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 }); });
+    state.a2Cues.forEach(function (c) { var mg = c._ovMogrt || spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: overlapsA1(c.start, c.end) ? _gap : 0 }); });
+    if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
     if (!combined.length) { uiAlert("Stil atanmadı."); return; }
 
-    // A1 HEP üst track (lane 0), A2 HEP bir alt track (lane 1). Ekran konumu DEĞİŞMEZ (kayma=0).
     combined.sort(function (a, b) { return a.start - b.start; });
-    combined.forEach(function (c) { c.lane = (c.src === "a1") ? 0 : 1; });
     var body = combined.map(function (c) {
-      return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + String(c.text).replace(/[\r\n|]/g, " ");
+      return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + c.shift + "|" + String(c.text).replace(/[\r\n|]/g, " ");
     }).join("\n");
     var file = path.join(cfg.workDir, "laned_" + Date.now() + ".txt");
     fs.writeFileSync(file, body, "utf8");
     $("progressBox").hidden = false; $("progressLabel").style.color = ""; $("progressLabel").textContent = "Timeline'a ekleniyor…";
-    logLine(combined.length + " altyazı · A1 üst / A2 alt track");
-    showResult(await evalES('addLanedSubtitles("' + esPath(file) + '",0)'));
+    logLine(combined.length + " altyazı · A1 üst / A2 alt (çakışanlar istiflenir)");
+    showResult(await evalES('addLanedSubtitles("' + esPath(file) + '")'));
   }
 
   // ---------- butonlar ----------
@@ -383,16 +393,20 @@
       if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra Değiştir'e bas.", "Renk değiştir"); return; }
       var cues = (state.mode === "speaker") ? state.a1Cues.concat(state.a2Cues) : state.singleCues;
       if (!cues.length) { uiAlert("Panelde altyazı listesi boş. Panel kapanınca liste sıfırlanır — o videoyu tekrar 'Altyazı Oluştur'.", "Renk değiştir"); return; }
-      var n = 0;
+      var matched = [];
       for (var t = 0; t < times.length; t++) {
         var best = null, bd = 0.3;
         for (var i = 0; i < cues.length; i++) { var d = Math.abs(cues[i].start - times[t]); if (d < bd) { bd = d; best = cues[i]; } }
-        if (best) { best._ovMogrt = mg; n++; }
+        if (best) { best._ovMogrt = mg; matched.push(best); }
       }
-      if (!n) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
+      if (!matched.length) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
+      // SADECE seçili bölgeyi yeniden yerleştir (hız) — tüm altyazıları değil.
+      var spanStart = matched[0].start, spanEnd = matched[0].end;
+      for (var mI = 1; mI < matched.length; mI++) { if (matched[mI].start < spanStart) spanStart = matched[mI].start; if (matched[mI].end > spanEnd) spanEnd = matched[mI].end; }
+      var range = { start: spanStart - 0.05, end: spanEnd + 0.05 };
       b.disabled = true;
-      logLine(n + " altyazının rengi değiştiriliyor (temiz yeniden yerleştirme)…");
-      try { if (state.mode === "speaker") await placeSpeaker(); else await placeSingle(); }
+      logLine(matched.length + " altyazının rengi değiştiriliyor…");
+      try { if (state.mode === "speaker") await placeSpeaker(range); else await placeSingle(range); }
       catch (e) { showResult("err:" + (e.message || e)); }
       finally { b.disabled = false; }
     });

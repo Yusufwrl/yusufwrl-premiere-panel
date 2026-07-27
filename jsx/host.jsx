@@ -583,11 +583,11 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
         var cues = [], maxLane = 0;
         for (var i = 0; i < lines.length; i++) {
             var ln = lines[i]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 5) continue;
-            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], lane = parseInt(p[3], 10) || 0, txt = p.slice(4).join("|");
+            var p = ln.split("|"); if (p.length < 6) continue;
+            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], lane = parseInt(p[3], 10) || 0, shift = parseFloat(p[4]) || 0, txt = p.slice(5).join("|");
             if (isNaN(s) || !mg) continue;
             if (lane > maxLane) maxLane = lane;
-            cues.push({ s: s, e: e, mg: mg, lane: lane, t: txt });
+            cues.push({ s: s, e: e, mg: mg, lane: lane, shift: shift, t: txt });
         }
         if (!cues.length) return "err:cue yok";
 
@@ -620,7 +620,7 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
             if (!ti) { failed++; continue; }
             _setTextAllWays(ti, cues[c].t);
             _setEndSec(ti, cues[c].e, TICKS);
-            if (cues[c].lane > 0) { needShift++; if (_shiftUp(ti, cues[c].lane * yOffsetPx)) shifted++; }
+            if (cues[c].shift > 0) { needShift++; if (_shiftUp(ti, cues[c].shift)) shifted++; }
             placed++;
         }
         return "ok:" + placed + " eklendi" + (needShift ? (", " + shifted + "/" + needShift + " kaydırıldı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
