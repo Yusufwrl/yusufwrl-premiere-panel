@@ -149,6 +149,57 @@
     return data;
   }
 
+  // ---------- Süre aralığı (opsiyonel) ----------
+  // "1:30" -> 90 sn, "90" -> 90, "1:05:00" -> 3900. Boş/geçersiz -> null.
+  function parseTime(str) {
+    str = String(str == null ? "" : str).trim();
+    if (!str) return null;
+    var parts = str.split(":"), val = 0;
+    for (var i = 0; i < parts.length; i++) {
+      var n = parseFloat(parts[i].replace(",", "."));
+      if (isNaN(n) || n < 0) return null;
+      val = val * 60 + n;
+    }
+    return val;
+  }
+  // Panel girdilerinden aralık okur. İkisi de boşsa null (= tüm video).
+  function getRange() {
+    var s = parseTime($("rangeStart") && $("rangeStart").value);
+    var e = parseTime($("rangeEnd") && $("rangeEnd").value);
+    if (s == null && e == null) return null;
+    var start = (s == null) ? 0 : s;
+    var end = (e == null) ? Infinity : e;
+    if (isFinite(end) && end <= start) end = Infinity; // geçersiz bitiş -> sona kadar
+    return { start: start, end: end };
+  }
+  function clipsInRange(clips, range) {
+    if (!range) return clips;
+    return clips.filter(function (c) {
+      var s = c.timelineStartSec || 0, e = s + (c.durationSec || 0);
+      return e > range.start && s < range.end;
+    });
+  }
+  // Klipleri (opsiyonel aralıkla) 16kHz WAV'a çevirir. { wav, offset, cleanup[] } döner.
+  // offset = cue zamanlarına eklenecek saniye (kırpma başlangıcı).
+  async function prepAudio(clips, trackIdx, name) {
+    var range = getRange();
+    var used = clipsInRange(clips, range);
+    if (range && !used.length) throw new Error("Seçilen süre aralığında bu kanalda konuşma yok.");
+    var stamp = Date.now();
+    var wav = path.join(cfg.workDir, name + "_" + stamp + ".wav");
+    await pipeline.buildTimelineAudio(used, cfg.ffmpegExe, wav, logLine, trackIdx);
+    if (!range) return { wav: wav, offset: 0, cleanup: [wav] };
+    var wav2 = path.join(cfg.workDir, name + "_r_" + stamp + ".wav");
+    await pipeline.trimWav(wav, wav2, range.start, range.end, cfg.ffmpegExe);
+    logLine("[aralık] " + fmtShort(range.start) + (isFinite(range.end) ? " → " + fmtShort(range.end) : " → son"));
+    return { wav: wav2, offset: range.start, cleanup: [wav, wav2] };
+  }
+  function offsetCues(cues, off) {
+    if (off) for (var i = 0; i < cues.length; i++) { cues[i].start += off; cues[i].end += off; }
+    return cues;
+  }
+  function cleanupFiles(list) { for (var i = 0; i < list.length; i++) { try { fs.unlinkSync(list[i]); } catch (e) {} } }
+
   // ---------- TEK STİL ----------
   async function runSingle() {
     var trackIdx = (state.track === "mix") ? 0 : parseInt(state.track, 10);
@@ -156,13 +207,13 @@
     var data = await getClips(trackIdx);
     logLine(data.sequenceName + " · " + data.clips.length + " klip");
     pipeline.ensureDir(cfg.workDir);
-    var wav = path.join(cfg.workDir, "single_" + Date.now() + ".wav");
     setProgress(20, "Ses hazırlanıyor…");
-    await pipeline.buildTimelineAudio(data.clips, cfg.ffmpegExe, wav, logLine, trackIdx);
+    var prep = await prepAudio(data.clips, trackIdx, "single");
     setProgress(45, "Yazıya dökülüyor (GPU)…");
-    var cues = await pipeline.transcribe(cfg, wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(45 + Math.min(50, p * 0.5)); },
+    var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(45 + Math.min(50, p * 0.5)); },
       { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) });
-    try { fs.unlinkSync(wav); } catch (e) {}
+    offsetCues(cues, prep.offset);
+    cleanupFiles(prep.cleanup);
     state.singleCues = cues; state.speakers = []; $("speakerMap").hidden = true;
     renderTranscript(cues, null);
     setProgress(100, "Bitti ✓");
@@ -173,24 +224,22 @@
     pipeline.ensureDir(cfg.workDir);
     setProgress(8, "A1 (sen) okunuyor…");
     var a1 = await getClips(0);
-    var wav1 = path.join(cfg.workDir, "a1_" + Date.now() + ".wav");
     setProgress(15, "A1 sesi hazırlanıyor…");
-    await pipeline.buildTimelineAudio(a1.clips, cfg.ffmpegExe, wav1, logLine, 0);
+    var prep1 = await prepAudio(a1.clips, 0, "a1");
     setProgress(25, "A1 yazıya dökülüyor…");
-    state.a1Cues = await pipeline.transcribe(cfg, wav1, function (l) { whenLog(l); },
-      { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) });
-    try { fs.unlinkSync(wav1); } catch (e) {}
+    state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { whenLog(l); },
+      { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) }), prep1.offset);
+    cleanupFiles(prep1.cleanup);
     logLine("A1: " + state.a1Cues.length + " satır");
 
     setProgress(50, "A2 (arkadaşlar) okunuyor…");
     var a2 = await getClips(1);
-    var wav2 = path.join(cfg.workDir, "a2_" + Date.now() + ".wav");
     setProgress(55, "A2 sesi hazırlanıyor…");
-    await pipeline.buildTimelineAudio(a2.clips, cfg.ffmpegExe, wav2, logLine, 1);
+    var prep2 = await prepAudio(a2.clips, 1, "a2");
     setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
-    state.a2Cues = await pipeline.transcribe(cfg, wav2, function (l) { var p = whenLog(l); if (p >= 0) setProgress(65 + Math.min(30, p * 0.3)); },
-      { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked) });
-    try { fs.unlinkSync(wav2); } catch (e) {}
+    state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) setProgress(65 + Math.min(30, p * 0.3)); },
+      { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked) }), prep2.offset);
+    cleanupFiles(prep2.cleanup);
 
     var seen = {}, speakers = [];
     state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text }); } });

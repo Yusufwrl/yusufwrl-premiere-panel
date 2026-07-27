@@ -111,6 +111,15 @@
           </div>
         </div>
 
+        <div class="field">
+          <label>Süre aralığı <small style="color:var(--faint)">(opsiyonel — boş = tüm video)</small></label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="text" class="input" id="rangeStart" placeholder="0:00" style="text-align:center;cursor:text" title="Başlangıç — dk:sn (ör. 0:00)">
+            <span style="color:var(--muted);flex-shrink:0">→</span>
+            <input type="text" class="input" id="rangeEnd" placeholder="son" style="text-align:center;cursor:text" title="Bitiş — dk:sn (ör. 1:00). Boş = videonun sonu">
+          </div>
+        </div>
+
         <label class="switch-row"><span>Küfür sansürü <small>(apt*l)</small></span><input type="checkbox" id="chkCensor"></label>
 
         <button class="btn-primary btn-lg" id="btnRun">
