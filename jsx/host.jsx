@@ -213,6 +213,79 @@ function _findClipNear(vTrack, startSec, TICKS) {
     return best;
 }
 
+// MOGRT değerinden düz metni çıkarır (string ya da {text:...} JSON olabilir).
+function _extractText(v) {
+    if (typeof v === "string") {
+        if (v.charAt(0) === "{") { try { var o = JSON.parse(v); if (o && typeof o.text === "string") return o.text; } catch (e) {} }
+        return v;
+    }
+    if (v && typeof v.text === "string") return v.text;
+    return (v == null) ? "" : ("" + v);
+}
+// Yerleştirilmiş MOGRT klibinden metni OKUR (renk değiştirirken korumak için).
+function _getMGTText(ti) {
+    try {
+        var mc = ti.getMGTComponent();
+        if (mc && mc.properties) {
+            for (var m = 0; m < mc.properties.numItems; m++) {
+                var mp = mc.properties[m];
+                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test("" + (mp.displayName || ""))) {
+                    try { return _extractText(mp.getValue()); } catch (e1) {}
+                }
+            }
+            if (mc.properties.numItems === 1) { try { return _extractText(mc.properties[0].getValue()); } catch (e2) {} }
+        }
+    } catch (e) {}
+    return null;
+}
+
+/*
+ * Timeline'da SEÇİLİ altyazı (MOGRT) kliplerini verilen stille (renkle) değiştirir.
+ * Aynı zaman + aynı metin korunur; klip silinip yeni stil aynı yere konur.
+ * Yanlış renk/konuşmacı atanan altyazıları yerleştirdikten SONRA düzeltmek için.
+ */
+function recolorSelected(mogrtPath) {
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Renk Değiştir"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var mf = new File(mogrtPath);
+        if (!mf.exists) return "err:Stil dosyası yok: " + mogrtPath;
+        var TICKS = 254016000000;
+        // Seçili MOGRT kliplerinin bilgisini ÖNCE topla (silince koleksiyon kayar).
+        var jobs = [];
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
+            var tr = seq.videoTracks[v];
+            for (var i = 0; i < tr.clips.numItems; i++) {
+                var cl = tr.clips[i];
+                var sel = false; try { sel = cl.isSelected(); } catch (es) {}
+                if (!sel) continue;
+                var mc = null; try { mc = cl.getMGTComponent(); } catch (em) {}
+                if (!mc) continue; // MOGRT değil (video/ses vb.) -> dokunma
+                var txt = _getMGTText(cl);
+                jobs.push({ ti: cl, startTicks: "" + cl.start.ticks, endSec: parseFloat(cl.end.ticks) / TICKS, text: (txt != null ? txt : ""), vIdx: v });
+            }
+        }
+        if (!jobs.length) return "err:Timeline'da altyazı klibi seçili değil (klibe tıkla, sonra bas)";
+        var done = 0, failed = 0, firstErr = "";
+        for (var j = 0; j < jobs.length; j++) {
+            var job = jobs[j];
+            try { job.ti.remove(false, false); } catch (er) {}
+            var ni = null;
+            try { ni = seq.importMGT(mogrtPath, job.startTicks, job.vIdx, -1); }
+            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
+            if (!ni) ni = _findClipNear(seq.videoTracks[job.vIdx], parseFloat(job.startTicks) / TICKS, TICKS);
+            if (!ni) { failed++; continue; }
+            if (job.text) _setTextAllWays(ni, job.text);
+            _setEndSec(ni, job.endSec, TICKS);
+            done++;
+        }
+        return "ok:" + done + " altyazının rengi değişti" + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
+}
+
 /*
  * Her altyazı satırını MOGRT stiliyle timeline'a koyar (importMGT ile).
  * İlk klipte MOGRT'nin tüm iç yapısını dosyaya döker (teşhis).

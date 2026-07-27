@@ -182,8 +182,17 @@
               <input id="chapInterval" type="number" min="10" value="60" title="Bölüm aralığı (sn)" style="width:52px">
             </div>
           </div>
-          <p class="note" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce).</p>
+          <p class="note" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce). Renk yanlışsa noktaya tıkla.</p>
           <div class="transcript" id="transcript"></div>
+        </div>
+
+        <div class="card" id="recolorCard">
+          <div class="card-title">Timeline'da renk değiştir</div>
+          <p class="note">Yerleştirdikten sonra bir altyazının rengi yanlışsa: timeline'da o klip(ler)i seç, aşağıdan doğru rengi/stili seç, "Değiştir"e bas. (Metin ve konum korunur.)</p>
+          <div class="row-speaker" style="gap:10px;align-items:center">
+            <div class="select sm" style="flex:1"><select id="selRecolor"></select></div>
+            <button class="btn-ghost" id="btnRecolor">Değiştir</button>
+          </div>
         </div>
       </div>
 

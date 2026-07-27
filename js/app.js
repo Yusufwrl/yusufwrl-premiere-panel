@@ -376,6 +376,19 @@
     }
     finally { state.running = false; btn.disabled = false; $("btnCancel").hidden = true; }
   });
+  // Timeline'da SEÇİLİ altyazıların rengini/stilini değiştir (yerleştirmeden sonra düzeltme)
+  (function () {
+    var b = $("btnRecolor"); if (!b) return;
+    b.addEventListener("click", async function () {
+      var mg = $("selRecolor") && $("selRecolor").value;
+      if (!mg) { uiAlert("Önce bir renk/stil seç.", "Renk değiştir"); return; }
+      if (b.disabled) return; b.disabled = true;
+      $("progressBox").hidden = false; $("progressLabel").style.color = ""; $("progressLabel").textContent = "Renk değiştiriliyor…";
+      try { showResult(await evalES('recolorSelected("' + esPath(mg) + '")')); }
+      catch (e) { showResult("err:" + (e.message || e)); }
+      finally { b.disabled = false; }
+    });
+  })();
   $("btnAddTimeline").addEventListener("click", async function () {
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de timeline'a eklenir."); return; }
     var btn = this; if (btn.disabled) return; btn.disabled = true;   // çift-tık koruması (mükerrer yerleştirmeyi önler)
@@ -579,6 +592,7 @@
     loadStyles();
     fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
     fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
+    fillStyleOptions($("selRecolor"), false); preselect($("selRecolor"), "tofi");
     if (state.styles.length) logLine(state.styles.length + " stil: " + state.styles.map(function (s) { return s.name; }).join(", "));
     // Oto-güncelleme (arka planda, sessiz — internet yoksa/başarısızsa paneli etkilemez)
     try {
