@@ -552,7 +552,7 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
     try {
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
-        yOffsetPx = parseFloat(yOffsetPx) || 130;
+        yOffsetPx = parseFloat(yOffsetPx); if (isNaN(yOffsetPx)) yOffsetPx = 130; // 0 = kayma yok (|| 130 hatasi duzeltildi)
         var raw = _readFileUTF8(cuesFilePath);
         var lines = raw.split(/\r?\n/);
         var cues = [], maxLane = 0;
