@@ -400,10 +400,13 @@
         if (best) { best._ovMogrt = mg; matched.push(best); }
       }
       if (!matched.length) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
-      // SADECE seçili bölgeyi yeniden yerleştir (hız) — tüm altyazıları değil.
-      var spanStart = matched[0].start, spanEnd = matched[0].end;
-      for (var mI = 1; mI < matched.length; mI++) { if (matched[mI].start < spanStart) spanStart = matched[mI].start; if (matched[mI].end > spanEnd) spanEnd = matched[mI].end; }
-      var range = { start: spanStart - 0.05, end: spanEnd + 0.05 };
+      // GÜVENLİK: importMGT yeni klibi varsayılan süresiyle koyup ileri taşarak komşu klipleri
+      // EZER. Bu yüzden seçili en erken noktadan SONUNA KADAR temizleyip yeniden yerleştiririz →
+      // import taşması hep temizlenmiş/boş alana düşer, komşu SİLİNMEZ. (Seçtiğin klip sona ne
+      // kadar yakınsa o kadar az klip yenilenir = o kadar hızlı.)
+      var spanStart = matched[0].start;
+      for (var mI = 1; mI < matched.length; mI++) { if (matched[mI].start < spanStart) spanStart = matched[mI].start; }
+      var range = { start: spanStart - 0.05, end: Infinity };
       b.disabled = true;
       logLine(matched.length + " altyazının rengi değiştiriliyor…");
       try { if (state.mode === "speaker") await placeSpeaker(range); else await placeSingle(range); }
