@@ -1503,7 +1503,10 @@
         q.konacakYol = q.dosya.yol;
         q.konacakBas = q.offset;
         if (q.offset < -0.01) {
-          var kirp = path.join(cfg.workDir, "snkkirp_" + k + "_" + Date.now() + path.extname(q.dosya.yol));
+          /* Uzantı ".wav" OLMAK ZORUNDA: trimWav çıktıyı pcm_s16le olarak yazıyor ve ffmpeg
+             biçimi uzantıdan seçiyor. ".m4a" verilirse mp4 muxer'a PCM yazmaya çalışıp
+             "Conversion failed" ile çöküyor (ölçüldü). */
+          var kirp = path.join(cfg.workDir, "snkkirp_" + k + "_" + Date.now() + ".wav");
           await pipeline.trimWav(q.dosya.yol, kirp, -q.offset, Infinity, cfg.ffmpegExe);
           q.konacakYol = kirp; q.konacakBas = 0;
           snk.temizlik.push(kirp);
