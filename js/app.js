@@ -281,7 +281,7 @@
     if (state.genMode === "channels") {
       var cc = { "__A1__": "#e5544b" };
       var hepsi = state.a1Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: "__A1__", _ref: c }; });
-      state.channels.forEach(function (ch, i) {
+      aktifKanallar().forEach(function (ch, i) {
         var id = "__CH" + ch.idx + "__"; cc[id] = speakerColor(i);
         ch.cues.forEach(function (c) { hepsi.push({ start: c.start, end: c.end, text: c.text, speaker: id, _ref: c }); });
       });
@@ -623,6 +623,8 @@
     renderChannelMap(d.tracks || [], d.videoTracks || 0);
     logLine("Kanallar: " + (d.tracks || []).map(function (t) { return "A" + (t.idx + 1) + "(" + t.clips + ")"; }).join(" ") +
             " · " + (d.videoTracks || 0) + " video kanalı");
+    var secili = aktifKanallar();
+    if (secili.length) logLine("Yazıya dökülecek: " + secili.map(kanalAdi).join(", "));
   }
   // list = [{idx, clips, style?, cues?}] — taramadan ya da kaydedilmiş oturumdan gelir
   function renderChannelMap(list, videoTracks) {
@@ -646,21 +648,45 @@
     }
     dolu.forEach(function (t, i) {
       var row = document.createElement("div"); row.className = "sp-row";
+      var onceki = eski[t.idx];
+
+      /* İŞLENSİN Mİ? — OBS kaydı zaten A1/A2/A3'ü kullanıyor olabilir (mikrofon, karışık Discord,
+         oyun sesi); Craig dosyaları bunların üstüne gelir. İşaretsiz kanal yazıya DÖKÜLMEZ:
+         oyun sesini Whisper'a vermek hem dakikalar kaybettiriyor hem saçma altyazı üretiyor.
+         Seçim kanal numarasına göre hatırlanır — bir kere ayarla, sonraki videolarda hazır gelsin. */
+      var chk = document.createElement("input");
+      chk.type = "checkbox"; chk.className = "kanal-chk"; chk.title = "Bu kanalı yazıya dök";
+      chk.checked = (t.aktif != null) ? !!t.aktif : (lsGet("kanalAktif." + t.idx, "1") === "1");
+      (function (ix, c, r) {
+        function yansit() { if (c.checked) r.classList.remove("kanal-pasif"); else r.classList.add("kanal-pasif"); }
+        c.addEventListener("change", function () { lsSet("kanalAktif." + ix, c.checked ? "1" : "0"); yansit(); });
+        yansit();
+      })(t.idx, chk, row);
+      row.appendChild(chk);
+
       var dot = document.createElement("div"); dot.className = "sp-dot"; dot.style.background = speakerColor(i); row.appendChild(dot);
+
       var info = document.createElement("div"); info.className = "sp-info";
-      var nm = document.createElement("div"); nm.className = "sp-name"; nm.textContent = "A" + (t.idx + 1) + " kanalı";
-      var sm = document.createElement("div"); sm.className = "sp-sample"; sm.textContent = t.clips + " klip";
-      info.appendChild(nm); info.appendChild(sm); row.appendChild(info);
+      // Kanala isim ver ("Dora") — hangi rengin kim olduğu karışmasın, isim de hatırlanır
+      var adInp = document.createElement("input");
+      adInp.type = "text"; adInp.className = "kanal-ad"; adInp.spellcheck = false;
+      adInp.placeholder = "A" + (t.idx + 1) + " — isim yaz";
+      adInp.value = t.ad || lsGet("kanalAd." + t.idx, "");
+      (function (ix, el) { el.addEventListener("change", function () { lsSet("kanalAd." + ix, el.value.trim()); }); })(t.idx, adInp);
+      var sm = document.createElement("div"); sm.className = "sp-sample";
+      sm.textContent = "A" + (t.idx + 1) + " · " + t.clips + " klip" +
+        (onceki && onceki.cues.length ? (" · " + onceki.cues.length + " altyazı hazır") : "");
+      info.appendChild(adInp); info.appendChild(sm); row.appendChild(info);
+
       var wrap = document.createElement("div"); wrap.className = "select sm";
       var sel = document.createElement("select"); fillStyleOptions(sel, false);
       if (sel.options.length) sel.selectedIndex = Math.min(i + 1, sel.options.length - 1);   // farklı renk öner
-      var onceki = eski[t.idx];
       var secilecek = t.style || (onceki && onceki.style) || "";
       if (secilecek) { for (var q = 0; q < sel.options.length; q++) if (sel.options[q].value === secilecek) { sel.value = secilecek; break; } }
       wrap.appendChild(sel); row.appendChild(wrap);
-      if (onceki && onceki.cues.length) { sm.textContent = t.clips + " klip · " + onceki.cues.length + " altyazı hazır"; }
       box.appendChild(row);
-      state.channels.push({ idx: t.idx, clips: t.clips, styleSel: sel, cues: t.cues || (onceki ? onceki.cues : []) });
+      state.channels.push({ idx: t.idx, clips: t.clips, styleSel: sel, aktifChk: chk, adInput: adInp,
+                            cues: t.cues || (onceki ? onceki.cues : []) });
     });
     /* Video kanalı bütçesi: en alt kanal senin görüntün, üstündeki bir kanal A1 altyazısı,
        bir kanal da arkadaşlar için gerekli → en az 3. Üst üste konuşma varsa her ek katman
@@ -675,15 +701,29 @@
       } else uyari.hidden = true;
     }
   }
+  // Kanalin gorunen adi: kullanici isim yazdiysa o, yoksa "A4"
+  function kanalAdi(ch) {
+    var ad = (ch && ch.adInput) ? String(ch.adInput.value).trim() : "";
+    return ad || ("A" + ((ch ? ch.idx : 0) + 1));
+  }
+  // Yazıya dökülecek kanallar (işareti kaldırılanlar atlanır)
+  function aktifKanallar() {
+    return state.channels.filter(function (c) { return !c.aktifChk || c.aktifChk.checked; });
+  }
+
   async function runChannels() {
     state.genMode = "channels";
     state.singleCues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
     if (!state.channels.length) throw new Error("Önce “Kanalları Tara” butonuna bas ve kanallara stil ata.");
+    var islenecek = aktifKanallar();
+    if (!islenecek.length) throw new Error("Hiç kanal seçilmedi. Arkadaşların bulunduğu kanalları işaretle.");
     // Önceki üretimin cue'larını temizle — döngü ortasında hata olursa yeni A1 ile eski
     // kanal altyazıları karışık kalıyordu.
     state.channels.forEach(function (c) { c.cues = []; });
+    var atlanan = state.channels.length - islenecek.length;
+    if (atlanan) logLine(atlanan + " kanal işaretsiz, atlanıyor (oyun sesi/karışık kanal).");
     pipeline.ensureDir(cfg.workDir);
-    var pay = 85 / (1 + state.channels.length);
+    var pay = 85 / (1 + islenecek.length);
 
     setProgress(8, "A1 (sen) okunuyor…");
     var a1 = await getClips(0);
@@ -695,10 +735,10 @@
     cleanupFiles(prep1.cleanup);
     logLine("A1: " + state.a1Cues.length + " satır");
 
-    for (var i = 0; i < state.channels.length; i++) {
-      var ch = state.channels[i];
+    for (var i = 0; i < islenecek.length; i++) {
+      var ch = islenecek[i];
       var lo = 10 + pay * (i + 1), hi = 10 + pay * (i + 2);
-      setProgress(lo, "A" + (ch.idx + 1) + " yazıya dökülüyor…");
+      setProgress(lo, kanalAdi(ch) + " yazıya dökülüyor…");
       var data = await getClips(ch.idx);
       var prep = await prepAudio(data.clips, ch.idx, "ch" + ch.idx);
       _pg.transT0 = Date.now(); _pg.totalSec = prep.dur || 0;
@@ -706,12 +746,17 @@
         (function (a, b) { return function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, a, b); }; })(lo, hi),
         trOpts()), prep.offset);
       cleanupFiles(prep.cleanup);
-      logLine("A" + (ch.idx + 1) + ": " + ch.cues.length + " satır");
+      logLine(kanalAdi(ch) + ": " + ch.cues.length + " satır");
+      // Konuşma çıkmayan kanal muhtemelen oyun sesi/müzik — kullanıcı işareti kaldırsın
+      if (!ch.cues.length) {
+        logLine("UYARI: " + kanalAdi(ch) + " kanalında konuşma bulunamadı. Oyun sesi/müzik kanalıysa " +
+                "işaretini kaldır — bir sonraki üretim daha hızlı biter.");
+      }
     }
     redrawTranscript();
     var toplam = state.a1Cues.length;
-    state.channels.forEach(function (c) { toplam += c.cues.length; });
-    progressDone("Bitti — " + (1 + state.channels.length) + " kanal, " + toplam + " satır");
+    islenecek.forEach(function (c) { toplam += c.cues.length; });
+    progressDone("Bitti — " + (1 + islenecek.length) + " kanal, " + toplam + " satır");
     await saveSessionAuto();
   }
 
@@ -745,7 +790,9 @@
           return { id: s.id, sample: s.sample, start: s.start, style: s.styleSel ? s.styleSel.value : "" };
         }),
         channels: state.channels.map(function (c) {
-          return { idx: c.idx, clips: c.clips, style: c.styleSel ? c.styleSel.value : "", cues: c.cues };
+          return { idx: c.idx, clips: c.clips, style: c.styleSel ? c.styleSel.value : "",
+                   ad: c.adInput ? c.adInput.value : "", aktif: c.aktifChk ? c.aktifChk.checked : true,
+                   cues: c.cues };
         })
       };
       fs.writeFileSync(sessionPath(_oturum.name), JSON.stringify(veri), "utf8");
@@ -892,7 +939,7 @@
     function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
 
     var arkadas = [];
-    state.channels.forEach(function (ch) {
+    aktifKanallar().forEach(function (ch) {
       var st = ch.styleSel ? ch.styleSel.value : "";
       ch.cues.forEach(function (c) {
         var mg = c._ovMogrt || st;
@@ -976,7 +1023,7 @@
   function allCues() {
     if (state.genMode === "channels") {
       var out = state.a1Cues.slice();
-      state.channels.forEach(function (ch) { out = out.concat(ch.cues); });
+      aktifKanallar().forEach(function (ch) { out = out.concat(ch.cues); });
       return out;
     }
     if (state.genMode === "speaker") return state.a1Cues.concat(state.a2Cues);
