@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}
@@ -41,7 +41,8 @@ Name: "{code:GetEngineDir}"
 
 [Files]
 ; --- Panel dosyalari -> CEP extensions klasoru ({app}) ---
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt"; \
+; Kullaniciya ozel dosyalar haric (kurulum/guncelleme kullanicininkini ezmesin)
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
 ;     (Motoru ayri dagitacaksan bu satiri sil ve arkadasin motoru elle koysun.)

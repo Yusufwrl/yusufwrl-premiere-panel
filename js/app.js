@@ -8,7 +8,8 @@
   var fileCounter = 0;
 
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
-    singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "" };
+    singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "",
+    dict: [], dictMap: null };   // karakter isimleri sözlüğü (Tofi/Moni/…) + arama tablosu
 
   function $(id) { return document.getElementById(id); }
   // Ayar kalıcılığı (localStorage) — panel her açılışta son ayarları hatırlar.
@@ -222,6 +223,84 @@
     });
     $("result").hidden = false;
   }
+  // Transkript kutusunu mevcut üretim moduna göre yeniden çizer
+  // (sözlük sonradan uygulandığında da kullanılır).
+  function redrawTranscript() {
+    if (state.genMode === "speaker") {
+      var color = {}; state.speakers.forEach(function (s, i) { color[s.id] = speakerColor(i); });
+      color["__A1__"] = "#e5544b";
+      var all = state.a1Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: "__A1__", _ref: c }; })
+        .concat(state.a2Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: c.speaker, _ref: c }; }));
+      all.sort(function (a, b) { return a.start - b.start; });
+      renderTranscript(all, color);
+    } else renderTranscript(state.singleCues, null);
+  }
+
+  // ---------- KARAKTER İSİMLERİ (sözlük) ----------
+  // İki yerde kullanılır: (1) motora --hotwords ipucu, (2) transkript sonrası KESİN düzeltme.
+  // Liste <uzantı kökü>\sozluk.json'da saklanır; oto-güncelleme bu dosyayı ezmez.
+  var SZ = null;                 // js/sozluk.js modülü (CEP dışında yüklenemez)
+  var _dictSonMetin = "";        // blur'da gereksiz kayıt yapmamak için
+  function dictStatus(msg, renk) {
+    var el = $("dictStatus"); if (!el) return;
+    el.textContent = msg || ""; el.style.color = renk || "var(--muted)";
+  }
+  function dictRefresh() {
+    state.dictMap = SZ ? SZ.buildMap(state.dict) : null;
+    var b = $("dictBadge"); if (b) b.textContent = state.dict.length;
+  }
+  function dictFill() {
+    var ta = $("dictText");
+    if (ta && SZ) { ta.value = SZ.toText(state.dict); _dictSonMetin = ta.value; }
+    dictRefresh();
+  }
+  /* Metin kutusunu okur, kaydeder ve MEVCUT altyazı listesine de uygular — yani yanlış bir
+     isim görünce sözlüğe ekleyip anında düzeltebilirsin, videoyu baştan işlemeye gerek yok. */
+  function dictApply(kaydet) {
+    var ta = $("dictText"); if (!ta) return;
+    if (!SZ) { dictStatus("Önizleme modunda kaydedilmez.", "var(--warn)"); return; }
+    state.dict = SZ.parseText(ta.value);
+    _dictSonMetin = ta.value;
+    dictRefresh();
+    if (kaydet) {
+      try { SZ.save(extRoot, state.dict); }
+      catch (e) { dictStatus("✕ Kaydedilemedi: " + (e.message || e), "var(--bad)"); return; }
+    }
+    var n = 0;
+    if (state.dictMap) {
+      var listeler = [state.singleCues, state.a1Cues, state.a2Cues];
+      for (var li = 0; li < listeler.length; li++) {
+        for (var ci = 0; ci < listeler[li].length; ci++) {
+          var yeni = SZ.fixText(listeler[li][ci].text, state.dictMap);
+          if (yeni !== listeler[li][ci].text) { listeler[li][ci].text = yeni; n++; }
+        }
+      }
+    }
+    if (n && !$("result").hidden) redrawTranscript();
+    dictStatus("✓ Kaydedildi — " + state.dict.length + " karakter" +
+      (n ? ", mevcut altyazıda " + n + " satır düzeltildi" : ""), "var(--good)");
+  }
+  if ($("dictSave")) $("dictSave").addEventListener("click", function () { dictApply(true); });
+  if ($("dictText")) $("dictText").addEventListener("blur", function () {
+    if (SZ && this.value !== _dictSonMetin) dictApply(true);   // "Kaydet"e basmayı unutursan kaybolmasın
+  });
+  if ($("dictReset")) $("dictReset").addEventListener("click", async function () {
+    if (!SZ) { dictStatus("Önizleme modunda kaydedilmez.", "var(--warn)"); return; }
+    if (!(await uiConfirm("Sözlük varsayılan karakterlere (Tofi, Moni, Dora, Mimi, Niko) dönecek.\nKendi eklediklerin silinir.\n\nDevam?", "Varsayılanlar"))) return;
+    state.dict = SZ.defaults(); dictFill();
+    try { SZ.save(extRoot, state.dict); dictStatus("✓ Varsayılanlar yüklendi.", "var(--good)"); }
+    catch (e) { dictStatus("✕ Kaydedilemedi: " + (e.message || e), "var(--bad)"); }
+  });
+
+  // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
+  function trOpts(extra) {
+    var o = { model: $("selModel").value, language: cfg.language, diarize: false,
+      censor: ($("chkCensor") && $("chkCensor").checked),
+      hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
+    if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) o[k] = extra[k];
+    return o;
+  }
+
   function renderSpeakerMap() {
     var box = $("speakerRows"); box.innerHTML = "";
     state.speakers.forEach(function (sp, i) {
@@ -320,8 +399,7 @@
     var prep = await prepAudio(data.clips, trackIdx, "single");
     setProgress(45, "Yazıya dökülüyor (GPU)…");
     _pg.transT0 = Date.now();
-    var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); },
-      { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) });
+    var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); }, trOpts());
     offsetCues(cues, prep.offset);
     cleanupFiles(prep.cleanup);
     state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
@@ -340,7 +418,7 @@
     setProgress(25, "A1 yazıya dökülüyor…");
     _pg.transT0 = Date.now();
     state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 25, 48); },
-      { model: $("selModel").value, language: cfg.language, diarize: false, censor: ($("chkCensor") && $("chkCensor").checked) }), prep1.offset);
+      trOpts()), prep1.offset);
     cleanupFiles(prep1.cleanup);
     logLine("A1: " + state.a1Cues.length + " satır");
 
@@ -353,19 +431,14 @@
     setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
     _pg.transT0 = Date.now();
     state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 65, 93); },
-      { model: $("selModel").value, language: cfg.language, diarize: true, censor: ($("chkCensor") && $("chkCensor").checked), numSpeakers: numSpk }), prep2.offset);
+      trOpts({ diarize: true, numSpeakers: numSpk })), prep2.offset);
     cleanupFiles(prep2.cleanup);
 
     var seen = {}, speakers = [];
     state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text, start: c.start }); } });
     state.speakers = speakers;
     renderSpeakerMap();
-
-    var color = {}; speakers.forEach(function (s, i) { color[s.id] = speakerColor(i); }); color["__A1__"] = "#e5544b";
-    var all = state.a1Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: "__A1__", _ref: c }; })
-      .concat(state.a2Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: c.speaker, _ref: c }; }));
-    all.sort(function (a, b) { return a.start - b.start; });
-    renderTranscript(all, color);
+    redrawTranscript();
     logLine("A2: " + state.a2Cues.length + " satır, " + speakers.length + " konuşmacı");
     progressDone("Bitti — " + speakers.length + " konuşmacı, " + (state.a1Cues.length + state.a2Cues.length) + " satır");
   }
@@ -747,6 +820,11 @@
     cfg = pipeline.loadConfig(extRoot);
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     $("selModel").value = cfg.model || "large-v3";
+    // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
+    SZ = pipeline.sozluk;
+    state.dict = SZ.load(extRoot);
+    dictFill();
+    if (state.dict.length) logLine("Sözlük: " + SZ.hotwords(state.dict));
     loadStyles();
     fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
     fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
@@ -765,6 +843,10 @@
   }
   function initMock() {
     setPill("pillHost", false); setPill("pillGpu", true);
+    // Önizlemede sozluk.js require edilemez — kutuyu örnekle doldur (kaydetme devre dışı)
+    var ta = $("dictText");
+    if (ta) ta.value = "Tofi: toffy, tofy, topi\nMoni: money, monny\nDora: dorra, tora\nMimi: mimmi, mimy\nNiko: nico, nikko";
+    var db = $("dictBadge"); if (db) db.textContent = "5";
     state.styles = [{ name: "Tofi Text", path: "tofi" }, { name: "Moni Text", path: "moni" },
       { name: "Kırmızı", path: "kirmizi" }, { name: "Mavi", path: "mavi" }, { name: "Sarı", path: "sari" }, { name: "Yeşil", path: "yesil" }];
     fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");

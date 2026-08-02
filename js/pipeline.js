@@ -6,6 +6,7 @@
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const sozluk = require(path.join(__dirname, "sozluk.js"));   // karakter isimleri sözlüğü
 
 // Çalışan ffmpeg/whisper süreçleri (İptal için)
 const _procs = [];
@@ -86,6 +87,37 @@ function run(exe, args, onLog, o) {
   });
 }
 
+/* Bir medya dosyasındaki SES AKIŞI sayısı. Motorla ffprobe gelmiyor; ffmpeg'in bilgi dökümü
+   (çıktısız çağrıda stderr'e yazar) ayrıştırılır. Aynı dosya onlarca klipte geçtiği için
+   sonuç önbelleklenir. Okunamazsa 1 varsayılır — en güvenli taban. */
+var _sesAkisSayisi = {};
+function _probeAudioCount(mediaPath, ffmpegExe) {
+  if (_sesAkisSayisi[mediaPath] != null) return Promise.resolve(_sesAkisSayisi[mediaPath]);
+  return new Promise(function (resolve) {
+    var buf = "", proc;
+    try { proc = spawn(ffmpegExe, ["-hide_banner", "-i", mediaPath], { windowsHide: true, cwd: path.dirname(ffmpegExe) }); }
+    catch (e) { resolve(1); return; }
+    proc.stdout.on("data", function (d) { buf += d; });
+    proc.stderr.on("data", function (d) { buf += d; });
+    proc.on("error", function () { resolve(1); });
+    proc.on("close", function () {
+      var m = buf.match(/Stream #\d+:\d+[^\n]*: Audio:/g);
+      _sesAkisSayisi[mediaPath] = (m && m.length) ? m.length : 1;
+      resolve(_sesAkisSayisi[mediaPath]);
+    });
+  });
+}
+// Benzersiz dosyaları gruplar hâlinde ölçer (çok klipli projede yüzlerce süreç açılmasın).
+async function _probeMany(yollar, ffmpegExe) {
+  const harita = {}, BATCH = 8;
+  for (let i = 0; i < yollar.length; i += BATCH) {
+    const grup = yollar.slice(i, i + BATCH);
+    const sonuc = await Promise.all(grup.map((p) => _probeAudioCount(p, ffmpegExe)));
+    for (let j = 0; j < grup.length; j++) harita[grup[j]] = sonuc[j];
+  }
+  return harita;
+}
+
 /* Tek parça (klip grubu) -> timeline'a hizalı 16kHz mono WAV. Tüm klipler ffmpeg'e argüman
    olur, o yüzden ÇAĞIRAN parça boyutunu komut satırı sınırının altında tutmalı (bkz. _chunkSize). */
 async function _renderTimelineChunk(clips, ffmpegExe, outWav, sIdx) {
@@ -94,7 +126,8 @@ async function _renderTimelineChunk(clips, ffmpegExe, outWav, sIdx) {
     const inPoint = Math.max(0, c.inPointSec || 0);
     inputArgs.push("-ss", String(inPoint), "-t", String(c.durationSec), "-i", c.mediaPath);
     const delayMs = Math.round(Math.max(0, c.timelineStartSec || 0) * 1000);
-    filters.push(`[${i}:a:${sIdx}]aresample=16000,adelay=${delayMs}|${delayMs}[a${i}]`);
+    const si = (c._sIdx != null) ? c._sIdx : sIdx;   // dosyada o akış yoksa mevcut sona düşülür
+    filters.push(`[${i}:a:${si}]aresample=16000,adelay=${delayMs}|${delayMs}[a${i}]`);
     labels.push(`[a${i}]`);
   });
   let filterComplex, mapLabel;
@@ -127,6 +160,27 @@ async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) 
   const valid = clips.filter((c) => c.mediaPath && c.durationSec > 0);
   if (valid.length === 0) throw new Error("Bu kanalda ses klibi bulunamadı.");
   if (onLog) onLog("[ffmpeg] ses hazırlanıyor (" + valid.length + " klip)...\n");
+
+  /* A1/A2/A3 track'i, medya dosyasının 1./2./3. SES AKIŞINA karşılık gelir — bu yalnızca
+     OBS çoklu-kanal kaydında (tek dosya, birden çok ses akışı) doğrudur. Tek akışlı kayıtta
+     ya da A2'ye ayrı bir dosya konduğunda 2. akış yoktur; sabit "a:1" istenirse ffmpeg
+     "matches no streams / Invalid argument" ile çöker. Bu yüzden akış sayısı ölçülür ve
+     dosyada olmayan akış hiç istenmez — o klip için mevcut son akış kullanılır. */
+  if (sIdx > 0) {
+    const gorulen = {}, tekil = [];
+    for (let vi = 0; vi < valid.length; vi++) {
+      if (!gorulen[valid[vi].mediaPath]) { gorulen[valid[vi].mediaPath] = 1; tekil.push(valid[vi].mediaPath); }
+    }
+    const sayilar = await _probeMany(tekil, ffmpegExe);
+    let dusen = 0;
+    for (let vj = 0; vj < valid.length; vj++) {
+      const n = sayilar[valid[vj].mediaPath] || 1;
+      valid[vj]._sIdx = Math.min(sIdx, n - 1);
+      if (valid[vj]._sIdx !== sIdx) dusen++;
+    }
+    if (dusen && onLog) onLog("[ffmpeg] " + dusen + " klipte " + (sIdx + 1) +
+      ". ses akışı yok (tek kanallı kayıt) — o kliplerin mevcut sesi kullanıldı.\n");
+  }
 
   const chunkN = _chunkSize(valid);
   if (valid.length <= chunkN) {
@@ -399,8 +453,10 @@ function cuesToChapters(cues, opts) {
 }
 
 /*
- * Ses -> cue nesneleri. opts = { model, language, diarize, maxWords }
+ * Ses -> cue nesneleri. opts = { model, language, diarize, maxWords, hotwords, dictMap }
  * diarize true ise cue'lar .speaker (SPEAKER_00...) taşır.
+ * hotwords: motora verilecek özel isim ipucu ("Tofi, Moni, ...").
+ * dictMap:  sozluk.buildMap() tablosu — transkript sonrası isim düzeltmesi için.
  */
 async function transcribe(cfg, wavPath, onLog, opts) {
   opts = opts || {};
@@ -431,6 +487,14 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   } else args.push("--output_format", "json");
   args.push("--output_dir", outDir);
 
+  // İpucusuz kopya — motor --hotwords'ü tanımazsa (eski sürüm) buna geri dönülür.
+  const argsNoHot = args.slice();
+  // Karakter/özel isim ipucu: modele "bu isimler geçecek" der, doğru yazma olasılığı artar.
+  // Motorun --reprompt varsayılanı True olduğu için ipucu TÜM video boyunca taşınır.
+  // --initial_prompt'a DOKUNULMAZ: onun 'auto' preset'i Türkçe noktalama/büyük harf kalitesini taşır.
+  const hot = String(opts.hotwords || "").trim();
+  if (hot) args.push("--hotwords", hot);
+
   const engDir = path.dirname(cfg.engineExe);
   const xxl = path.join(engDir, "_xxl_data");
   const pathDirs = [engDir, xxl, path.join(xxl, "ctranslate2"), path.join(xxl, "torch", "lib")];
@@ -439,15 +503,28 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   const srtPath = path.join(outDir, base + ".srt");
 
   if (onLog) onLog("[whisper] " + (opts.diarize ? "konuşmacı ayırma + " : "") + "yazıya dökülüyor (GPU)...\n");
+  const runOpts = { cwd: engDir, pathDirs: pathDirs, logFile: logFile };
   try {
-    await run(cfg.engineExe, args, onLog, { cwd: engDir, pathDirs: pathDirs, logFile: logFile });
+    await run(cfg.engineExe, args, onLog, runOpts);
   } catch (e) {
+    // Motor --hotwords'ü tanımadıysa hiç çıktı üretmeden çöker; ipucusuz bir kez daha dene.
+    if (!fs.existsSync(jsonPath) && hot) {
+      if (onLog) onLog("[whisper] isim ipucu desteklenmedi, ipucusuz tekrar deneniyor...\n");
+      try { await run(cfg.engineExe, argsNoHot, onLog, runOpts); } catch (e2) {}
+    }
     if (!fs.existsSync(jsonPath)) throw e;
     if (onLog) onLog("[whisper] çıkışta uyardı ama transkript hazır.\n");
   }
   if (!fs.existsSync(jsonPath)) throw new Error("JSON üretilemedi: " + jsonPath);
   const data = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
   const words = flattenWords(data);
+  // Karakter isimlerini düzelt (Toffy'ye -> Tofi'ye). Model ipucuna uymamış olsa bile
+  // burası deterministik: sözlükteki yanlış yazımlar doğrusuyla değiştirilir.
+  // Konuşmacı atamasından ÖNCE: bölünmüş isimler burada birleşebiliyor.
+  if (opts.dictMap) {
+    var nFix = sozluk.fixWords(words, opts.dictMap);
+    if (nFix && onLog) onLog("[sözlük] " + nFix + " isim düzeltildi.\n");
+  }
   if (opts.diarize) {
     if (fs.existsSync(srtPath)) {
       assignSpeakers(words, parseSpeakerIntervals(fs.readFileSync(srtPath, "utf8")));
@@ -548,5 +625,5 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav,
   buildCues, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
-  fmtChapter, cuesToTxt, cuesToChapters, censorText,
+  fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk,
 };

@@ -130,6 +130,33 @@
           </div>
         </div>
 
+        <details class="card dict-card" id="dictCard">
+          <summary class="dict-summary">
+            <span class="card-title" style="margin:0">Karakter İsimleri</span>
+            <span class="dict-badge" id="dictBadge">0</span>
+            <span class="dict-chev">▾</span>
+          </summary>
+          <div class="dict-body">
+            <p class="note" style="margin-top:0">
+              Yapay zekâ karakter isimlerini yanlış yazıyor (Tofi → “Toffy”, Moni → “Money”…).
+              Doğru yazımı ve modelin yaptığı yanlışları buraya yaz: hem motora önceden ipucu verilir,
+              hem de altyazı çıktıktan sonra <b style="color:var(--text)">kesin olarak</b> düzeltilir. Ekler korunur (“Toffy’ye” → “Tofi’ye”).
+            </p>
+            <textarea id="dictText" class="dict-text" rows="6" spellcheck="false"
+              placeholder="Tofi: toffy, tofy&#10;Moni: money, monny"></textarea>
+            <p class="note" style="margin-top:7px">
+              Her satıra bir karakter — <b style="color:var(--text)">DoğruYazım: yanlış1, yanlış2</b>.
+              İki kelimeye bölünen isimler için boşluklu yaz (<b style="color:var(--text)">to fi</b>).
+              Gerçek Türkçe kelimelere benzeyen yanlış yazım ekleme (ör. “mini”) — masum kelimeler bozulur.
+            </p>
+            <div class="dict-actions">
+              <button class="btn-ghost" id="dictSave" type="button">Kaydet</button>
+              <button class="btn-ghost" id="dictReset" type="button">Varsayılanlar</button>
+              <span class="dict-status" id="dictStatus"></span>
+            </div>
+          </div>
+        </details>
+
         <div class="field">
           <label>Süre aralığı <small style="color:var(--faint)">(opsiyonel — boş = tüm video)</small></label>
           <div style="display:flex;align-items:center;gap:8px">

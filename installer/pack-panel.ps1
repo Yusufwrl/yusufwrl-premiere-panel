@@ -19,7 +19,8 @@ $root = Split-Path -Parent $PSScriptRoot
 
 # Panele giren dosya/klasorler (gelistirme ve makineye-ozel olanlar disarida)
 $include = @("index.html", "config.json", "update.json", "version.json", ".debug", "js", "jsx", "css", "CSXS")
-$exclude = @("engine-root.txt", "diarize-device.txt")
+# Kullaniciya ozel dosyalar pakete GIRMEZ (kurulumda/guncellemede kullanicininki ezilmesin)
+$exclude = @("engine-root.txt", "diarize-device.txt", "sozluk.json")
 
 function Copy-Panel($dest) {
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }

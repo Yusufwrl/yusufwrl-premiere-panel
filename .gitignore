@@ -6,6 +6,8 @@ installer/YusufwrlKur.exe
 
 # Makineye ozel
 engine-root.txt
+diarize-device.txt
+sozluk.json
 
 # Motor ASLA repoya girmez (~3 GB)
 engine/
