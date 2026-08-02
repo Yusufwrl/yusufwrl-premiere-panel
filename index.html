@@ -62,6 +62,17 @@
             </div>
             <div class="tc-arrow">›</div>
           </button>
+
+          <button class="tool-card" data-view="senkron">
+            <div class="tc-icon grad-c">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h4l3-3v16l-3-3H4zM16 8a5 5 0 0 1 0 8M19 5a9 9 0 0 1 0 14"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Senkron</div>
+              <div class="tc-desc">Craig kayıtlarını otomatik hizala, kanallara yerleştir, renklendir</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
         </div>
         <div class="home-foot">Yeni araçlar zamanla eklenecek.</div>
       </div>
@@ -282,6 +293,71 @@
           </button>
           <p class="note" id="acCutNote" style="margin-top:12px;">Kesim geri alınabilir (Ctrl+Z). Önce bir yedek almak istersen projeyi kaydet.</p>
         </div>
+      </div>
+
+      <!-- ================= SENKRON ================= -->
+      <div class="view" id="viewSenkron" hidden>
+
+        <div class="card">
+          <div class="card-title">1 · Craig Klasörü</div>
+          <button class="btn-ghost" id="snkKlasor" type="button">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Klasör Seç
+          </button>
+          <p class="note" id="snkKlasorYol">Craig'den indirdiğin <b style="color:var(--text)">Çoklu Parça</b> ZIP'ini çıkardığın klasörü seç.</p>
+        </div>
+
+        <div class="card" id="snkCekenCard" hidden>
+          <div class="card-title">2 · Videoyu kim çekiyor?</div>
+          <div class="seg" id="snkCeken">
+            <button class="seg-btn active" data-ceken="Tofi" type="button">Tofi</button>
+            <button class="seg-btn" data-ceken="Moni" type="button">Moni</button>
+          </div>
+          <p class="note">Çeken kişi A1'de kalır (OBS mikrofonun). Karşı taraf A2'ye yerleşir, diğerleri A4'ten devam eder.</p>
+        </div>
+
+        <div class="card" id="snkPlanCard" hidden>
+          <div class="card-title">3 · Yerleşim <small style="color:var(--faint);text-transform:none;letter-spacing:0">— uygulamadan önce kontrol et</small></div>
+          <div id="snkPlanRows"></div>
+          <p class="note" id="snkUyari" hidden></p>
+        </div>
+
+        <button class="btn-primary btn-lg" id="snkUygula" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>Uygula</span>
+        </button>
+
+        <div class="progress-box" id="snkProgress" hidden>
+          <div class="progress-head">
+            <span class="spinner" id="snkSpinner"></span>
+            <span class="prog-badge" id="snkBadge" hidden></span>
+            <span id="snkLabel">Hazırlanıyor…</span>
+            <span class="progress-pct" id="snkPct"></span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="snkFill"></div></div>
+          <div class="progress-actions">
+            <button class="log-toggle" id="snkLogToggle">Ayrıntılar ▾</button>
+            <button class="cancel-btn" id="snkCancel" hidden>✕ İptal</button>
+          </div>
+          <pre class="log" id="snkLog" hidden></pre>
+        </div>
+
+        <details class="card dict-card" id="snkKisiCard">
+          <summary class="dict-summary">
+            <span class="card-title" style="margin:0">Kişiler</span>
+            <span class="dict-badge" id="snkKisiBadge">0</span>
+            <span class="dict-chev">▾</span>
+          </summary>
+          <div class="dict-body">
+            <textarea id="snkKisiText" class="dict-text" rows="7" spellcheck="false"
+              placeholder="Tofi: yusufwrl [Rose]&#10;Moni: e, 31241324asdwq12123 [Blue]"></textarea>
+            <div class="dict-actions">
+              <button class="btn-ghost" id="snkKisiSave" type="button">Kaydet</button>
+              <button class="btn-ghost" id="snkKisiReset" type="button">Varsayılanlar</button>
+              <span class="dict-status" id="snkKisiStatus"></span>
+            </div>
+          </div>
+        </details>
       </div>
 
     </main>

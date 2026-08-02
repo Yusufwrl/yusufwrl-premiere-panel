@@ -9,6 +9,7 @@ engine-root.txt
 diarize-device.txt
 sozluk.json
 assemblyai-key.txt
+kisiler.json
 
 # Motor ASLA repoya girmez (~3 GB)
 engine/

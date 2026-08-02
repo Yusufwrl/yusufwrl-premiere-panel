@@ -42,7 +42,7 @@ Name: "{code:GetEngineDir}"
 [Files]
 ; --- Panel dosyalari -> CEP extensions klasoru ({app}) ---
 ; Kullaniciya ozel dosyalar haric (kurulum/guncelleme kullanicininkini ezmesin)
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json"; \
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
 ;     (Motoru ayri dagitacaksan bu satiri sil ve arkadasin motoru elle koysun.)

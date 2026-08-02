@@ -73,6 +73,140 @@ function getAudioTracksJSON() {
     return '{"videoTracks":' + vt + ',"tracks":[' + out.join(",") + ']}';
 }
 
+/* ================= SENKRON KARTI (Craig kayıtlarını yerleştirme) ================= */
+
+// Sekansın ses/video kanal sayısı ve içerik süresi — panel kanal bütçesini buna göre denetler.
+function getSequenceInfoJSON() {
+    var seq = app.project.activeSequence;
+    if (!seq) return '{"error":"no_sequence"}';
+    var av = 0, vv = 0, sure = 0;
+    try { av = seq.audioTracks.numTracks; } catch (e1) {}
+    try { vv = seq.videoTracks.numTracks; } catch (e2) {}
+    try { sure = _seqDuration(seq); } catch (e3) {}
+    var dolu = [];
+    for (var i = 0; i < av; i++) {
+        var n = 0;
+        try { n = seq.audioTracks[i].clips.numItems; } catch (e4) {}
+        dolu.push(n);
+    }
+    return '{"sequenceName":"' + _jsonEsc(seq.name) + '","audioTracks":' + av +
+           ',"videoTracks":' + vv + ',"durationSec":' + sure.toFixed(3) +
+           ',"clipCounts":[' + dolu.join(",") + ']}';
+}
+
+// Bir ses kanalındaki TÜM klipleri siler (A2'yi boşaltmak için).
+// ripple=false ŞART: true olsaydı sonraki klipler sola kayar ve tüm senkron bozulurdu.
+function clearAudioTrack(trackIdx) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var ix = parseInt(trackIdx, 10);
+        if (isNaN(ix) || ix < 0 || ix >= seq.audioTracks.numTracks) return "err:A" + (ix + 1) + " kanalı yok";
+        var tr = seq.audioTracks[ix], silinen = 0;
+        for (var i = tr.clips.numItems - 1; i >= 0; i--) {
+            try { tr.clips[i].remove(false, false); silinen++; } catch (e1) {}
+        }
+        return "ok:" + silinen + " klip silindi (A" + (ix + 1) + ")";
+    } catch (e) { return "err:" + e.toString(); }
+}
+
+/*
+ * Craig dosyalarını projeye alır, doğru ses kanalına doğru saniyeye yerleştirir ve
+ * proje panelinde karakterin rengini verir.
+ *
+ * Plan dosyası (UTF-8), her satır:  medyaYolu|sesKanalIndeksi|baslangicSaniye|renkIndeksi|ad
+ *
+ * DİKKAT — bu fonksiyonun kritik incelikleri:
+ *  - Zaman SANİYE (Number) olarak verilir. ticks string verilirse klip 0'a düşer.
+ *  - overwriteClip kullanılır, insertClip DEĞİL: insert sonraki klipleri sağa iter (senkron bozulur).
+ *  - Yerleştirmeden sonra kanalın klip sayısı KONTROL EDİLİR. Kanal tipi uyumsuzsa (saf Mono
+ *    kanala stereo klip) Premiere sessizce hiçbir şey yapmıyor; bunu yakalamazsak kullanıcı
+ *    "oldu" sanır.
+ *  - İçe alınan ses dosyaları Premiere'de otomatik olarak varsayılan bir renk etiketi alır,
+ *    bu yüzden setColorLabel her dosya için AÇIKÇA çağrılır.
+ */
+function senkronUygula(planDosyaPath) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var raw = _readFileUTF8(planDosyaPath);
+        var lines = raw.split(/\r?\n/);
+        var isler = [], yollar = [], i;
+        for (i = 0; i < lines.length; i++) {
+            var ln = lines[i]; if (!ln) continue;
+            var p = ln.split("|"); if (p.length < 5) continue;
+            var is = { yol: p[0], kanal: parseInt(p[1], 10), bas: parseFloat(p[2]),
+                       renk: parseInt(p[3], 10), ad: p.slice(4).join("|") };
+            if (isNaN(is.kanal) || isNaN(is.bas)) continue;
+            if (is.bas < 0) is.bas = 0;
+            isler.push(is); yollar.push(is.yol);
+        }
+        if (!isler.length) return "err:Plan boş";
+
+        // 1) Dosyaları kendi bin'ine al
+        var root = app.project.rootItem, bin = null;
+        try { bin = root.createBin("Craig Sesleri"); } catch (eb) { bin = null; }
+        if (!bin) bin = root;
+        try { app.project.importFiles(yollar, true, bin, false); }
+        catch (ei) { return "err:Dosyalar projeye alınamadı: " + ei.toString(); }
+
+        // 2) İçe alınan öğeleri medya yoluna göre eşle
+        function _norm(s) { return String(s).replace(/\\/g, "/").toLowerCase(); }
+        function _bul(yol) {
+            var hedef = _norm(yol);
+            for (var k = 0; k < bin.children.numItems; k++) {
+                var ch = bin.children[k], mp = "";
+                try { mp = ch.getMediaPath(); } catch (e) { mp = ""; }
+                if (mp && _norm(mp) === hedef) return ch;
+            }
+            // yol eşleşmezse dosya adına düş
+            var ad = _basename(yol).replace(/\.[^.]+$/, "").toLowerCase();
+            for (var m = 0; m < bin.children.numItems; m++) {
+                var c2 = bin.children[m], nm = "";
+                try { nm = String(c2.name).replace(/\.[^.]+$/, "").toLowerCase(); } catch (e2) {}
+                if (nm === ad) return c2;
+            }
+            return null;
+        }
+
+        var konan = 0, hata = 0, ilkHata = "";
+        for (i = 0; i < isler.length; i++) {
+            var it = isler[i];
+            var pi = _bul(it.yol);
+            if (!pi) { hata++; if (!ilkHata) ilkHata = it.ad + ": projede bulunamadı"; continue; }
+
+            // renk etiketi (yerleştirmeden ÖNCE — timeline klibi de renkli doğsun)
+            if (!isNaN(it.renk) && it.renk >= 0 && it.renk <= 15) {
+                try { pi.setColorLabel(it.renk); } catch (ec) {}
+            }
+
+            if (it.kanal < 0 || it.kanal >= seq.audioTracks.numTracks) {
+                hata++; if (!ilkHata) ilkHata = it.ad + ": A" + (it.kanal + 1) + " kanalı yok";
+                continue;
+            }
+            var once = 0;
+            try { once = seq.audioTracks[it.kanal].clips.numItems; } catch (e3) {}
+
+            var oldu = false;
+            // önce sekans seviyesi (hedef ses kanalını açıkça söyler), sonra kanal seviyesi
+            try { oldu = seq.overwriteClip(pi, it.bas, 0, it.kanal); } catch (e4) { oldu = false; }
+            if (!oldu) { try { oldu = seq.audioTracks[it.kanal].overwriteClip(pi, it.bas); } catch (e5) {} }
+
+            var sonra = 0;
+            try { sonra = seq.audioTracks[it.kanal].clips.numItems; } catch (e6) {}
+            if (sonra > once) konan++;
+            else {
+                hata++;
+                if (!ilkHata) ilkHata = it.ad + ": A" + (it.kanal + 1) + " kanalına yerleşmedi " +
+                    "(kanal tipi uyumsuz olabilir — Mono kanala stereo klip konamaz)";
+            }
+        }
+        return "ok:" + konan + " ses yerleştirildi" + (hata ? (", " + hata + " hata | " + ilkHata) : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    }
+}
+
 function _basename(p) { return String(p).replace(/^.*[\\\/]/, ""); }
 
 // Playhead'i (CTI) verilen saniyeye taşır — konuşmacının ilk göründüğü ana atlamak için.

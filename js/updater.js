@@ -140,7 +140,7 @@ async function checkForUpdate(extRoot, ui) {
     await unzip(tmp, stage);
     // kullanıcıya/makineye özel dosyalar — ASLA ezme
     // (motor kökü, diarization cihazı, karakter isimleri sözlüğü)
-    copyDir(stage, extRoot, ["engine-root.txt", "diarize-device.txt", "sozluk.json"]);
+    copyDir(stage, extRoot, ["engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json"]);
     fs.writeFileSync(path.join(extRoot, "version.json"), JSON.stringify({ version: clean }, null, 2));
     if (ui.setStatus) ui.setStatus("");
     if (ui.alert) await ui.alert("Panel v" + clean + " kuruldu.\nPremiere'i kapatıp yeniden aç.", "Güncelleme tamam");

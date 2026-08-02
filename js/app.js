@@ -10,7 +10,8 @@
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
     singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "",
     dict: [], dictMap: null,     // karakter isimleri sözlüğü (Tofi/Moni/…) + arama tablosu
-    channels: [] };              // "ayrı kanal" modu: her ses kanalı bir kişi
+    channels: [],                // "ayrı kanal" modu: her ses kanalı bir kişi
+    kisiler: [] };               // Discord adı -> karakter + renk (Senkron kartı)
 
   function $(id) { return document.getElementById(id); }
   // Turkce kucuk harf: duz toLowerCase "I"->"i" verir; Turkcede I->i, İ->i olmali.
@@ -189,7 +190,8 @@
   function goView(name) {
     var all = document.querySelectorAll(".view");
     for (var i = 0; i < all.length; i++) { all[i].classList.remove("active"); all[i].setAttribute("hidden", ""); }
-    var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut" : "viewHome";
+    var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
+           : name === "senkron" ? "viewSenkron" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
@@ -1167,6 +1169,422 @@
   $("btnCancel").addEventListener("click", cancelOp);
   $("acCancel").addEventListener("click", cancelOp);
 
+
+  /* ================= SENKRON KARTI =================
+     Craig bot ile alınan kişi başı ses dosyalarını otomatik hizalayıp doğru kanala koyar.
+
+     AKIŞ: klasör seç -> dosya adlarından Discord adını çıkar -> kişilerle eşle ->
+           çeken kişiyi seç -> her dosyayı OBS kaydıyla hizala -> yerleşim tablosunu göster ->
+           kullanıcı onaylayınca Premiere'e uygula (import + kanal + renk etiketi).
+
+     KANAL KURALI: A1 = çeken (OBS mikrofonu, dokunulmaz), A2 = karşı taraf (Tofi<->Moni),
+                   A3 = oyun sesi (dokunulmaz), A4+ = diğer arkadaşlar.
+
+     REFERANS SEÇİMİ: arkadaşlar A2 (OBS'in Discord'dan aldığı karışık kanal) ile hizalanır —
+     ikisi de aynı Discord ses zincirinden geçtiği için sistematik sapma olmaz. Çeken kişinin
+     kendi sesi A2'de YOKTUR, o yüzden onun dosyası A1 ile hizalanır. */
+  var KISI = null;                 // js/kisiler.js modülü
+  var HIZ = null;                  // js/hizala.js modülü
+  var snk = { klasor: "", dosyalar: [], plan: [], calisiyor: false, iptal: false, temizlik: [], cekenDosya: null, sesKanalSayisi: 0 };
+  var _snkMax = 0;
+
+  function snkLog(msg) { var el = $("snkLog"); if (!el) return; var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
+  function snkProgress(pct, label) {
+    var box = $("snkProgress"); if (!box) return;
+    box.hidden = false; box.classList.remove("done", "error");
+    $("snkSpinner").hidden = false; var bd = $("snkBadge"); if (bd) bd.hidden = true;
+    $("snkLabel").style.color = ""; if (label != null) $("snkLabel").textContent = label;
+    if (pct >= 0) { if (pct < _snkMax) pct = _snkMax; else _snkMax = pct; $("snkFill").style.width = pct + "%"; $("snkPct").textContent = Math.round(pct) + "%"; }
+  }
+  function snkDone(label) {
+    var box = $("snkProgress"); box.hidden = false; box.classList.add("done"); box.classList.remove("error");
+    $("snkSpinner").hidden = true; var bd = $("snkBadge"); if (bd) { bd.hidden = false; bd.textContent = "✓"; bd.className = "prog-badge ok"; }
+    _snkMax = 100; $("snkFill").style.width = "100%"; $("snkPct").textContent = "100%";
+    $("snkLabel").style.color = "var(--good)"; $("snkLabel").textContent = label || "Bitti";
+  }
+  function snkFail(label, kind) {
+    var box = $("snkProgress"); box.hidden = false; box.classList.add("error"); box.classList.remove("done");
+    $("snkSpinner").hidden = true; var bd = $("snkBadge"); if (bd) { bd.hidden = false; bd.textContent = "✕"; bd.className = "prog-badge bad"; }
+    $("snkLabel").style.color = (kind === "warn") ? "var(--warn)" : "var(--bad)"; $("snkLabel").textContent = label || "Hata";
+  }
+
+  // ---------- kişiler tablosu ----------
+  function snkKisiDoldur() {
+    var ta = $("snkKisiText");
+    if (ta && KISI) ta.value = KISI.toText(state.kisiler);
+    var b = $("snkKisiBadge"); if (b) b.textContent = (state.kisiler || []).length;
+  }
+  function snkKisiKaydet() {
+    if (!KISI) return;
+    var ta = $("snkKisiText"); if (!ta) return;
+    state.kisiler = KISI.parseText(ta.value);
+    try { KISI.save(extRoot, state.kisiler); } catch (e) {
+      $("snkKisiStatus").textContent = "✕ " + (e.message || e); $("snkKisiStatus").style.color = "var(--bad)"; return;
+    }
+    snkKisiDoldur();
+    $("snkKisiStatus").textContent = "✓ Kaydedildi — " + state.kisiler.length + " kişi";
+    $("snkKisiStatus").style.color = "var(--good)";
+    if (snk.dosyalar.length) snkEslestir();     // açık liste varsa yeniden eşle
+  }
+
+  // ---------- 1) klasör seç ----------
+  var SES_UZANTI = /\.(m4a|aac|mp3|flac|wav|ogg|opus|wma)$/i;
+  function snkKlasorSec() {
+    if (!CEP) { uiAlert("Önizleme modu — Premiere'de klasör seçilir."); return; }
+    var yol = "";
+    try {
+      if (window.cep && window.cep.fs && window.cep.fs.showOpenDialogEx) {
+        var r = window.cep.fs.showOpenDialogEx(false, true, "Craig klasörünü seç", snk.klasor || "");
+        if (r && r.data && r.data.length) yol = r.data[0];
+      }
+    } catch (e) {}
+    if (!yol) return;
+    snk.klasor = yol;
+    $("snkKlasorYol").innerHTML = "";
+    $("snkKlasorYol").appendChild(document.createTextNode(yol));
+    snkDosyalariOku();
+  }
+  function snkDosyalariOku() {
+    var hepsi = [];
+    try { hepsi = fs.readdirSync(snk.klasor); } catch (e) { uiAlert("Klasör okunamadı: " + (e.message || e), "Senkron"); return; }
+    snk.dosyalar = [];
+    for (var i = 0; i < hepsi.length; i++) {
+      if (!SES_UZANTI.test(hepsi[i])) continue;
+      snk.dosyalar.push({ dosya: hepsi[i], yol: path.join(snk.klasor, hepsi[i]), ad: KISI.adCikar(hepsi[i]) });
+    }
+    if (!snk.dosyalar.length) {
+      uiAlert("Bu klasörde ses dosyası yok. Craig'den “Çoklu Parça” indirdiğinden ve ZIP'i çıkardığından emin ol.", "Senkron");
+      return;
+    }
+    snkLog(snk.dosyalar.length + " ses dosyası bulundu.");
+    $("snkCekenCard").hidden = false;
+    snkEslestir();
+  }
+
+  // ---------- 2) kişileri eşle + plan kur ----------
+  function snkCekenKim() {
+    var b = document.querySelector("#snkCeken .seg-btn.active");
+    return b ? b.dataset.ceken : "Tofi";
+  }
+  function snkEslestir() {
+    if (!snk.dosyalar.length) return;
+    var ceken = snkCekenKim();
+    var karsi = (ceken === "Tofi") ? "Moni" : "Tofi";
+    var eslesen = [], bilinmeyen = [];
+    snk.dosyalar.forEach(function (d) {
+      var k = KISI.bul(state.kisiler, d.ad);
+      if (k) eslesen.push({ dosya: d, kisi: k });
+      else bilinmeyen.push(d);
+    });
+
+    /* Kanal ataması: çeken A1'de zaten var (OBS), Craig'deki kendi dosyası SADECE hizalama
+       referansı olarak kullanılır, timeline'a konmaz. Karşı taraf A2'ye, A3 oyun sesi olduğu
+       için atlanır, kalanlar A4'ten itibaren sıralanır. */
+    var plan = [], sonrakiKanal = 3;   // 0-tabanlı: 3 = A4
+    plan.push({ kanal: 0, karakter: ceken, kilit: true, not: "OBS mikrofonun — dokunulmaz" });
+    var karsiKayit = null;
+    eslesen.forEach(function (e) { if (e.kisi.karakter === karsi) karsiKayit = e; });
+    if (karsiKayit) plan.push({ kanal: 1, karakter: karsi, dosya: karsiKayit.dosya, renk: karsiKayit.kisi.renk });
+    else plan.push({ kanal: 1, karakter: karsi, bos: true, not: "bu kişinin kaydı klasörde yok" });
+    plan.push({ kanal: 2, karakter: "Oyun sesi", kilit: true, not: "dokunulmaz" });
+
+    eslesen.forEach(function (e) {
+      if (e.kisi.karakter === ceken || e.kisi.karakter === karsi) return;   // A1/A2 zaten ayrıldı
+      plan.push({ kanal: sonrakiKanal++, karakter: e.kisi.karakter, dosya: e.dosya, renk: e.kisi.renk });
+    });
+    bilinmeyen.forEach(function (d) {
+      plan.push({ kanal: sonrakiKanal++, karakter: "?", dosya: d, bilinmeyen: true, renk: 0 });
+    });
+    // çekenin kendi Craig dosyası — hizalama referansı (timeline'a konmaz)
+    snk.cekenDosya = null;
+    eslesen.forEach(function (e) { if (e.kisi.karakter === ceken) snk.cekenDosya = e.dosya; });
+
+    snk.plan = plan;
+    snkPlanCiz();
+    $("snkPlanCard").hidden = false;
+    $("snkUygula").hidden = false;
+  }
+
+  // ---------- 3) yerleşim tablosu ----------
+  function snkPlanCiz() {
+    var box = $("snkPlanRows"); if (!box) return;
+    box.innerHTML = "";
+    snk.plan.forEach(function (p) {
+      var row = document.createElement("div");
+      row.className = "snk-row" + (p.kilit ? " kilit" : "") + ((p.bos || p.bilinmeyen || p.aykiri) ? " sorunlu" : "");
+      var kn = document.createElement("div"); kn.className = "snk-kanal"; kn.textContent = "A" + (p.kanal + 1);
+      row.appendChild(kn);
+
+      var orta = document.createElement("div"); orta.className = "snk-orta";
+      var isim = document.createElement("div"); isim.className = "snk-kisi";
+      if (!p.kilit && p.renk != null) {
+        var sw = document.createElement("span"); sw.className = "snk-etiket";
+        sw.style.background = _labelRenk(p.renk); sw.title = KISI.LABELLER[p.renk] || "";
+        isim.appendChild(sw);
+      }
+      isim.appendChild(document.createTextNode(p.bilinmeyen ? "Bilinmeyen kişi" : p.karakter));
+      orta.appendChild(isim);
+      var alt = document.createElement("div"); alt.className = "snk-dosya";
+      alt.textContent = p.dosya ? p.dosya.dosya : (p.not || "");
+      orta.appendChild(alt);
+      row.appendChild(orta);
+
+      var sag = document.createElement("div"); sag.className = "snk-kayma";
+      if (p.bilinmeyen) {
+        // kullanıcı elle karakter seçebilsin
+        var wrap = document.createElement("div"); wrap.className = "select sm";
+        var sel = document.createElement("select");
+        var o0 = document.createElement("option"); o0.value = ""; o0.textContent = "kişi seç…"; sel.appendChild(o0);
+        (state.kisiler || []).forEach(function (k) {
+          var op = document.createElement("option"); op.value = k.karakter; op.textContent = k.karakter; sel.appendChild(op);
+        });
+        (function (satir, s) {
+          s.addEventListener("change", function () {
+            if (!s.value) return;
+            var k = KISI.karakterBul(state.kisiler, s.value);
+            if (!k) return;
+            // seçilen kişiyi kalıcı yap: dosyadaki adı o kişinin adlarına ekle
+            if (satir.dosya && satir.dosya.ad) {
+              var varMi = false;
+              for (var q = 0; q < k.adlar.length; q++) if (k.adlar[q] === satir.dosya.ad) varMi = true;
+              if (!varMi) { k.adlar.push(satir.dosya.ad); try { KISI.save(extRoot, state.kisiler); } catch (e) {} snkKisiDoldur(); }
+            }
+            snkEslestir();
+          });
+        })(p, sel);
+        wrap.appendChild(sel); sag.appendChild(wrap);
+      } else if (p.offset != null) {
+        sag.innerHTML = "";
+        sag.appendChild(document.createTextNode((p.offset >= 0 ? "+" : "") + p.offset.toFixed(2) + " sn"));
+        var s2 = document.createElement("small");
+        s2.textContent = p.aykiri ? "diğerlerinden farklı!" : ("güven: " + (p.guven || "?"));
+        if (p.aykiri) s2.style.color = "var(--bad)";
+        sag.appendChild(s2);
+      } else if (p.kilit) {
+        sag.innerHTML = ""; var s3 = document.createElement("small"); s3.textContent = "kilitli"; sag.appendChild(s3);
+      }
+      row.appendChild(sag);
+      box.appendChild(row);
+    });
+
+    // kanal bütçesi uyarısı
+    var gereken = 0;
+    snk.plan.forEach(function (p) { if (p.kanal + 1 > gereken) gereken = p.kanal + 1; });
+    var u = $("snkUyari");
+    if (u) {
+      if (snk.sesKanalSayisi && gereken > snk.sesKanalSayisi) {
+        u.hidden = false; u.style.color = "var(--warn)";
+        u.textContent = "⚠ Sekansta " + snk.sesKanalSayisi + " ses kanalı var, " + gereken + " gerekiyor. " +
+          "Premiere'de " + (gereken - snk.sesKanalSayisi) + " ses kanalı ekle (panel ekleyemiyor), sonra tekrar dene.";
+      } else u.hidden = true;
+    }
+  }
+  // Premiere label indeksi -> yaklaşık ekran rengi (sadece tabloda göstermek için)
+  function _labelRenk(i) {
+    var r = ["#a78bfa", "#818cf8", "#22d3ee", "#c4b5fd", "#38bdf8", "#22c55e", "#fb7185", "#fbbf24",
+             "#a855f7", "#3b82f6", "#14b8a6", "#e879f9", "#d6bcab", "#4ade80", "#a16207", "#facc15"];
+    return r[i] || "#888";
+  }
+
+  // ---------- 4) hizalama + uygulama ----------
+  // Timeline'daki bir ses kanalını hizalama referansı olarak WAV'a döker
+  async function snkRefWav(trackIdx, ad) {
+    var d = await getClips(trackIdx);
+    var w = path.join(cfg.workDir, ad + "_" + Date.now() + ".wav");
+    await pipeline.buildTimelineAudio(d.clips, cfg.ffmpegExe, w, null, trackIdx);
+    snk.temizlik.push(w);
+    return w;
+  }
+
+  async function snkCalistir() {
+    if (snk.calisiyor) return;
+    if (!CEP) { uiAlert("Önizleme modu — Premiere'de çalışır."); return; }
+    var yerlesecek = [];
+    snk.plan.forEach(function (p) { if (p.dosya && !p.kilit) yerlesecek.push(p); });
+    if (!yerlesecek.length) { uiAlert("Yerleştirilecek ses dosyası yok.", "Senkron"); return; }
+
+    var bilinmeyen = 0;
+    yerlesecek.forEach(function (p) { if (p.bilinmeyen) bilinmeyen++; });
+    if (bilinmeyen) {
+      var devam = await uiConfirm(bilinmeyen + " dosyanın kime ait olduğu bilinmiyor; bunlar isimsiz " +
+        "yerleştirilecek ve renk almayacak.\n\nYine de devam edilsin mi? (İptal edip listeden kişi seçebilirsin.)", "Senkron");
+      if (!devam) return;
+    }
+
+    snk.calisiyor = true; snk.iptal = false; snk.temizlik = [];
+    $("snkUygula").disabled = true; $("snkCancel").hidden = false;
+    _snkMax = 0; $("snkLog").textContent = "";
+    try {
+      pipeline.ensureDir(cfg.workDir);
+
+      // --- sekans ve kanal bütçesi ---
+      snkProgress(3, "Sekans okunuyor…");
+      var bilgi;
+      try { bilgi = JSON.parse(await evalES("getSequenceInfoJSON()")); }
+      catch (e) { throw new Error("Sekans bilgisi okunamadı."); }
+      if (bilgi.error) throw new Error("Aktif sekans yok. Önce bir sekans aç.");
+      snk.sesKanalSayisi = bilgi.audioTracks;
+      var gereken = 0;
+      snk.plan.forEach(function (p) { if (p.kanal + 1 > gereken) gereken = p.kanal + 1; });
+      if (gereken > bilgi.audioTracks) {
+        throw new Error("Sekansta " + bilgi.audioTracks + " ses kanalı var ama " + gereken + " gerekiyor. " +
+          "Premiere'de " + (gereken - bilgi.audioTracks) + " ses kanalı ekleyip tekrar dene " +
+          "(panel kanal ekleyemiyor, Premiere'in API'si buna izin vermiyor).");
+      }
+
+      // --- referans sesler ---
+      snkProgress(8, "OBS sesi hazırlanıyor (A1)…");
+      var refA1 = await snkRefWav(0, "snkref1");
+      var refA2 = null;
+      try {
+        snkProgress(14, "OBS sesi hazırlanıyor (A2)…");
+        refA2 = await snkRefWav(1, "snkref2");
+      } catch (e2) { snkLog("A2 okunamadı — hizalama A1 ile yapılacak."); }
+
+      // --- hizalama ---
+      var sonuclar = [];
+      for (var i = 0; i < yerlesecek.length; i++) {
+        if (snk.iptal) throw new Error("İptal edildi");
+        var p = yerlesecek[i];
+        snkProgress(20 + 55 * i / yerlesecek.length, p.karakter + " hizalanıyor…");
+        var r = await HIZ.offsetBul(cfg.ffmpegExe, (refA2 || refA1), p.dosya.yol,
+          { maxKaymaSn: 180, workDir: cfg.workDir });
+        p.offset = r.offset; p.guven = r.guven; p.r = r.r;
+        sonuclar.push(p);
+        snkLog(p.karakter + ": " + (r.offset >= 0 ? "+" : "") + r.offset.toFixed(2) + " sn  (güven " +
+               r.guven + ", benzerlik " + r.r.toFixed(2) + ")");
+      }
+
+      /* Çekenin kendi Craig dosyası A2'de YOK (A2 = Discord'dan gelenler), o yüzden A1 ile
+         hizalanır ve yalnızca ÇAPRAZ KONTROL olarak kullanılır — timeline'a konmaz. */
+      if (snk.cekenDosya) {
+        snkProgress(78, "Kendi sesin çapraz kontrol ediliyor…");
+        try {
+          var rc = await HIZ.offsetBul(cfg.ffmpegExe, refA1, snk.cekenDosya.yol,
+            { maxKaymaSn: 180, workDir: cfg.workDir });
+          sonuclar.push({ karakter: "(kendi sesin)", offset: rc.offset, _kontrol: true });
+          snkLog("Kendi kaydın (A1 ile): " + (rc.offset >= 0 ? "+" : "") + rc.offset.toFixed(2) + " sn");
+        } catch (e3) {}
+      }
+
+      /* TUTARLILIK: Craig herkesi aynı anda kaydettiği için tüm gecikmeler birbirine yakın
+         OLMALI. Sapan dosya yanlış hizalanmıştır — korelasyon değerinden çok daha keskin bir
+         işaret (karışık kanalda doğru eşleşme bile düşük korelasyon verebiliyor). */
+      var tut = HIZ.tutarlilikKontrol(sonuclar, 0.5);
+      snkPlanCiz();
+      snkProgress(82, "Kontrol ediliyor…");
+      if (tut.aykiriSayisi) {
+        snkLog("UYARI: " + tut.aykiriSayisi + " dosyanın kayması diğerlerinden farklı (medyan " +
+               tut.medyan.toFixed(2) + " sn).");
+      }
+
+      // --- onay ---
+      var ozet = [];
+      yerlesecek.forEach(function (p) {
+        ozet.push("A" + (p.kanal + 1) + " → " + p.karakter + "   " +
+                  (p.offset >= 0 ? "+" : "") + p.offset.toFixed(2) + " sn" + (p.aykiri ? "  ⚠" : ""));
+      });
+      var msg = yerlesecek.length + " ses dosyası yerleştirilecek:\n\n" + ozet.join("\n") +
+        (tut.aykiriSayisi ? "\n\n⚠ " + tut.aykiriSayisi + " dosyanın kayması diğerlerinden farklı — " +
+          "yanlış hizalanmış olabilir. Uyguladıktan sonra o kanalları kontrol et." : "") +
+        "\n\nProje önce kaydedilecek; sorun olursa üstteki “Geri Al” ile bu ana dönebilirsin.";
+      if (!(await uiConfirm(msg, "Senkron"))) { snkFail("İptal edildi", "warn"); return; }
+
+      // --- uygula ---
+      snkProgress(86, "Proje kaydediliyor…");
+      await evalES("saveProject()");
+
+      /* NEGATİF KAYMA: Craig kaydı OBS'ten ÖNCE başlamışsa klip timeline'da 0'dan önceye
+         düşmeliydi — bu mümkün değil. Bu yüzden dosyanın başı ffmpeg ile kırpılır ve kırpılmış
+         kopya 0'a yerleştirilir; senkron korunur. */
+      snkProgress(88, "Dosyalar hazırlanıyor…");
+      for (var k = 0; k < yerlesecek.length; k++) {
+        var q = yerlesecek[k];
+        q.konacakYol = q.dosya.yol;
+        q.konacakBas = q.offset;
+        if (q.offset < -0.01) {
+          var kirp = path.join(cfg.workDir, "snkkirp_" + k + "_" + Date.now() + path.extname(q.dosya.yol));
+          await pipeline.trimWav(q.dosya.yol, kirp, -q.offset, Infinity, cfg.ffmpegExe);
+          q.konacakYol = kirp; q.konacakBas = 0;
+          snk.temizlik.push(kirp);
+          snkLog(q.karakter + ": kayıt videodan önce başlamış, başı kırpıldı (" + (-q.offset).toFixed(2) + " sn).");
+        }
+      }
+
+      snkProgress(92, "Premiere'e yerleştiriliyor…");
+      var satirlar = [];
+      yerlesecek.forEach(function (p) {
+        satirlar.push(p.konacakYol + "|" + p.kanal + "|" + Math.max(0, p.konacakBas).toFixed(3) + "|" +
+                      (p.bilinmeyen ? -1 : (p.renk != null ? p.renk : 0)) + "|" + p.karakter);
+      });
+      var planDosya = path.join(cfg.workDir, "snkplan_" + Date.now() + ".txt");
+      fs.writeFileSync(planDosya, satirlar.join("\n"), "utf8");
+      var sonuc = await evalES('senkronUygula("' + esPath(planDosya) + '")');
+      try { fs.unlinkSync(planDosya); } catch (e4) {}
+      snkLog("Sonuç: " + sonuc);
+
+      if (String(sonuc).indexOf("ok:") !== 0) {
+        snkFail("⚠ " + String(sonuc).replace(/^[a-z_]+:/, ""), "warn");
+        uiAlert(String(sonuc).replace(/^[a-z_]+:/, ""), "Senkron");
+        return;
+      }
+      snkDone("Bitti — " + String(sonuc).replace(/^ok:/, ""));
+
+      /* A2 TEMİZLİĞİ AYRI ONAY: karışık Discord kanalı artık gereksiz ama silmek geri alınamaz
+         bir işlem (Premiere'de undo grubu yok). Kullanıcı açıkça istemeden dokunulmaz. */
+      var karsiPlan = null;
+      snk.plan.forEach(function (p) { if (p.kanal === 1 && p.dosya) karsiPlan = p; });
+      if (karsiPlan) {
+        var sil = await uiConfirm("A2'de artık " + karsiPlan.karakter + "'nin temiz kaydı var.\n\n" +
+          "OBS'ten gelen ESKİ karışık Discord sesi hâlâ orada duruyor olabilir — o kanalı temizleyeyim mi?\n\n" +
+          "(Not: A2'ye yeni ses zaten yerleşti. Temizlik yaparsan A2'deki TÜM eski klipler silinir.)", "A2 temizliği");
+        if (sil) {
+          var t = await evalES("clearAudioTrack(1)");
+          snkLog("A2 temizliği: " + t);
+        }
+      }
+    } catch (e) {
+      if (snk.iptal) snkFail("İptal edildi", "warn");
+      else { snkFail("❌ " + friendlyError(e), "bad"); snkLog("HATA: " + (e.message || e)); }
+    } finally {
+      snk.calisiyor = false;
+      $("snkUygula").disabled = false;
+      $("snkCancel").hidden = true;
+      cleanupFiles(snk.temizlik || []);
+      snk.temizlik = [];
+    }
+  }
+
+  // ---------- olay bağlantıları ----------
+  if ($("snkKlasor")) $("snkKlasor").addEventListener("click", snkKlasorSec);
+  if ($("snkUygula")) $("snkUygula").addEventListener("click", snkCalistir);
+  if ($("snkCancel")) $("snkCancel").addEventListener("click", function () {
+    snk.iptal = true;
+    try { if (pipeline && pipeline.cancelAll) pipeline.cancelAll(); } catch (e) {}
+  });
+  if ($("snkLogToggle")) $("snkLogToggle").addEventListener("click", function () {
+    var l = $("snkLog"); l.hidden = !l.hidden; this.textContent = l.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴";
+  });
+  (function () {
+    var btns = document.querySelectorAll("#snkCeken .seg-btn");
+    for (var i = 0; i < btns.length; i++) btns[i].addEventListener("click", function () {
+      var a = document.querySelector("#snkCeken .seg-btn.active"); if (a) a.classList.remove("active");
+      this.classList.add("active");
+      lsSet("snkCeken", this.dataset.ceken);
+      if (snk.dosyalar.length) snkEslestir();
+    });
+  })();
+  if ($("snkKisiSave")) $("snkKisiSave").addEventListener("click", snkKisiKaydet);
+  if ($("snkKisiReset")) $("snkKisiReset").addEventListener("click", async function () {
+    if (!KISI) return;
+    if (!(await uiConfirm("Kişi listesi varsayılana dönecek. Kendi eklediklerin silinir.\n\nDevam?", "Kişiler"))) return;
+    state.kisiler = KISI.defaults();
+    try { KISI.save(extRoot, state.kisiler); } catch (e) {}
+    snkKisiDoldur();
+    $("snkKisiStatus").textContent = "✓ Varsayılanlar yüklendi.";
+    $("snkKisiStatus").style.color = "var(--good)";
+  });
+
   // ---------- AUTOCUT ----------
   var acCuts = [], acLast = null, _acMax = 0;
   function acSetProgress(pct, label) {
@@ -1336,6 +1754,16 @@
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
     state.dict = SZ.load(extRoot);
+    // Senkron kartı modülleri (Craig kayıtlarını hizalama ve yerleştirme)
+    try {
+      KISI = require(path.join(extRoot, "js", "kisiler.js"));
+      HIZ = require(path.join(extRoot, "js", "hizala.js"));
+      state.kisiler = KISI.load(extRoot);
+      snkKisiDoldur();
+      var ck = lsGet("snkCeken", "Tofi");
+      var ckBtn = document.querySelector('#snkCeken .seg-btn[data-ceken="' + ck + '"]');
+      if (ckBtn) { var akt = document.querySelector("#snkCeken .seg-btn.active"); if (akt) akt.classList.remove("active"); ckBtn.classList.add("active"); }
+    } catch (eKisi) { logLine("Senkron modülü yüklenemedi: " + (eKisi.message || eKisi)); }
     dictFill();
     if (state.dict.length) logLine("Sözlük: " + SZ.hotwords(state.dict));
     loadStyles();
