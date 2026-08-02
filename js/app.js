@@ -552,64 +552,6 @@
     await saveSessionAuto();
   }
 
-  // ---------- KONUŞMACIYA GÖRE ----------
-  async function runSpeaker() {
-    state.genMode = "speaker"; state.singleCues = [];
-    pipeline.ensureDir(cfg.workDir);
-    setProgress(8, "A1 (sen) okunuyor…");
-    var a1 = await getClips(0);
-    setProgress(15, "A1 sesi hazırlanıyor…");
-    var prep1 = await prepAudio(a1.clips, 0, "a1");
-    setProgress(25, "A1 yazıya dökülüyor…");
-    _pg.transT0 = Date.now(); _pg.totalSec = prep1.dur || 0;
-    state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 25, 48); },
-      trOpts()), prep1.offset);
-    cleanupFiles(prep1.cleanup);
-    logLine("A1: " + state.a1Cues.length + " satır");
-
-    setProgress(50, "A2 (arkadaşlar) okunuyor…");
-    var a2 = await getClips(1);
-    setProgress(55, "A2 sesi hazırlanıyor…");
-    var prep2 = await prepAudio(a2.clips, 1, "a2");
-    // "min3" = en az 3 kişi (alt sınır), "3" = tam 3 kişi, "" = otomatik
-    var spkSec = String(($("selNumSpk") && $("selNumSpk").value) || "");
-    var spkOpts = { diarize: true };
-    // Diarizasyon cihazi: GPU cok daha hizli ama bazi kartlarda (ornegin RTX 50xx) torch kerneli yok.
-    if ($("chkDiarGpu")) spkOpts.diarizeDevice = $("chkDiarGpu").checked ? "cuda" : "cpu";
-    var mm = spkSec.match(/^min(\d+)$/);
-    if (mm) { spkOpts.minSpeakers = parseInt(mm[1], 10); logLine("A2: en az " + mm[1] + " konuşmacıya ayrılacak"); }
-    else {
-      var nSpk = parseInt(spkSec, 10);
-      if (nSpk > 0) { spkOpts.numSpeakers = nSpk; logLine("A2: tam " + nSpk + " konuşmacıya ayrılacak"); }
-    }
-    setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
-    _pg.transT0 = Date.now(); _pg.totalSec = prep2.dur || 0;
-    state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 65, 93); },
-      trOpts(spkOpts)), prep2.offset);
-    cleanupFiles(prep2.cleanup);
-
-    var seen = {}, speakers = [];
-    state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text, start: c.start }); } });
-    /* Konuşmacı ayırma SESSİZ KAYIP koruması: konuşmacısı belirlenemeyen A2 satırlarına stil
-       atanamıyor, dolayısıyla timeline'a HİÇ basılmıyorlardı — panel yine "ok" diyordu.
-       Artık bu satırlar bir konuşmacıya bağlanır; kullanıcı rengi sonradan değiştirebilir. */
-    if (!speakers.length && state.a2Cues.length) {
-      speakers.push({ id: "SPEAKER_00", sample: state.a2Cues[0].text, start: state.a2Cues[0].start });
-      logLine("UYARI: konuşmacı ayırma sonuç vermedi — tüm A2 satırları tek konuşmacı sayıldı.");
-    }
-    if (speakers.length) {
-      var sahipsiz = 0;
-      state.a2Cues.forEach(function (c) { if (!c.speaker) { c.speaker = speakers[0].id; sahipsiz++; } });
-      if (sahipsiz) logLine("UYARI: " + sahipsiz + " A2 satırının konuşmacısı belirlenemedi, ilk konuşmacıya atandı.");
-    }
-    state.speakers = speakers;
-    renderSpeakerMap();
-    redrawTranscript();
-    logLine("A2: " + state.a2Cues.length + " satır, " + speakers.length + " konuşmacı");
-    progressDone("Bitti — " + speakers.length + " konuşmacı, " + (state.a1Cues.length + state.a2Cues.length) + " satır");
-    await saveSessionAuto();
-  }
-
   /* ================= AYRI KANAL MODU =================
      Arkadaşların sesleri A2/A3/A4… kanallarında AYRI AYRI duruyorsa, konuşmacıyı yapay zekâya
      tahmin ettirmeye gerek yok: her kanal ayrı yazıya dökülür ve kimin konuştuğu %100 kesindir.
@@ -818,12 +760,6 @@
     state.speakers = []; state.channels = [];
     if (state.genMode === "channels" && (o.channels || []).length) {
       renderChannelMap(o.channels, 0);   // 0 = bilinmiyor; sahte değer uyarıyı kalıcı bastırıyordu
-      var ak = $("chkAyriKanal");
-      if (ak && !ak.checked) {
-        ak.checked = true; lsSet("ayriKanal", "1");   // ayar bir sonraki açılışta da kalsın
-        if ($("kanalBox")) $("kanalBox").hidden = false;
-        if ($("diarizeBox")) $("diarizeBox").hidden = true;
-      }
     } else if (state.genMode === "speaker" && (o.speakers || []).length) {
       state.speakers = o.speakers.map(function (s) { return { id: s.id, sample: s.sample, start: s.start }; });
       renderSpeakerMap();
@@ -1040,10 +976,8 @@
     $("btnCancel").hidden = false;
     try {
       if (!CEP) await runMock();
-      else if (state.mode === "speaker") {
-        if ($("chkAyriKanal") && $("chkAyriKanal").checked) await runChannels();
-        else await runSpeaker();
-      } else await runSingle();
+      else if (state.mode === "speaker") await runChannels();
+      else await runSingle();
     }
     catch (e) {
       if (state.cancelled) progressFail("İptal edildi", "warn");
@@ -1441,32 +1375,12 @@
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
   function wirePersistence() {
-    var ids = ["acSens", "acMin", "selStyleSingle", "selStyleA1", "selNumSpk", "selIstif"];
+    var ids = ["acSens", "acMin", "selStyleSingle", "selStyleA1", "selIstif"];
     for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
     // AutoCut gürültü azaltma — varsayılan KAPALI (analizi ~5 kat yavaşlatıyor)
     var dn = $("chkDenoise");
     if (dn) { dn.checked = lsGet("denoise", "0") === "1"; dn.addEventListener("change", function () { lsSet("denoise", dn.checked ? "1" : "0"); }); }
     restoreSegs();
-    // Ayrı kanal modu toggle'ı — açıkken diarizasyon (AI tahmini) devre dışı kalır
-    var ak = $("chkAyriKanal");
-    if (ak) {
-      ak.checked = lsGet("ayriKanal", "0") === "1";
-      var uygula = function (tara) {
-        var on = ak.checked;
-        if ($("kanalBox")) $("kanalBox").hidden = !on;
-        if ($("diarizeBox")) $("diarizeBox").hidden = on;
-        var not = $("rsFriendsNote"); if (not) not.textContent = on ? "Her kanal ayrı kişi" : "AI otomatik ayıracak";
-        lsSet("ayriKanal", on ? "1" : "0");
-        if (on && tara && CEP && cfg) scanChannels();
-      };
-      ak.addEventListener("change", function () { uygula(true); });
-      var dg = $("chkDiarGpu");
-      if (dg) {
-        dg.checked = lsGet("diarGpu", (cfg && cfg.diarizeDevice === "cuda") ? "1" : "0") === "1";
-        dg.addEventListener("change", function () { lsSet("diarGpu", dg.checked ? "1" : "0"); });
-      }
-      uygula(false);   // ilk yüklemede sadece görünürlük; tarama kullanıcı isteyince
-    }
     if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
   }
 

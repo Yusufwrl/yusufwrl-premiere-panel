@@ -96,11 +96,6 @@
             <div class="rs-label"><i class="chip chip-you"></i>Sen <small>(A1)</small></div>
             <div class="select sm"><select id="selStyleA1"></select></div>
           </div>
-          <div class="row-speaker">
-            <div class="rs-label"><i class="chip chip-friends"></i>Arkadaşlar <small>(A2)</small></div>
-            <div class="rs-note" id="rsFriendsNote">AI otomatik ayıracak</div>
-          </div>
-
           <div class="field" style="margin-top:12px">
             <label>Arkadaşın altyazısı yukarı kaysın mı? <small style="color:var(--faint)">(üst üste binmesin diye)</small></label>
             <div class="select">
@@ -112,52 +107,12 @@
             </div>
           </div>
 
-          <label class="switch-row" style="margin-top:12px">
-            <span>Arkadaşlar ayrı kanallarda <small>(A2, A3, A4… her biri bir kişi)</small></span>
-            <input type="checkbox" id="chkAyriKanal">
-          </label>
-
-          <!-- AYRI KANAL MODU -->
-          <div id="kanalBox" hidden>
-            <p class="note" style="margin-top:10px">
-              Her ses kanalı ayrı yazıya dökülür — yapay zekâ <b style="color:var(--text)">tahmin etmez</b>,
-              konuşmacı ayrımı %100 doğru olur. Üst üste konuşmalar da doğru çıkar (karışık kanalda bu mümkün değil).
-              Discord kaydını Craig bot ile ya da OBS'te kişi başı ayrı kanal alarak elde edebilirsin.
-            </p>
+          <!-- Her ses kanalı bir kişi (Craig / OBS kişi başı kayıt) -->
+          <div id="kanalBox">
             <div id="kanalRows"></div>
             <button class="btn-ghost" id="btnKanalTara" type="button" style="margin-top:10px">Kanalları Tara</button>
             <p class="note" id="kanalUyari" hidden></p>
           </div>
-
-          <!-- KARIŞIK KANAL (AI ile ayırma) -->
-          <div id="diarizeBox">
-          <p class="note">A1 hep sen; A2'deki arkadaşları yapay zeka ayırır, üretimden sonra her birine renk atarsın.</p>
-          <div class="field" style="margin-top:12px">
-            <label>A2'de kaç kişi konuşuyor? <small style="color:var(--faint)">(emin değilsen “En az”)</small></label>
-            <div class="select">
-              <select id="selNumSpk">
-                <option value="">Otomatik</option>
-                <option value="min2">En az 2 kişi</option>
-                <option value="min3">En az 3 kişi</option>
-                <option value="min4">En az 4 kişi</option>
-                <option value="min5">En az 5 kişi</option>
-                <option value="2">Tam 2 kişi</option>
-                <option value="3">Tam 3 kişi</option>
-                <option value="4">Tam 4 kişi</option>
-                <option value="5">Tam 5 kişi</option>
-                <option value="6">Tam 6 kişi</option>
-                <option value="7">Tam 7 kişi</option>
-                <option value="8">Tam 8 kişi</option>
-                <option value="9">Tam 9 kişi</option>
-                <option value="10">Tam 10 kişi</option>
-              </select>
-            </div>
-          </div>
-          <label class="switch-row" style="margin-top:12px">
-            <span>Konuşmacı ayırmayı GPU'da çalıştır <small>(çok daha hızlı; bazı kartlarda çalışmaz)</small></span>
-            <input type="checkbox" id="chkDiarGpu">
-          </label>
-          </div><!-- /diarizeBox -->
         </div>
 
         <details class="card dict-card" id="dictCard">

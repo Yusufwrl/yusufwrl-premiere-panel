@@ -8,9 +8,15 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 
 ## Üretim modları (js/app.js)
 - **Tek Stil** (`runSingle`) — tek kanal ya da **Mix** (A1+A2 birleşik).
-- **Konuşmacıya Göre** (`runSpeaker`) — A2 karışık kanal, pyannote ile AI konuşmacı ayırma.
-- **Ayrı Kanal** (`runChannels`) — A2/A3/A4… her kanal bir kişi. Diarizasyon YOK, ayrım %100 doğru,
-  üst üste konuşmalar da çıkar. Çakışan konuşmalara greedy katman atanır (her katman bir video kanalı tüketir).
+- **Konuşmacıya Göre** (`runChannels`) — A2/A3/A4… **her kanal bir kişi** (Craig bot ya da OBS ile kişi başı kayıt).
+  Ayrım %100 doğru, üst üste konuşmalar da çıkar. Kanal satırlarında işaret kutusu (oyun sesi/karışık kanal atlanır)
+  ve isim alanı var; ikisi de kanal numarasına göre localStorage'da hatırlanır.
+  Çakışan konuşmalara greedy katman atanır — katman sayısı sekansın video kanalıyla sınırlanır
+  (aşarsa host `lane`'i 0'a kelepçeleyip o kanaldaki klipleri siliyor).
+- **Diarizasyon (AI konuşmacı tahmini) panelden KALDIRILDI.** Ölçüldü: tek kişilik kayıtta pyannote_v3.1
+  4 konuşmacı, reverb_v2 3 konuşmacı, ücretli AssemblyAI 4 konuşmacı buldu (doğrusu 1). Sorun modelde değil,
+  karışık kanalda konuşmacıyı tahmin etmenin doğasında. `pipeline.transcribe`'ın `diarize` desteği kodda
+  duruyor (eski oturumların geri yüklenmesi ve olası ihtiyaç için), UI'dan erişilmiyor.
 - Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
 - Host katmanı: `jsx/host.jsx` — **ExtendScript (ES3)**: `let`/`const`/arrow/optional-chaining **YOK**. Premiere'i bu dosya sürer.
 - Manifest: `CSXS/manifest.xml` — BundleId `com.yusufwrl.premierepanel`, PPRO 14+, CSXS 9.
