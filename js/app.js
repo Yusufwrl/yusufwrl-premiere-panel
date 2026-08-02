@@ -854,25 +854,8 @@
     state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
     function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
 
-    /* İSTİFLEME HYSTERESIS — kayma kararı tek altyazı yerine KONUŞMA SERİSİ başına verilir.
-       Eskiden her A2 satırı için ayrı bakılıyordu: bir satır A1 ile çakışıyor diye yukarı,
-       sonraki çakışmıyor diye aşağı… Gerçek kayıtta ~3 dakikada 38 kez zıplama ölçüldü.
-       Artık aralarında SERI_GAP'ten az boşluk olan ardışık A2 satırları tek seri sayılır ve
-       seride BİR satır bile A1 ile çakışıyorsa TÜM seri yukarıda kalır. */
-    var SERI_GAP = 1.2;
-    var a2sirali = state.a2Cues.slice().sort(function (x, y) { return x.start - y.start; });
-    for (var si = 0; si < a2sirali.length; ) {
-      var sj = si, seriCakisiyor = false;
-      while (sj < a2sirali.length) {
-        if (sj > si && (a2sirali[sj].start - a2sirali[sj - 1].end) > SERI_GAP) break;
-        if (overlapsA1(a2sirali[sj].start, a2sirali[sj].end)) seriCakisiyor = true;
-        sj++;
-      }
-      for (var sk2 = si; sk2 < sj; sk2++) a2sirali[sk2]._shift = seriCakisiyor ? _gap : 0;
-      si = sj;
-    }
-
-    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1), seri kararına göre kayar.
+    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1), istifleme moduna göre kayar.
+    var kayma = stackShifter(overlapsA1, _gap);
     var combined = [];
     state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 }); });
     // İkinci koruma katmanı: stili bulunamayan A2 satırı sessizce DÜŞMESİN — ilk atanmış stile düşer.
@@ -883,7 +866,7 @@
     state.a2Cues.forEach(function (c) {
       var mg = c._ovMogrt || spStyle[c.speaker];
       if (!mg && yedekSp) { mg = yedekSp; yedekli++; }
-      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: (c._shift || 0) });
+      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: kayma(c.start, c.end) });
     });
     if (yedekli) logLine("UYARI: " + yedekli + " A2 satırına stil atanmamıştı, yedek stille eklendi.");
     if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
@@ -945,19 +928,7 @@
         maxKat = izin;
       }
     }
-    // A1 ile çakışma kararı SERİ başına (tek tek verilirse altyazı sürekli zıplıyor)
-    var SERI_GAP = 1.2;
-    for (var i = 0; i < arkadas.length; ) {
-      var j = i, cak = false;
-      while (j < arkadas.length) {
-        if (j > i && (arkadas[j].start - arkadas[j - 1].end) > SERI_GAP) break;
-        if (overlapsA1(arkadas[j].start, arkadas[j].end)) cak = true;
-        j++;
-      }
-      for (var k = i; k < j; k++) arkadas[k]._a1cak = cak;
-      i = j;
-    }
-
+    var kayma = stackShifter(overlapsA1, _gap);
     var combined = [];
     state.a1Cues.forEach(function (c) {
       var mg = c._ovMogrt || a1Style;
@@ -965,7 +936,7 @@
     });
     arkadas.forEach(function (it) {
       combined.push({ start: it.start, end: it.end, mogrt: it.mogrt, text: it.text,
-        lane: 1 + it.kat, shift: (it._a1cak ? _gap : 0) + it.kat * _gap });
+        lane: 1 + it.kat, shift: kayma(it.start, it.end) + it.kat * _gap });
     });
     if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
     if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
@@ -978,6 +949,21 @@
     fs.writeFileSync(file, body, "utf8");
     logLine(combined.length + " altyazı · " + (arkadas.length ? (2 + maxKat) : 1) + " katman (üst üste konuşma: " + (maxKat ? "var" : "yok") + ")");
     return await evalES('addLanedSubtitles("' + esPath(file) + '")');
+  }
+
+  /* İSTİFLEME — arkadaşın altyazısı ne zaman yukarı kaysın?
+     Bir denemede kayma kararı "konuşma serisi" başına verilmişti (zıplamayı azaltmak için);
+     ama seride TEK bir çakışma tüm seriyi yukarıda tutuyordu ve sen konuşmadığın hâlde altyazı
+     gereksiz yere yukarıda kalıyordu. Ölçüm: 0.6 sn'lik yayılma bile 600 satırda 104 gereksiz
+     kayma üretiyor. Bu yüzden varsayılan davranış GERÇEK çakışma — yayılma yok.
+       "overlap" : sadece ikiniz aynı anda konuşurken kayar (varsayılan)
+       "off"     : hiç kaymaz (çakışırsa üst üste binebilir)
+       "always"  : arkadaşlar hep yukarıda (tutarlı konum, hiç zıplama yok) */
+  function stackShifter(overlapFn, gap) {
+    var mod = String(($("selIstif") && $("selIstif").value) || "overlap");
+    if (mod === "off") return function () { return 0; };
+    if (mod === "always") return function () { return gap; };
+    return function (s, e) { return overlapFn(s, e) ? gap : 0; };
   }
 
   // Aktif üretim moduna göre doğru yerleştiriciyi seçer
@@ -1252,7 +1238,8 @@
       for (var wi = 0; wi < wavs.length; wi++) { try { fs.unlinkSync(wavs[wi]); } catch (e) {} }
       acLogLine("Timeline sesi hazır (" + wavs.length + " kanal).");
       acSetProgress(45, "Boşluklar taranıyor…");
-      var opts = { sensitivity: parseFloat($("acSens").value), minSilence: parseFloat($("acMin").value) };
+      var opts = { sensitivity: parseFloat($("acSens").value), minSilence: parseFloat($("acMin").value),
+                   denoise: !!($("chkDenoise") && $("chkDenoise").checked) };
       var res = await pipeline.analyzeSilence(cfg, voice, function (l) { var s = String(l).trim(); if (s) acLogLine(s); }, opts);
       try { fs.unlinkSync(voice); } catch (e) {}
       acCuts = res.cuts; acLast = res;
@@ -1260,7 +1247,14 @@
       // küçük toplamlarda 0 sn görünmesin: 1 sn altında ondalık göster
       $("acSaved").textContent = (res.totalCut >= 1 ? Math.round(res.totalCut) : res.totalCut.toFixed(1)) + " sn";
       $("acResult").hidden = false;
-      acDone("Bitti — " + res.count + " boşluk bulundu (eşik " + res.threshold + "dB)");
+      /* Kesim maliyeti boşluk SAYISIYLA büyüyor. Çok yüksek sayıda kullanıcıyı önceden uyar —
+         daha önce 1137 boşlukluk bir kesim hiç bitmeden iptal edilmişti. */
+      if (res.count > 500) {
+        acLogLine("UYARI: " + res.count + " boşluk çok fazla; kesim uzun sürer. " +
+                  "“En kısa boşluk” değerini büyütürsen çok daha hızlı biter ve neredeyse aynı süreyi kazanırsın.");
+      }
+      acDone("Bitti — " + res.count + " boşluk bulundu (eşik " + res.threshold + "dB)" +
+             (res.merged ? (", " + res.merged + " yakın boşluk birleşti") : ""));
     } catch (e) {
       if (state.cancelled) acFail("İptal edildi", "warn");
       else { acFail("❌ " + friendlyError(e), "bad"); acLogLine("HATA: " + (e.message || e)); }
@@ -1274,7 +1268,12 @@
     if (!acCuts.length) { uiAlert("Önce Analiz Et."); return; }
     var _sec = acLast ? acLast.totalCut : 0;
     var _secTxt = _sec >= 1 ? Math.round(_sec) + " sn" : _sec.toFixed(1) + " sn";
-    if (!(await uiConfirm(acCuts.length + " boşluk kesilecek (~" + _secTxt + " kısalır).\n\nSekans dışı / kayıt boşluğu olanlar otomatik atlanır. Kesimden ÖNCE kaydet; geri almak için Ctrl+Z (birden çok kez gerekebilir).", "Boşlukları Kes"))) return;
+    var _uyari = (acCuts.length > 500)
+      ? ("\n\n⚠ " + acCuts.length + " kesim çok fazla — bu işlem uzun sürebilir. İptal edip “En kısa boşluk” " +
+         "değerini büyütmen (ör. 0.3 sn) neredeyse aynı süreyi kazandırır ama çok daha hızlı biter.")
+      : "";
+    if (!(await uiConfirm(acCuts.length + " boşluk kesilecek (~" + _secTxt + " kısalır)." + _uyari +
+        "\n\nSekans dışı / kayıt boşluğu olanlar otomatik atlanır. Kesimden ÖNCE kaydet; geri almak için Ctrl+Z (birden çok kez gerekebilir).", "Boşlukları Kes"))) return;
     btn.disabled = true;   // çift-tık koruması: kesim sürerken tekrar tetiklenmesin
     try {
       _acMax = 0; $("acLabel").style.color = "";
@@ -1393,8 +1392,11 @@
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
   function wirePersistence() {
-    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk", "selCensor"];
+    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk", "selCensor", "selIstif"];
     for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
+    // AutoCut gürültü azaltma — varsayılan KAPALI (analizi ~5 kat yavaşlatıyor)
+    var dn = $("chkDenoise");
+    if (dn) { dn.checked = lsGet("denoise", "0") === "1"; dn.addEventListener("change", function () { lsSet("denoise", dn.checked ? "1" : "0"); }); }
     // Sansür eskiden açık/kapalı bir kutuydu; kayıtlı eski değeri yeni üç seviyeye taşı
     if ($("selCensor") && lsGet("selCensor", null) == null) $("selCensor").value = (lsGet("censor", "1") === "1") ? "all" : "off";
     restoreSegs();

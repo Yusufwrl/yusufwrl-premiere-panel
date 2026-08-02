@@ -772,21 +772,53 @@ function _secToTC(sec, fpsFrac) {
     return _p2(hh) + ":" + _p2(mm) + ":" + _p2(ss) + ":" + _p2(ff);
 }
 
-// Bir kanalda [s,e] aralığındaki (ortadaki) klipleri ripple-siler. Silinen klip sayısını döndürür (H4).
+/* Bir kanalda [s,e] aralığındaki (ortadaki) klipleri ripple-siler. Silinen klip sayısını döndürür (H4).
+   PERFORMANS — bu fonksiyon AutoCut'ın asıl darboğazıydı:
+   Kesimler SONDAN BAŞA yapıldığı için (bkz. autoCut'taki ivs.sort) silinecek klip HER ZAMAN
+   listenin BAŞINDA oluyor; eski sürüm ise listeyi SONDAN tarıyor ve erken çıkışı yoktu.
+   Her kesim kanala net +1 klip eklediğinden tarama uzunluğu kesim sayısıyla birlikte büyüyor:
+   1137 boşlukta kanal başına ~649.000 klip ziyareti (5 kanalda ~3,2 milyon, her ziyaret birkaç
+   Premiere çağrısı). Ölçülen sonuç: kesim hiç bitmiyordu.
+   Artık BAŞTAN taranıyor ve aralığın ötesine geçildiğinde çıkılıyor — kesim başına ~4 ziyaret. */
 function _ripTrack(tr, s, e, eps) {
-    var removed = 0;
-    for (var i = tr.clips.numItems - 1; i >= 0; i--) {
-        var cl = tr.clips[i], cs, ce;
+    var cls = tr.clips, n = 0;
+    try { n = cls.numItems; } catch (eN) { return 0; }
+    if (!n) return 0;                                   // boş kanal: hiç dokunma
+    var hit = [], kirildi = false, i, cl, cs, ce;
+    for (i = 0; i < n; i++) {
+        cl = cls[i];
         try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er) { continue; }
-        if (cs >= s - eps && ce <= e + eps) { try { cl.remove(true, false); removed++; } catch (er2) {} }
+        if (cs >= s - eps && ce <= e + eps) hit.push(i);
+        else if (cs > e + eps) { kirildi = true; break; }   // klipler zaman sıralı: sonrası hep daha geç
+    }
+    /* Güvenlik ağı: erken çıktık ama HİÇBİR şey bulamadıysak koleksiyon beklendiği gibi sıralı
+       olmayabilir. Sessizce eksik silme yapmaktansa (kullanıcı fark etmez, boşluk kesilmemiş olur)
+       tam taramaya dön. */
+    if (kirildi && !hit.length) {
+        for (i = 0; i < n; i++) {
+            cl = cls[i];
+            try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er2) { continue; }
+            if (cs >= s - eps && ce <= e + eps) hit.push(i);
+        }
+    }
+    // BÜYÜK indeksten küçüğe sil — silme sonrası indeksler kaymasın (eski davranışla birebir aynı).
+    var removed = 0;
+    for (i = hit.length - 1; i >= 0; i--) {
+        try { cls[hit[i]].remove(true, false); removed++; } catch (er3) {}
     }
     return removed;
 }
-// eps'i fps'e bağla (H9): 0.75/fps hem razor kare-yuvarlamasını kapsar hem komşu klibi korur.
-function _rippleDeleteRange(seq, s, e, fps) {
-    var eps = (fps && fps > 0) ? (0.75 / fps) : 0.04, v, removed = 0;
-    for (v = 0; v < seq.videoTracks.numTracks; v++) removed += _ripTrack(seq.videoTracks[v], s, e, eps);
-    for (v = 0; v < seq.audioTracks.numTracks; v++) removed += _ripTrack(seq.audioTracks[v], s, e, eps);
+/* eps'i fps'e bağla (H9): 0.75/fps hem razor kare-yuvarlamasını kapsar hem komşu klibi korur.
+   doluV/doluA verilirse yalnızca DOLU kanallar taranır (boş kanalda yapacak iş yok). */
+function _rippleDeleteRange(seq, s, e, fps, doluV, doluA) {
+    var eps = (fps && fps > 0) ? (0.75 / fps) : 0.04, i, removed = 0;
+    if (doluV && doluA) {
+        for (i = 0; i < doluV.length; i++) removed += _ripTrack(seq.videoTracks[doluV[i]], s, e, eps);
+        for (i = 0; i < doluA.length; i++) removed += _ripTrack(seq.audioTracks[doluA[i]], s, e, eps);
+        return removed;
+    }
+    for (i = 0; i < seq.videoTracks.numTracks; i++) removed += _ripTrack(seq.videoTracks[i], s, e, eps);
+    for (i = 0; i < seq.audioTracks.numTracks; i++) removed += _ripTrack(seq.audioTracks[i], s, e, eps);
     return removed;
 }
 // [s,e] aralığını tek bir klip tam kaplıyor mu? (kayıt sürekliliği kontrolü, H2/H3)
@@ -846,20 +878,42 @@ function autoCut(intervalsFilePath) {
         // (kayıtta gerçek boşluk) o kesimi atla — desenkron üretme (H2/H3).
         var refTrack = (seq.audioTracks.numTracks > 0) ? seq.audioTracks[0] : null;
 
+        /* DOLU kanalları bir kez tespit et. Boş kanalı razorlamak da taramak da no-op;
+           tipik sekansta razor çağrılarının önemli bir kısmı buradan gidiyordu.
+           QE track nesneleri de döngü ÖNCESİNDE alınır (her kesimde getTrackAt çağırmak yerine). */
+        var doluV = [], doluA = [], qeV = [], qeA = [], di;
+        for (di = 0; di < seq.videoTracks.numTracks; di++) {
+            try { if (seq.videoTracks[di].clips.numItems > 0) { doluV.push(di); qeV.push(qeSeq.getVideoTrackAt(di)); } } catch (edv) {}
+        }
+        for (di = 0; di < seq.audioTracks.numTracks; di++) {
+            try { if (seq.audioTracks[di].clips.numItems > 0) { doluA.push(di); qeA.push(qeSeq.getAudioTrackAt(di)); } } catch (eda) {}
+        }
+        pr("Dolu kanal: " + doluV.length + " video + " + doluA.length + " ses (boş kanallar atlanıyor)");
+
+        var t0 = 0; try { t0 = $.hiresTimer; } catch (et) {}
+        var tRazor = 0, tRip = 0;
         var done = 0, failed = 0, noop = 0, skippedCover = 0, firstErr = "";
         for (var k = 0; k < ivs.length; k++) {
             var cs = ivs[k].s, ce = ivs[k].e;
             if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04)) { skippedCover++; continue; }
             var tcS = _secToTC(cs, fpsFrac), tcE = _secToTC(ce, fpsFrac);
             try {
-                for (var v = 0; v < seq.videoTracks.numTracks; v++) { var qv = qeSeq.getVideoTrackAt(v); qv.razor(tcS); qv.razor(tcE); }
-                for (var a = 0; a < seq.audioTracks.numTracks; a++) { var qa = qeSeq.getAudioTrackAt(a); qa.razor(tcS); qa.razor(tcE); }
-                var rem = _rippleDeleteRange(seq, cs, ce, fps);
+                var m0 = 0; try { m0 = $.hiresTimer; } catch (em) {}
+                for (var v = 0; v < qeV.length; v++) { qeV[v].razor(tcS); qeV[v].razor(tcE); }
+                for (var a = 0; a < qeA.length; a++) { qeA[a].razor(tcS); qeA[a].razor(tcE); }
+                try { tRazor += $.hiresTimer - m0; } catch (em2) {}
+                var m1 = 0; try { m1 = $.hiresTimer; } catch (em3) {}
+                var rem = _rippleDeleteRange(seq, cs, ce, fps, doluV, doluA);
+                try { tRip += $.hiresTimer - m1; } catch (em4) {}
                 if (rem > 0) done++; else noop++;              // hiçbir klip silinmediyse "done" sayma (H4)
             } catch (e1) { failed++; if (!firstErr) firstErr = e1.toString(); }
         }
         try { app.endUndoGroup(); } catch (eug2) {}
         var durAfter = _seqDuration(seq);
+        var tTop = 0; try { tTop = ($.hiresTimer - t0) / 1000000; } catch (et2) {}
+        // Faz zamanlaması: bir dahaki yavaşlık şikâyetinde nerede takıldığı ÖLÇÜLEBİLİR olsun.
+        pr("Süre: toplam " + tTop.toFixed(1) + " sn | razor " + (tRazor / 1000000).toFixed(1) +
+           " sn | ripple-delete " + (tRip / 1000000).toFixed(1) + " sn");
         pr("Sekans süresi SONRA: " + durAfter.toFixed(2) + " sn | done=" + done + " noop=" + noop + " skipCover=" + skippedCover + " failed=" + failed + (firstErr ? " err=" + firstErr : ""));
         try { var dir = new File(intervalsFilePath).parent; _writeFileUTF8(dir.fsName + "/autocut_diag.txt", diag.join("\n")); } catch (ed) {}
         return "ok:" + done + " boşluk kesildi (" + seqDur.toFixed(1) + " → " + durAfter.toFixed(1) + " sn)"

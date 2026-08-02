@@ -101,6 +101,17 @@
             <div class="rs-note" id="rsFriendsNote">AI otomatik ayıracak</div>
           </div>
 
+          <div class="field" style="margin-top:12px">
+            <label>Arkadaşın altyazısı yukarı kaysın mı? <small style="color:var(--faint)">(üst üste binmesin diye)</small></label>
+            <div class="select">
+              <select id="selIstif">
+                <option value="overlap">Sadece aynı anda konuşurken</option>
+                <option value="off">Hiç kaydırma</option>
+                <option value="always">Hep yukarıda dursun</option>
+              </select>
+            </div>
+          </div>
+
           <label class="switch-row" style="margin-top:12px">
             <span>Arkadaşlar ayrı kanallarda <small>(A2, A3, A4… her biri bir kişi)</small></span>
             <input type="checkbox" id="chkAyriKanal">
@@ -298,10 +309,10 @@
             <div class="field">
               <label>En kısa boşluk</label>
               <div class="select"><select id="acMin">
-                <option value="0.1">0.1 sn (en kısa)</option>
-                <option value="0.15">0.15 sn</option>
+                <option value="0.1">0.1 sn — çok yavaş!</option>
+                <option value="0.15">0.15 sn — yavaş</option>
                 <option value="0.2">0.2 sn</option>
-                <option value="0.3">0.3 sn</option>
+                <option value="0.3">0.3 sn — önerilen</option>
                 <option value="0.35">0.35 sn</option>
                 <option value="0.5" selected>0.5 sn</option>
                 <option value="0.8">0.8 sn</option>
@@ -309,7 +320,12 @@
               </select></div>
             </div>
           </div>
-          <p class="note">Konuşma kanalları (A1 + A2) analiz edilir; oyun sesi (A3) sayılmaz. Boşluk = kimse konuşmuyorsa. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.</p>
+          <label class="switch-row" style="margin-top:12px">
+            <span>Gürültü azaltma <small>(gürültülü kayıtta daha isabetli — analiz ~5 kat yavaşlar)</small></span>
+            <input type="checkbox" id="chkDenoise">
+          </label>
+          <p class="note">Konuşma kanalları (A1 + A2) analiz edilir; oyun sesi (A3) sayılmaz. Boşluk = kimse konuşmuyorsa. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.<br>
+            <b style="color:var(--text)">Hız notu:</b> “En kısa boşluk” ne kadar küçükse o kadar çok kesim olur ve kesim o kadar uzun sürer. 0.1 sn seçmek binlerce kesim üretebilir; 0.3 sn neredeyse aynı süreyi kazandırıp çok daha hızlı biter.</p>
         </div>
 
         <button class="btn-primary btn-lg" id="acAnalyze">
