@@ -98,26 +98,55 @@
           </div>
           <div class="row-speaker">
             <div class="rs-label"><i class="chip chip-friends"></i>Arkadaşlar <small>(A2)</small></div>
-            <div class="rs-note">AI otomatik ayıracak</div>
+            <div class="rs-note" id="rsFriendsNote">AI otomatik ayıracak</div>
           </div>
+
+          <label class="switch-row" style="margin-top:12px">
+            <span>Arkadaşlar ayrı kanallarda <small>(A2, A3, A4… her biri bir kişi)</small></span>
+            <input type="checkbox" id="chkAyriKanal">
+          </label>
+
+          <!-- AYRI KANAL MODU -->
+          <div id="kanalBox" hidden>
+            <p class="note" style="margin-top:10px">
+              Her ses kanalı ayrı yazıya dökülür — yapay zekâ <b style="color:var(--text)">tahmin etmez</b>,
+              konuşmacı ayrımı %100 doğru olur. Üst üste konuşmalar da doğru çıkar (karışık kanalda bu mümkün değil).
+              Discord kaydını Craig bot ile ya da OBS'te kişi başı ayrı kanal alarak elde edebilirsin.
+            </p>
+            <div id="kanalRows"></div>
+            <button class="btn-ghost" id="btnKanalTara" type="button" style="margin-top:10px">Kanalları Tara</button>
+            <p class="note" id="kanalUyari" hidden></p>
+          </div>
+
+          <!-- KARIŞIK KANAL (AI ile ayırma) -->
+          <div id="diarizeBox">
           <p class="note">A1 hep sen; A2'deki arkadaşları yapay zeka ayırır, üretimden sonra her birine renk atarsın.</p>
           <div class="field" style="margin-top:12px">
-            <label>A2'de kaç kişi konuşuyor? <small style="color:var(--faint)">(bilmiyorsan Otomatik)</small></label>
+            <label>A2'de kaç kişi konuşuyor? <small style="color:var(--faint)">(emin değilsen “En az”)</small></label>
             <div class="select">
               <select id="selNumSpk">
                 <option value="">Otomatik</option>
-                <option value="2">2 kişi</option>
-                <option value="3">3 kişi</option>
-                <option value="4">4 kişi</option>
-                <option value="5">5 kişi</option>
-                <option value="6">6 kişi</option>
-                <option value="7">7 kişi</option>
-                <option value="8">8 kişi</option>
-                <option value="9">9 kişi</option>
-                <option value="10">10 kişi</option>
+                <option value="min2">En az 2 kişi</option>
+                <option value="min3">En az 3 kişi</option>
+                <option value="min4">En az 4 kişi</option>
+                <option value="min5">En az 5 kişi</option>
+                <option value="2">Tam 2 kişi</option>
+                <option value="3">Tam 3 kişi</option>
+                <option value="4">Tam 4 kişi</option>
+                <option value="5">Tam 5 kişi</option>
+                <option value="6">Tam 6 kişi</option>
+                <option value="7">Tam 7 kişi</option>
+                <option value="8">Tam 8 kişi</option>
+                <option value="9">Tam 9 kişi</option>
+                <option value="10">Tam 10 kişi</option>
               </select>
             </div>
           </div>
+          <label class="switch-row" style="margin-top:12px">
+            <span>Konuşmacı ayırmayı GPU'da çalıştır <small>(çok daha hızlı; bazı kartlarda çalışmaz)</small></span>
+            <input type="checkbox" id="chkDiarGpu">
+          </label>
+          </div><!-- /diarizeBox -->
         </div>
 
         <div class="field">
@@ -125,6 +154,7 @@
           <div class="select">
             <select id="selModel">
               <option value="large-v3">large-v3 · en doğru</option>
+              <option value="large-v3:batched">large-v3 · hızlı önizleme (~3x)</option>
               <option value="medium">medium · hızlı</option>
             </select>
           </div>
@@ -166,7 +196,16 @@
           </div>
         </div>
 
-        <label class="switch-row"><span>Küfür sansürü <small>(apt*l)</small></span><input type="checkbox" id="chkCensor"></label>
+        <div class="field">
+          <label>Küfür sansürü <small style="color:var(--faint)">(a***l)</small></label>
+          <div class="select">
+            <select id="selCensor">
+              <option value="off">Kapalı</option>
+              <option value="hard">Sadece ağır küfür</option>
+              <option value="all">Hepsi (hakaretler dahil)</option>
+            </select>
+          </div>
+        </div>
 
         <button class="btn-primary btn-lg" id="btnRun">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
@@ -224,6 +263,21 @@
             <div class="color-grid" id="recolorBtns"></div>
             <div class="recolor-status" id="recolorStatus" hidden></div>
             <p class="note" id="recolorHint"></p>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Timeline'da Yazıyı Düzelt</div>
+            <p class="note" style="margin-top:0;line-height:1.75">
+              Altyazıyı timeline'a ekledikten sonra yazı hatası görürsen: klibi seç, <b style="color:var(--text)">Oku</b>'ya bas,
+              yazıyı düzelt, <b style="color:var(--text)">Uygula</b>'ya bas. Klip silinip yeniden eklenmez —
+              konumu, süresi ve elle yaptığın ayarlar korunur.
+            </p>
+            <input type="text" class="input" id="fixText" placeholder="Seçili altyazının yazısı" style="cursor:text">
+            <div class="dict-actions">
+              <button class="btn-ghost" id="btnFixRead" type="button">Oku</button>
+              <button class="btn-ghost" id="btnFixApply" type="button">Uygula</button>
+              <span class="dict-status" id="fixStatus"></span>
+            </div>
           </div>
         </div>
       </div>

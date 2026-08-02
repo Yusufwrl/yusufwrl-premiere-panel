@@ -9,9 +9,13 @@
 
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
     singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "",
-    dict: [], dictMap: null };   // karakter isimleri sözlüğü (Tofi/Moni/…) + arama tablosu
+    dict: [], dictMap: null,     // karakter isimleri sözlüğü (Tofi/Moni/…) + arama tablosu
+    channels: [] };              // "ayrı kanal" modu: her ses kanalı bir kişi
 
   function $(id) { return document.getElementById(id); }
+  // Turkce kucuk harf: duz toLowerCase "I"->"i" verir; Turkcede I->i, İ->i olmali.
+  // Stil adi eslesmesinde onemli: "MİMİ.mogrt" duz toLowerCase ile "mi̇mi̇" olur ve renk tutmaz.
+  function trLower(s) { return String(s).replace(/İ/g, "i").replace(/I/g, "ı").toLowerCase(); }
   // Ayar kalıcılığı (localStorage) — panel her açılışta son ayarları hatırlar.
   function lsGet(k, d) { try { var v = localStorage.getItem("yw." + k); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem("yw." + k, v); } catch (e) {} }
@@ -45,12 +49,38 @@
   }
   function uiConfirm(msg, title) { return uiModal({ confirm: true, msg: msg, title: title }); }
   function uiAlert(msg, title) { return uiModal({ confirm: false, msg: msg, title: title }); }
+  /* Ham ffmpeg/whisper hatalarını anlaşılır Türkçeye çevirir. Kullanıcı yazılımcı değil;
+     "ffmpeg.exe çıkış kodu 4294967274 … Invalid argument" ekranı ne olduğunu da ne yapılacağını
+     da anlatmıyor. Çeviri bulunamazsa ham mesajın İLK satırı gösterilir (ekranı kaplamasın);
+     teknik dökümün tamamı her durumda "Ayrıntılar" altında durmaya devam eder. */
+  var _HATA_CEVIRI = [
+    [/matches no streams|Stream specifier/i,
+      "Seçtiğin ses kanalı bu videoda yok gibi görünüyor. Kaynak Ses'ten başka bir kanal (A1/A2) dene."],
+    [/No such file|could not find codec|Invalid data found|does not contain any stream/i,
+      "Medya dosyası okunamadı. Klip çevrimdışı (offline) olabilir — Premiere'de sağ tık > Link Media."],
+    [/out of memory|cudaErrorMemoryAllocation|CUBLAS_STATUS_ALLOC/i,
+      "GPU belleği yetmedi. Model'i “medium” yap ya da açık olan ağır programları kapat."],
+    [/cudnn|cublas|CUDA driver|no kernel image|\.dll/i,
+      "Ekran kartı sürücüsü sorunu. Sürücüyü güncelle; sorun sürerse Model'i “medium” yap."],
+    [/ENAMETOOLONG/i,
+      "Bu sekansta çok fazla klip var. Süre aralığı vererek videoyu parça parça işle."],
+    [/ENOENT/i,
+      "Motor bulunamadı. Kurulum eksik olabilir — YusufwrlEngine klasörünü kontrol et."],
+    [/JSON üretilemedi/i,
+      "Yapay zekâ motoru sonuç üretemedi. Seçili kanalda konuşma olduğundan emin ol, sonra tekrar dene."]
+  ];
+  function friendlyError(e) {
+    var ham = String((e && e.message) || e || "");
+    for (var i = 0; i < _HATA_CEVIRI.length; i++) if (_HATA_CEVIRI[i][0].test(ham)) return _HATA_CEVIRI[i][1];
+    var ilk = ham.split("\n")[0];
+    return ilk.length > 140 ? ilk.slice(0, 140) + "…" : ilk;
+  }
   function trimLog(s) { var lines = String(s).split("\n"); return (lines.length > 200 ? lines.slice(0, 200) : lines).join("\n"); }
   function logLine(msg) { var el = $("log"); var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
   function setPill(id, on) { var el = $(id); el.classList.remove("on", "off"); el.classList.add(on ? "on" : "off"); }
   // ---------- İlerleme (yüzde + tahmini süre + bitti/hata durumu) ----------
   // _pg.max: yüzde geri gitmesin (monotonik). _pg.transT0: transkripsiyon başlangıç zamanı (ETA için).
-  var _pg = { base: "", max: 0, transT0: 0 };
+  var _pg = { base: "", max: 0, transT0: 0, totalSec: 0 };   // totalSec: ilerlemeyi zaman damgasindan hesaplamak icin
   function _fmtEta(sec) { sec = Math.max(0, Math.round(sec)); var m = Math.floor(sec / 60), s = sec % 60; return "~" + m + ":" + (s < 10 ? "0" : "") + s; }
   function setProgress(pct, label, eta) {
     var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
@@ -66,7 +96,7 @@
     }
   }
   function progressReset(label) {
-    _pg.base = label || ""; _pg.max = 0; _pg.transT0 = 0;
+    _pg.base = label || ""; _pg.max = 0; _pg.transT0 = 0; _pg.totalSec = 0;
     var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
     $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
     $("progressLabel").style.color = ""; $("progressLabel").textContent = _pg.base;
@@ -102,8 +132,24 @@
   function evalES(code) { return new Promise(function (res) { if (!cs) { res('{"error":"no_cep"}'); return; } cs.evalScript(code, function (r) { res(r); }); }); }
   function speakerColor(i) { return SP_COLORS[i % SP_COLORS.length]; }
   function fmtShort(sec) { var m = Math.floor(sec / 60), s = Math.floor(sec % 60); return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s; }
-  function whenLog(line) { var s = String(line).trim(); if (s) logLine(s.length > 80 ? s.slice(-80) : s);
-    var re = /(\d+)%/g, m, last = -1; while ((m = re.exec(s)) !== null) last = +m[1]; return last; }   // en son yüzdeyi al (tqdm \r ile üst üste yazar)
+  /* Motor çıktısından ilerleme yüzdesi. Motor varsayılan ayarda HİÇ yüzde basmıyor — çubuk
+     %45'te donup kalıyordu. Bunun yerine bastığı segment zaman damgaları ("[01:07.000 --> …")
+     okunup toplam süreye oranlanır.
+     (--print_progress eklemek daha kolay olurdu ama o bayrak CANLI TRANSKRİPT akışını kapatıyor;
+      yanlış kanal seçtiğini işlem sürerken fark etmenin tek yolu o akış.) */
+  function whenLog(line) {
+    var s = String(line).trim();
+    if (s) logLine(s.length > 80 ? s.slice(-80) : s);
+    var re = /(\d+)%/g, m, last = -1;
+    while ((m = re.exec(s)) !== null) last = +m[1];    // en son yüzdeyi al (tqdm \r ile üst üste yazar)
+    if (last >= 0) return last;
+    if (_pg.totalSec > 0) {
+      var tre = /\[(?:(\d+):)?(\d+):(\d+)(?:\.\d+)?\s*-->/g, t, sonSn = -1;
+      while ((t = tre.exec(s)) !== null) sonSn = (t[1] ? (+t[1]) * 3600 : 0) + (+t[2]) * 60 + (+t[3]);
+      if (sonSn >= 0) return Math.max(0, Math.min(99, Math.round(sonSn / _pg.totalSec * 100)));
+    }
+    return -1;
+  }
 
   // ---------- mod ve track ----------
   var modeBtns = document.querySelectorAll("#segMode .seg-btn");
@@ -119,8 +165,11 @@
     else {
       // Cue'ları üreten moda dönerken transkript/sonuç kartını koru (ör. renk sekmesine gidip
       // gelince kaybolmasın); farklı üretim moduna geçişte gizle.
-      var hasCur = (state.mode === "single") ? state.singleCues.length : (state.a1Cues.length || state.a2Cues.length);
-      var keep = (state.genMode === state.mode) && hasCur;
+      // "channels" genMode'u "Konuşmacıya Göre" sekmesinde üretiliyor; sekme adıyla birebir
+      // eşleşmediği için sonuç kartı ve "Timeline'a Ekle" butonu haksız yere gizleniyordu.
+      var uretimSekmesi = (state.genMode === "channels") ? "speaker" : state.genMode;
+      var hasCur = allCues().length;
+      var keep = (uretimSekmesi === state.mode) && hasCur;
       $("result").hidden = !keep;
       $("speakerMap").hidden = !(keep && state.mode === "speaker" && state.speakers.length);
     }
@@ -156,7 +205,7 @@
     state.styles.forEach(function (s) { var op = document.createElement("option"); op.value = s.path; op.textContent = s.name; sel.appendChild(op); });
   }
   function preselect(sel, nameLike) {
-    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].textContent.toLowerCase().indexOf(nameLike) >= 0) { sel.selectedIndex = i; return true; }
+    for (var i = 0; i < sel.options.length; i++) if (trLower(sel.options[i].textContent).indexOf(trLower(nameLike)) >= 0) { sel.selectedIndex = i; return true; }
     return false;
   }
 
@@ -179,6 +228,7 @@
       chip.addEventListener("click", function () {
         cue.speaker = sp.id; if (cue._ref) cue._ref.speaker = sp.id;
         dotEl.style.background = col; closeSpeakerPicker();
+        saveSession();   // elle yapılan konuşmacı düzeltmesi de kalıcı olsun
       });
       pop.appendChild(chip);
     });
@@ -213,8 +263,10 @@
       (function (cue, node) {
         node.addEventListener("blur", function () {
           var v = node.textContent.replace(/\s+/g, " ").trim();
-          if (v) { cue.text = v; if (cue._ref) cue._ref.text = v; }   // _ref: konuşmacı modunda state.a1/a2Cues'a köprü
-          else node.textContent = cue.text;
+          if (v && v !== cue.text) {
+            cue.text = v; if (cue._ref) cue._ref.text = v;   // _ref: konuşmacı/kanal modunda asıl listeye köprü
+            saveSession();                                    // elle düzeltmeler de kalıcı olsun
+          } else if (!v) node.textContent = cue.text;
         });
         node.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); node.blur(); } });
       })(c, x);
@@ -226,6 +278,17 @@
   // Transkript kutusunu mevcut üretim moduna göre yeniden çizer
   // (sözlük sonradan uygulandığında da kullanılır).
   function redrawTranscript() {
+    if (state.genMode === "channels") {
+      var cc = { "__A1__": "#e5544b" };
+      var hepsi = state.a1Cues.map(function (c) { return { start: c.start, end: c.end, text: c.text, speaker: "__A1__", _ref: c }; });
+      state.channels.forEach(function (ch, i) {
+        var id = "__CH" + ch.idx + "__"; cc[id] = speakerColor(i);
+        ch.cues.forEach(function (c) { hepsi.push({ start: c.start, end: c.end, text: c.text, speaker: id, _ref: c }); });
+      });
+      hepsi.sort(function (a, b) { return a.start - b.start; });
+      renderTranscript(hepsi, cc);
+      return;
+    }
     if (state.genMode === "speaker") {
       var color = {}; state.speakers.forEach(function (s, i) { color[s.id] = speakerColor(i); });
       color["__A1__"] = "#e5544b";
@@ -276,7 +339,7 @@
         }
       }
     }
-    if (n && !$("result").hidden) redrawTranscript();
+    if (n) { if (!$("result").hidden) redrawTranscript(); saveSession(); }
     dictStatus("✓ Kaydedildi — " + state.dict.length + " karakter" +
       (n ? ", mevcut altyazıda " + n + " satır düzeltildi" : ""), "var(--good)");
   }
@@ -294,8 +357,14 @@
 
   // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
   function trOpts(extra) {
-    var o = { model: $("selModel").value, language: cfg.language, diarize: false,
-      censor: ($("chkCensor") && $("chkCensor").checked),
+    // "large-v3:batched" = hızlı önizleme modu; model adı ile bayrak burada ayrılır
+    var mv = String(($("selModel") && $("selModel").value) || "large-v3");
+    var hizli = /:batched$/.test(mv);
+    // Sansür: "off" | "hard" (sadece ağır küfür) | "all" (hakaretler dahil)
+    var cs = String(($("selCensor") && $("selCensor").value) || "all");
+    var o = { model: mv.replace(/:batched$/, ""), batched: hizli,
+      language: cfg.language, diarize: false,
+      censor: (cs === "off") ? false : cs,
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
     if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) o[k] = extra[k];
     return o;
@@ -341,6 +410,10 @@
   function parseTime(str) {
     str = String(str == null ? "" : str).trim();
     if (!str) return null;
+    /* KATI biçim kontrolü: "90", "1:30", "1:05:00" (ondalık saniye olabilir). Eskiden parseFloat
+       kullanılıyordu ve "1:00-2:00", "2dk", "1:30x" gibi girdilerde sondaki çöpü sessizce yutup
+       geçerli sayıyordu — kullanıcı yanlış aralıkla 30 dakika bekliyordu. */
+    if (!/^\d+(:\d{1,2}){0,2}([.,]\d+)?$/.test(str)) return null;
     var parts = str.split(":"), val = 0;
     for (var i = 0; i < parts.length; i++) {
       var n = parseFloat(parts[i].replace(",", "."));
@@ -351,8 +424,13 @@
   }
   // Panel girdilerinden aralık okur. İkisi de boşsa null (= tüm video).
   function getRange() {
-    var s = parseTime($("rangeStart") && $("rangeStart").value);
-    var e = parseTime($("rangeEnd") && $("rangeEnd").value);
+    var sHam = String(($("rangeStart") && $("rangeStart").value) || "").trim();
+    var eHam = String(($("rangeEnd") && $("rangeEnd").value) || "").trim();
+    var s = parseTime(sHam), e = parseTime(eHam);
+    /* Yanlış yazım ("1:00-2:00", "1;30", "bir dakika") sessizce TÜM videoyu işletiyordu:
+       kullanıcı 30 dakika bekleyip yanlış sonuç alıyordu. Artık açıkça hata verilir. */
+    if (sHam && s == null) throw new Error("Başlangıç süresi anlaşılmadı: “" + sHam + "”. Örnek: 1:30");
+    if (eHam && e == null) throw new Error("Bitiş süresi anlaşılmadı: “" + eHam + "”. Örnek: 2:45");
     if (s == null && e == null) return null;
     var start = (s == null) ? 0 : s;
     var end = (e == null) ? Infinity : e;
@@ -375,36 +453,101 @@
     var stamp = Date.now();
     var wav = path.join(cfg.workDir, name + "_" + stamp + ".wav");
     await pipeline.buildTimelineAudio(used, cfg.ffmpegExe, wav, logLine, trackIdx);
-    if (!range) return { wav: wav, offset: 0, cleanup: [wav] };
+    if (!range) return { wav: wav, offset: 0, cleanup: [wav], dur: clipsEnd(used) };
     var wav2 = path.join(cfg.workDir, name + "_r_" + stamp + ".wav");
     await pipeline.trimWav(wav, wav2, range.start, range.end, cfg.ffmpegExe);
     logLine("[aralık] " + fmtShort(range.start) + (isFinite(range.end) ? " → " + fmtShort(range.end) : " → son"));
-    return { wav: wav2, offset: range.start, cleanup: [wav, wav2] };
+    return { wav: wav2, offset: range.start, cleanup: [wav, wav2], dur: Math.max(0, Math.min(clipsEnd(used), range.end) - range.start) };
+  }
+  /* MIX: konuşma kanallarını (A1 + A2) TEK wav'da birleştirir — A3 oyun sesidir, dahil edilmez.
+     Eskiden "Mix" seçilince sessizce sadece A1 yazıya dökülüyordu; arkadaşların altyazıya hiç
+     girmiyordu ve uyarı da çıkmıyordu. Kanallardan biri yoksa diğeriyle devam edilir. */
+  async function prepAudioMix(name) {
+    var range = getRange(), stamp = Date.now();
+    var parts = [], cleanup = [], bulunan = [], mixEnd = 0;
+    // try/catch TÜM kanal işlemini sarmalı: bir kanalın ffmpeg hatası diğerini düşürmemeli.
+    for (var t = 0; t < 2; t++) {
+      try {
+        var data = await getClips(t);
+        var used = clipsInRange(data.clips, range);
+        if (!used.length) { logLine("Mix: A" + (t + 1) + " seçilen aralıkta boş."); continue; }
+        var w = path.join(cfg.workDir, name + "_mix" + t + "_" + stamp + ".wav");
+        await pipeline.buildTimelineAudio(used, cfg.ffmpegExe, w, logLine, t);
+        parts.push(w); cleanup.push(w); bulunan.push("A" + (t + 1));
+        var ke = clipsEnd(used); if (ke > mixEnd) mixEnd = ke;
+      } catch (e) { logLine("Mix: A" + (t + 1) + " atlandı (" + friendlyError(e) + ")"); }
+    }
+    if (!parts.length) { cleanupFiles(cleanup); throw new Error("Mix için A1/A2 kanallarında konuşma bulunamadı."); }
+    logLine("Mix: " + bulunan.join(" + ") + " birleştirildi");
+    var wav = path.join(cfg.workDir, name + "_mix_" + stamp + ".wav");
+    // Bundan sonraki her hatada üretilmiş WAV'lar temizlenir (yoksa work klasöründe sızar)
+    try {
+      await pipeline.mixWavs(parts, cfg.ffmpegExe, wav);
+      cleanup.push(wav);
+      if (!range) return { wav: wav, offset: 0, cleanup: cleanup, dur: mixEnd };
+      var wav2 = path.join(cfg.workDir, name + "_mixr_" + stamp + ".wav");
+      await pipeline.trimWav(wav, wav2, range.start, range.end, cfg.ffmpegExe);
+      cleanup.push(wav2);
+    } catch (eMix) { cleanupFiles(cleanup); throw eMix; }
+    logLine("[aralık] " + fmtShort(range.start) + (isFinite(range.end) ? " → " + fmtShort(range.end) : " → son"));
+    return { wav: wav2, offset: range.start, cleanup: cleanup, dur: Math.max(0, Math.min(mixEnd, range.end) - range.start) };
   }
   function offsetCues(cues, off) {
     if (off) for (var i = 0; i < cues.length; i++) { cues[i].start += off; cues[i].end += off; }
     return cues;
   }
   function cleanupFiles(list) { for (var i = 0; i < list.length; i++) { try { fs.unlinkSync(list[i]); } catch (e) {} } }
+  /* Panel açılışında ESKİ geçici dosyaları temizle. İptal/hata durumunda cleanupFiles hiç
+     çalışmadığı için work klasöründe 60+ MB artık birikiyordu (tek bir WAV 44 MB olabiliyor).
+     Sadece panelin ürettiği geçici desenler silinir; oturum dosyaları ve kullanıcının kendi
+     dosyaları (A1.json/A1.wav gibi) ASLA dokunulmaz. */
+  function cleanupOldTemp() {
+    try {
+      var simdi = Date.now(), gun = 24 * 3600 * 1000;
+      /* Önek + (opsiyonel ara ek) + 13 haneli zaman damgası. Ara ek şart: en büyük artıklar
+         "single_r_<stamp>.wav", "single_mix0_<stamp>.wav", "a1_r_<stamp>.wav" gibi adlarda ve
+         eski desen (önekten hemen sonra rakam) bunları hiç yakalamıyordu.
+         oturum_*.json ve kullanıcının kendi dosyaları desende YOK. */
+      var desen = /^(single|a1|a2|ch\d+|acv\d|acvoice|mcues|laned|chan|cuts|cap|sub|cues|fixtext)_[a-z0-9]*_?\d{10,}\./;
+      var files = fs.readdirSync(cfg.workDir), silinen = 0, bayt = 0;
+      for (var i = 0; i < files.length; i++) {
+        if (!desen.test(files[i])) continue;
+        var fp = path.join(cfg.workDir, files[i]);
+        try {
+          var st = fs.statSync(fp);
+          if (simdi - st.mtimeMs > gun) { bayt += st.size; fs.unlinkSync(fp); silinen++; }
+        } catch (e) {}
+      }
+      if (silinen) logLine("Temizlik: " + silinen + " eski geçici dosya silindi (" + Math.max(1, Math.round(bayt / 1048576)) + " MB).");
+    } catch (e) {}
+  }
 
   // ---------- TEK STİL ----------
   async function runSingle() {
     state.genMode = "single";
-    var trackIdx = (state.track === "mix") ? 0 : parseInt(state.track, 10);
+    var isMix = (state.track === "mix");
     setProgress(8, "Sekans okunuyor…");
-    var data = await getClips(trackIdx);
-    logLine(data.sequenceName + " · " + data.clips.length + " klip");
     pipeline.ensureDir(cfg.workDir);
-    setProgress(20, "Ses hazırlanıyor…");
-    var prep = await prepAudio(data.clips, trackIdx, "single");
+    var prep;
+    if (isMix) {
+      setProgress(20, "Ses hazırlanıyor (A1 + A2)…");
+      prep = await prepAudioMix("single");
+    } else {
+      var trackIdx = parseInt(state.track, 10);
+      var data = await getClips(trackIdx);
+      logLine(data.sequenceName + " · " + data.clips.length + " klip");
+      setProgress(20, "Ses hazırlanıyor…");
+      prep = await prepAudio(data.clips, trackIdx, "single");
+    }
     setProgress(45, "Yazıya dökülüyor (GPU)…");
-    _pg.transT0 = Date.now();
+    _pg.transT0 = Date.now(); _pg.totalSec = prep.dur || 0;
     var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); }, trOpts());
     offsetCues(cues, prep.offset);
     cleanupFiles(prep.cleanup);
     state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
     renderTranscript(cues, null);
     progressDone("Bitti — " + cues.length + " altyazı hazır");
+    await saveSessionAuto();
   }
 
   // ---------- KONUŞMACIYA GÖRE ----------
@@ -416,7 +559,7 @@
     setProgress(15, "A1 sesi hazırlanıyor…");
     var prep1 = await prepAudio(a1.clips, 0, "a1");
     setProgress(25, "A1 yazıya dökülüyor…");
-    _pg.transT0 = Date.now();
+    _pg.transT0 = Date.now(); _pg.totalSec = prep1.dur || 0;
     state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 25, 48); },
       trOpts()), prep1.offset);
     cleanupFiles(prep1.cleanup);
@@ -426,21 +569,246 @@
     var a2 = await getClips(1);
     setProgress(55, "A2 sesi hazırlanıyor…");
     var prep2 = await prepAudio(a2.clips, 1, "a2");
-    var numSpk = parseInt($("selNumSpk") && $("selNumSpk").value, 10) || 0;
-    if (numSpk > 0) logLine("A2: " + numSpk + " konuşmacıya ayrılacak");
+    // "min3" = en az 3 kişi (alt sınır), "3" = tam 3 kişi, "" = otomatik
+    var spkSec = String(($("selNumSpk") && $("selNumSpk").value) || "");
+    var spkOpts = { diarize: true };
+    // Diarizasyon cihazi: GPU cok daha hizli ama bazi kartlarda (ornegin RTX 50xx) torch kerneli yok.
+    if ($("chkDiarGpu")) spkOpts.diarizeDevice = $("chkDiarGpu").checked ? "cuda" : "cpu";
+    var mm = spkSec.match(/^min(\d+)$/);
+    if (mm) { spkOpts.minSpeakers = parseInt(mm[1], 10); logLine("A2: en az " + mm[1] + " konuşmacıya ayrılacak"); }
+    else {
+      var nSpk = parseInt(spkSec, 10);
+      if (nSpk > 0) { spkOpts.numSpeakers = nSpk; logLine("A2: tam " + nSpk + " konuşmacıya ayrılacak"); }
+    }
     setProgress(65, "A2 konuşmacılar ayrılıyor (AI)…");
-    _pg.transT0 = Date.now();
+    _pg.transT0 = Date.now(); _pg.totalSec = prep2.dur || 0;
     state.a2Cues = offsetCues(await pipeline.transcribe(cfg, prep2.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 65, 93); },
-      trOpts({ diarize: true, numSpeakers: numSpk })), prep2.offset);
+      trOpts(spkOpts)), prep2.offset);
     cleanupFiles(prep2.cleanup);
 
     var seen = {}, speakers = [];
     state.a2Cues.forEach(function (c) { if (c.speaker && !seen[c.speaker]) { seen[c.speaker] = 1; speakers.push({ id: c.speaker, sample: c.text, start: c.start }); } });
+    /* Konuşmacı ayırma SESSİZ KAYIP koruması: konuşmacısı belirlenemeyen A2 satırlarına stil
+       atanamıyor, dolayısıyla timeline'a HİÇ basılmıyorlardı — panel yine "ok" diyordu.
+       Artık bu satırlar bir konuşmacıya bağlanır; kullanıcı rengi sonradan değiştirebilir. */
+    if (!speakers.length && state.a2Cues.length) {
+      speakers.push({ id: "SPEAKER_00", sample: state.a2Cues[0].text, start: state.a2Cues[0].start });
+      logLine("UYARI: konuşmacı ayırma sonuç vermedi — tüm A2 satırları tek konuşmacı sayıldı.");
+    }
+    if (speakers.length) {
+      var sahipsiz = 0;
+      state.a2Cues.forEach(function (c) { if (!c.speaker) { c.speaker = speakers[0].id; sahipsiz++; } });
+      if (sahipsiz) logLine("UYARI: " + sahipsiz + " A2 satırının konuşmacısı belirlenemedi, ilk konuşmacıya atandı.");
+    }
     state.speakers = speakers;
     renderSpeakerMap();
     redrawTranscript();
     logLine("A2: " + state.a2Cues.length + " satır, " + speakers.length + " konuşmacı");
     progressDone("Bitti — " + speakers.length + " konuşmacı, " + (state.a1Cues.length + state.a2Cues.length) + " satır");
+    await saveSessionAuto();
+  }
+
+  /* ================= AYRI KANAL MODU =================
+     Arkadaşların sesleri A2/A3/A4… kanallarında AYRI AYRI duruyorsa, konuşmacıyı yapay zekâya
+     tahmin ettirmeye gerek yok: her kanal ayrı yazıya dökülür ve kimin konuştuğu %100 kesindir.
+     Üstelik ÜST ÜSTE konuşmalar da doğru çıkar — karışık tek kanalda bu fiziksel olarak mümkün
+     değil, çünkü Whisper tek metin akışı üretir ve aynı anda konuşan ikisinden biri metne hiç
+     girmez. Diarizasyon (pyannote) Discord kaydında %75-90 isabetli; bu mod onu tamamen aradan
+     çıkarır. */
+  async function scanChannels() {
+    if (!CEP) { uiAlert("Önizleme modu — Premiere'de kanallar taranır."); return; }
+    var raw = await evalES("getAudioTracksJSON()");
+    var d; try { d = JSON.parse(raw); } catch (e) { uiAlert("Sekans okunamadı: " + raw, "Kanal tarama"); return; }
+    if (d.error === "no_sequence") { uiAlert("Aktif sekans yok. Önce bir sekans aç.", "Kanal tarama"); return; }
+    renderChannelMap(d.tracks || [], d.videoTracks || 0);
+    logLine("Kanallar: " + (d.tracks || []).map(function (t) { return "A" + (t.idx + 1) + "(" + t.clips + ")"; }).join(" ") +
+            " · " + (d.videoTracks || 0) + " video kanalı");
+  }
+  // list = [{idx, clips, style?, cues?}] — taramadan ya da kaydedilmiş oturumdan gelir
+  function renderChannelMap(list, videoTracks) {
+    var box = $("kanalRows"); if (!box) return;
+    /* Üretilmiş altyazıları KORU. Yeniden tarama (ya da kutuyu kapatıp açma) sadece kanal
+       listesini ve stilleri tazelemeli; 30 dakikalık işlemin sonucunu silmemeli. Tarama
+       verisinde cues alanı olmadığı için önceki cue'lar kanal numarasına göre geri bağlanır. */
+    var eski = {};
+    state.channels.forEach(function (c) {
+      if (c.cues && c.cues.length) eski[c.idx] = { cues: c.cues, style: c.styleSel ? c.styleSel.value : "" };
+    });
+    box.innerHTML = ""; state.channels = [];
+    var uyari = $("kanalUyari");
+    // A1 = sen; arkadaş kanalları A2'den başlar ve içinde klip olmalı
+    var dolu = list.filter(function (t) { return t.idx >= 1 && t.clips > 0; });
+    if (!dolu.length) {
+      box.innerHTML = '<p class="note" style="margin:0;color:var(--warn)">A2 ve sonrasında ses klibi yok. ' +
+        'Arkadaşların seslerini ayrı ayrı A2, A3, A4… kanallarına yerleştir.</p>';
+      if (uyari) uyari.hidden = true;
+      return;
+    }
+    dolu.forEach(function (t, i) {
+      var row = document.createElement("div"); row.className = "sp-row";
+      var dot = document.createElement("div"); dot.className = "sp-dot"; dot.style.background = speakerColor(i); row.appendChild(dot);
+      var info = document.createElement("div"); info.className = "sp-info";
+      var nm = document.createElement("div"); nm.className = "sp-name"; nm.textContent = "A" + (t.idx + 1) + " kanalı";
+      var sm = document.createElement("div"); sm.className = "sp-sample"; sm.textContent = t.clips + " klip";
+      info.appendChild(nm); info.appendChild(sm); row.appendChild(info);
+      var wrap = document.createElement("div"); wrap.className = "select sm";
+      var sel = document.createElement("select"); fillStyleOptions(sel, false);
+      if (sel.options.length) sel.selectedIndex = Math.min(i + 1, sel.options.length - 1);   // farklı renk öner
+      var onceki = eski[t.idx];
+      var secilecek = t.style || (onceki && onceki.style) || "";
+      if (secilecek) { for (var q = 0; q < sel.options.length; q++) if (sel.options[q].value === secilecek) { sel.value = secilecek; break; } }
+      wrap.appendChild(sel); row.appendChild(wrap);
+      if (onceki && onceki.cues.length) { sm.textContent = t.clips + " klip · " + onceki.cues.length + " altyazı hazır"; }
+      box.appendChild(row);
+      state.channels.push({ idx: t.idx, clips: t.clips, styleSel: sel, cues: t.cues || (onceki ? onceki.cues : []) });
+    });
+    /* Video kanalı bütçesi: en alt kanal senin görüntün, üstündeki bir kanal A1 altyazısı,
+       bir kanal da arkadaşlar için gerekli → en az 3. Üst üste konuşma varsa her ek katman
+       bir kanal daha ister. Yetmezse yerleştirme katmanı kırpar (silme yapmaz) ama ekranda
+       altyazılar üst üste binebilir. */
+    if (uyari) {
+      if (videoTracks && videoTracks < 3) {
+        uyari.hidden = false; uyari.style.color = "var(--warn)";
+        uyari.textContent = "⚠ Sekansta " + videoTracks + " video kanalı var; rahat çalışmak için en az 3 gerekir " +
+          "(görüntü + senin altyazın + arkadaşlar). Üst üste konuşma varsa daha fazlası gerekir. " +
+          "Premiere'de video kanalı eklemen önerilir.";
+      } else uyari.hidden = true;
+    }
+  }
+  async function runChannels() {
+    state.genMode = "channels";
+    state.singleCues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
+    if (!state.channels.length) throw new Error("Önce “Kanalları Tara” butonuna bas ve kanallara stil ata.");
+    // Önceki üretimin cue'larını temizle — döngü ortasında hata olursa yeni A1 ile eski
+    // kanal altyazıları karışık kalıyordu.
+    state.channels.forEach(function (c) { c.cues = []; });
+    pipeline.ensureDir(cfg.workDir);
+    var pay = 85 / (1 + state.channels.length);
+
+    setProgress(8, "A1 (sen) okunuyor…");
+    var a1 = await getClips(0);
+    var prep1 = await prepAudio(a1.clips, 0, "a1");
+    setProgress(10, "A1 yazıya dökülüyor…");
+    _pg.transT0 = Date.now(); _pg.totalSec = prep1.dur || 0;
+    state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav,
+      function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 10, 10 + pay); }, trOpts()), prep1.offset);
+    cleanupFiles(prep1.cleanup);
+    logLine("A1: " + state.a1Cues.length + " satır");
+
+    for (var i = 0; i < state.channels.length; i++) {
+      var ch = state.channels[i];
+      var lo = 10 + pay * (i + 1), hi = 10 + pay * (i + 2);
+      setProgress(lo, "A" + (ch.idx + 1) + " yazıya dökülüyor…");
+      var data = await getClips(ch.idx);
+      var prep = await prepAudio(data.clips, ch.idx, "ch" + ch.idx);
+      _pg.transT0 = Date.now(); _pg.totalSec = prep.dur || 0;
+      ch.cues = offsetCues(await pipeline.transcribe(cfg, prep.wav,
+        (function (a, b) { return function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, a, b); }; })(lo, hi),
+        trOpts()), prep.offset);
+      cleanupFiles(prep.cleanup);
+      logLine("A" + (ch.idx + 1) + ": " + ch.cues.length + " satır");
+    }
+    redrawTranscript();
+    var toplam = state.a1Cues.length;
+    state.channels.forEach(function (c) { toplam += c.cues.length; });
+    progressDone("Bitti — " + (1 + state.channels.length) + " kanal, " + toplam + " satır");
+    await saveSessionAuto();
+  }
+
+  /* ================= OTURUM KAYDETME =================
+     Panel kapanınca (ya da Premiere yeniden başlayınca) tüm altyazı listesi uçuyordu:
+     Renk Değiştir sekmesi kullanılamaz hale geliyor, elle düzeltilen onlarca satır kayboluyor
+     ve 30 dakikalık videoyu baştan işlemek dakikalar sürüyordu. Ayarlar zaten kaydediliyordu
+     ama asıl değerli veri kaydedilmiyordu.
+     AutoCut sonrası timeline zamanları kaydığı için içerik süresi de yazılır; fark varsa
+     geri yüklerken uyarılır — yanlış zamanlı listeyle çalışmak sessiz hataya yol açar. */
+  var _oturum = { name: "", end: 0 };
+  function clipsEnd(clips) {
+    var e = 0;
+    for (var i = 0; i < (clips || []).length; i++) {
+      var x = (clips[i].timelineStartSec || 0) + (clips[i].durationSec || 0);
+      if (x > e) e = x;
+    }
+    return e;
+  }
+  function sessionPath(seqName) {
+    var guv = String(seqName || "sekans").replace(/[^A-Za-z0-9ğüşıöçĞÜŞİÖÇ_ -]/g, "_").slice(0, 60);
+    return path.join(cfg.workDir, "oturum_" + guv + ".json");
+  }
+  function saveSession() {
+    if (!CEP || !cfg || !_oturum.name) return;
+    try {
+      var veri = {
+        sequence: _oturum.name, seqEnd: _oturum.end, genMode: state.genMode, savedAt: Date.now(),
+        singleCues: state.singleCues, a1Cues: state.a1Cues, a2Cues: state.a2Cues,
+        speakers: state.speakers.map(function (s) {
+          return { id: s.id, sample: s.sample, start: s.start, style: s.styleSel ? s.styleSel.value : "" };
+        }),
+        channels: state.channels.map(function (c) {
+          return { idx: c.idx, clips: c.clips, style: c.styleSel ? c.styleSel.value : "", cues: c.cues };
+        })
+      };
+      fs.writeFileSync(sessionPath(_oturum.name), JSON.stringify(veri), "utf8");
+    } catch (e) { logLine("Oturum kaydedilemedi: " + (e.message || e)); }
+  }
+  // Üretim sonunda çağrılır: sekans kimliğini öğrenip oturumu yazar
+  async function saveSessionAuto() {
+    if (!CEP || !cfg) return;
+    try {
+      var d = await getClips(0);
+      _oturum.name = d.sequenceName; _oturum.end = clipsEnd(d.clips);
+      saveSession();
+      logLine("Oturum kaydedildi — panel kapansa da liste durur.");
+    } catch (e) {}
+  }
+  function restoreSession(o) {
+    state.genMode = o.genMode || "single";
+    state.singleCues = o.singleCues || [];
+    state.a1Cues = o.a1Cues || [];
+    state.a2Cues = o.a2Cues || [];
+    state.speakers = []; state.channels = [];
+    if (state.genMode === "channels" && (o.channels || []).length) {
+      renderChannelMap(o.channels, 0);   // 0 = bilinmiyor; sahte değer uyarıyı kalıcı bastırıyordu
+      var ak = $("chkAyriKanal");
+      if (ak && !ak.checked) {
+        ak.checked = true; lsSet("ayriKanal", "1");   // ayar bir sonraki açılışta da kalsın
+        if ($("kanalBox")) $("kanalBox").hidden = false;
+        if ($("diarizeBox")) $("diarizeBox").hidden = true;
+      }
+    } else if (state.genMode === "speaker" && (o.speakers || []).length) {
+      state.speakers = o.speakers.map(function (s) { return { id: s.id, sample: s.sample, start: s.start }; });
+      renderSpeakerMap();
+      for (var i = 0; i < state.speakers.length; i++) {
+        var st = o.speakers[i] && o.speakers[i].style, sel = state.speakers[i].styleSel;
+        if (st && sel) { for (var q = 0; q < sel.options.length; q++) if (sel.options[q].value === st) { sel.value = st; break; } }
+      }
+    }
+    redrawTranscript();
+    var hedef = (state.genMode === "single") ? "single" : "speaker";
+    var btn = document.querySelector('#segMode .seg-btn[data-mode="' + hedef + '"]');
+    if (btn && state.mode !== hedef) btn.click();
+    progressDone("Kaydedilmiş oturum geri yüklendi — " + allCues().length + " altyazı");
+  }
+  async function offerSessionRestore() {
+    if (!CEP || !cfg) return;
+    var d;
+    try { d = await getClips(0); } catch (e) { return; }     // sekans yoksa sessizce çık
+    _oturum.name = d.sequenceName; _oturum.end = clipsEnd(d.clips);
+    var p = sessionPath(d.sequenceName);
+    if (!fs.existsSync(p)) return;
+    var o; try { o = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return; }
+    var toplam = (o.singleCues || []).length + (o.a1Cues || []).length + (o.a2Cues || []).length;
+    (o.channels || []).forEach(function (c) { toplam += (c.cues || []).length; });
+    if (!toplam) return;
+    var kaymis = o.seqEnd && Math.abs(o.seqEnd - _oturum.end) > 1.0;
+    var dk = Math.round((Date.now() - (o.savedAt || 0)) / 60000);
+    var ne = dk < 60 ? (dk + " dakika") : dk < 1440 ? (Math.round(dk / 60) + " saat") : (Math.round(dk / 1440) + " gün");
+    var msg = "Bu sekans için kaydedilmiş " + toplam + " altyazı var (" + ne + " önce).\n\n" +
+      (kaymis ? "⚠ DİKKAT: sekansın uzunluğu o zamandan beri değişmiş (muhtemelen AutoCut yapıldı).\n" +
+                "Altyazı zamanları KAYMIŞ olabilir.\n\n" : "") +
+      "Geri yüklensin mi?";
+    if (!(await uiConfirm(msg, "Kaydedilmiş oturum"))) return;
+    restoreSession(o);
   }
 
   // ---------- yerleştirme ----------
@@ -486,12 +854,38 @@
     state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
     function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
 
-    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1); SADECE A1 ile aynı anda
-    // görünüyorsa (çakışıyorsa) ekranda _gap kadar yukarı kayar (çakışma okunmaz olmasın),
-    // çakışmıyorsa normal konumda kalır ("ekran aynı kalsın").
+    /* İSTİFLEME HYSTERESIS — kayma kararı tek altyazı yerine KONUŞMA SERİSİ başına verilir.
+       Eskiden her A2 satırı için ayrı bakılıyordu: bir satır A1 ile çakışıyor diye yukarı,
+       sonraki çakışmıyor diye aşağı… Gerçek kayıtta ~3 dakikada 38 kez zıplama ölçüldü.
+       Artık aralarında SERI_GAP'ten az boşluk olan ardışık A2 satırları tek seri sayılır ve
+       seride BİR satır bile A1 ile çakışıyorsa TÜM seri yukarıda kalır. */
+    var SERI_GAP = 1.2;
+    var a2sirali = state.a2Cues.slice().sort(function (x, y) { return x.start - y.start; });
+    for (var si = 0; si < a2sirali.length; ) {
+      var sj = si, seriCakisiyor = false;
+      while (sj < a2sirali.length) {
+        if (sj > si && (a2sirali[sj].start - a2sirali[sj - 1].end) > SERI_GAP) break;
+        if (overlapsA1(a2sirali[sj].start, a2sirali[sj].end)) seriCakisiyor = true;
+        sj++;
+      }
+      for (var sk2 = si; sk2 < sj; sk2++) a2sirali[sk2]._shift = seriCakisiyor ? _gap : 0;
+      si = sj;
+    }
+
+    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1), seri kararına göre kayar.
     var combined = [];
     state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 }); });
-    state.a2Cues.forEach(function (c) { var mg = c._ovMogrt || spStyle[c.speaker]; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: overlapsA1(c.start, c.end) ? _gap : 0 }); });
+    // İkinci koruma katmanı: stili bulunamayan A2 satırı sessizce DÜŞMESİN — ilk atanmış stile düşer.
+    var yedekSp = "";
+    for (var sk in spStyle) { if (spStyle.hasOwnProperty(sk) && spStyle[sk]) { yedekSp = spStyle[sk]; break; } }
+    if (!yedekSp) yedekSp = a1Style || state.singleStyle || (state.styles[0] && state.styles[0].path) || "";
+    var yedekli = 0;
+    state.a2Cues.forEach(function (c) {
+      var mg = c._ovMogrt || spStyle[c.speaker];
+      if (!mg && yedekSp) { mg = yedekSp; yedekli++; }
+      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: (c._shift || 0) });
+    });
+    if (yedekli) logLine("UYARI: " + yedekli + " A2 satırına stil atanmamıştı, yedek stille eklendi.");
     if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
     if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
 
@@ -505,16 +899,120 @@
     return await evalES('addLanedSubtitles("' + esPath(file) + '")');
   }
 
+  /* Ayrı kanal modunda yerleştirme. A1 = katman 0 (taban). Arkadaşlar katman 1'den başlar;
+     AYNI ANDA konuşan arkadaşlar birbirinin üstüne binmesin diye çakışanlara ayrı katman
+     verilir (greedy). Çakışma yoksa hepsi tek katmanda kalır — gereksiz video kanalı tüketilmez. */
+  async function placeChannels(range) {
+    var a1Style = $("selStyleA1").value, _gap = 130;
+    var a1Iv = [];
+    state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
+    function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
+
+    var arkadas = [];
+    state.channels.forEach(function (ch) {
+      var st = ch.styleSel ? ch.styleSel.value : "";
+      ch.cues.forEach(function (c) {
+        var mg = c._ovMogrt || st;
+        if (mg) arkadas.push({ start: c.start, end: c.end, mogrt: mg, text: c.text });
+      });
+    });
+    arkadas.sort(function (a, b) { return a.start - b.start; });
+
+    // Çakışanlara ayrı katman (greedy interval coloring)
+    var katmanSon = [];
+    arkadas.forEach(function (it) {
+      var L = 0;
+      while (L < katmanSon.length && katmanSon[L] > it.start + 0.001) L++;
+      katmanSon[L] = it.end; it.kat = L;
+    });
+
+    /* KATMAN BÜTÇESİ — her katman bir video kanalı tüketir. host tarafı taşan lane'i 0'a
+       kelepçeliyor (addLanedSubtitles: idx2 = top - lane, idx2<0 ise 0) ve o kanaldaki
+       zaman aralığına denk gelen TÜM klipleri siliyor — yani senin GÖRÜNTÜN silinebilir.
+       Bu yüzden katman sayısı sekanstaki video kanalıyla sınırlanır: fazla çakışanlar aynı
+       katmanda kalır (ekranda üst üste binebilir ama hiçbir şey silinmez). */
+    var maxKat = 0;
+    for (var mk = 0; mk < arkadas.length; mk++) if (arkadas[mk].kat > maxKat) maxKat = arkadas[mk].kat;
+    var vt = 0;
+    try { vt = (JSON.parse(await evalES("getAudioTracksJSON()")) || {}).videoTracks || 0; } catch (eVt) {}
+    if (vt > 0) {
+      var izin = Math.max(0, vt - 3);   // en alt video kanalı (senin görüntün) korunur
+      if (maxKat > izin) {
+        var kirpilan = 0;
+        for (var k3 = 0; k3 < arkadas.length; k3++) if (arkadas[k3].kat > izin) { arkadas[k3].kat = izin; kirpilan++; }
+        logLine("UYARI: sekansta " + vt + " video kanalı var, " + (3 + maxKat) + " gerekiyordu. " +
+                kirpilan + " altyazı aynı katmana alındı (üst üste gelebilir). Video kanalı eklersen düzelir.");
+        maxKat = izin;
+      }
+    }
+    // A1 ile çakışma kararı SERİ başına (tek tek verilirse altyazı sürekli zıplıyor)
+    var SERI_GAP = 1.2;
+    for (var i = 0; i < arkadas.length; ) {
+      var j = i, cak = false;
+      while (j < arkadas.length) {
+        if (j > i && (arkadas[j].start - arkadas[j - 1].end) > SERI_GAP) break;
+        if (overlapsA1(arkadas[j].start, arkadas[j].end)) cak = true;
+        j++;
+      }
+      for (var k = i; k < j; k++) arkadas[k]._a1cak = cak;
+      i = j;
+    }
+
+    var combined = [];
+    state.a1Cues.forEach(function (c) {
+      var mg = c._ovMogrt || a1Style;
+      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 });
+    });
+    arkadas.forEach(function (it) {
+      combined.push({ start: it.start, end: it.end, mogrt: it.mogrt, text: it.text,
+        lane: 1 + it.kat, shift: (it._a1cak ? _gap : 0) + it.kat * _gap });
+    });
+    if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
+    if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
+    combined.sort(function (a, b) { return a.start - b.start; });
+
+    var body = combined.map(function (c) {
+      return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + c.shift + "|" + String(c.text).replace(/[\r\n|]/g, " ");
+    }).join("\n");
+    var file = path.join(cfg.workDir, "chan_" + Date.now() + ".txt");
+    fs.writeFileSync(file, body, "utf8");
+    logLine(combined.length + " altyazı · " + (arkadas.length ? (2 + maxKat) : 1) + " katman (üst üste konuşma: " + (maxKat ? "var" : "yok") + ")");
+    return await evalES('addLanedSubtitles("' + esPath(file) + '")');
+  }
+
+  // Aktif üretim moduna göre doğru yerleştiriciyi seçer
+  function placeCurrent(range) {
+    if (state.genMode === "channels") return placeChannels(range);
+    if (state.genMode === "speaker") return placeSpeaker(range);
+    return placeSingle(range);
+  }
+  // Aktif moddaki tüm cue'lar (renk değiştirme ve dışa aktarma için tek liste)
+  function allCues() {
+    if (state.genMode === "channels") {
+      var out = state.a1Cues.slice();
+      state.channels.forEach(function (ch) { out = out.concat(ch.cues); });
+      return out;
+    }
+    if (state.genMode === "speaker") return state.a1Cues.concat(state.a2Cues);
+    return state.singleCues;
+  }
+
   // ---------- butonlar ----------
   $("btnRun").addEventListener("click", async function () {
     if (state.running) return; state.running = true; state.cancelled = false;
     var btn = this; btn.disabled = true; $("result").hidden = true; $("speakerMap").hidden = true;
     $("log").textContent = ""; progressReset("Başlıyor…");
     $("btnCancel").hidden = false;
-    try { if (!CEP) await runMock(); else if (state.mode === "speaker") await runSpeaker(); else await runSingle(); }
+    try {
+      if (!CEP) await runMock();
+      else if (state.mode === "speaker") {
+        if ($("chkAyriKanal") && $("chkAyriKanal").checked) await runChannels();
+        else await runSpeaker();
+      } else await runSingle();
+    }
     catch (e) {
       if (state.cancelled) progressFail("İptal edildi", "warn");
-      else { progressFail("❌ " + (e.message || e), "bad"); logLine("HATA: " + (e.message || e)); }
+      else { progressFail("❌ " + friendlyError(e), "bad"); logLine("HATA: " + (e.message || e)); }
     }
     finally { state.running = false; btn.disabled = false; $("btnCancel").hidden = true; }
   });
@@ -532,7 +1030,7 @@
     "pembe": "#ff7ac2", "turuncu": "#ff8c42", "lacivert": "#3b5bdb", "gri": "#9aa0b5", "altın": "#e0a63a",
     "altin": "#e0a63a", "turkuaz": "#3fc6c6", "yeşilimsi": "#9ac44b" };
   function styleColor(name, i) {
-    var n = String(name).toLowerCase();
+    var n = trLower(name);
     for (var s in _STYLE_COLORS) { if (_STYLE_COLORS.hasOwnProperty(s) && n.indexOf(s) >= 0) return _STYLE_COLORS[s]; }
     for (var k in _COLORWORDS) { if (_COLORWORDS.hasOwnProperty(k) && n.indexOf(k) >= 0) return _COLORWORDS[k]; }
     return speakerColor(i);
@@ -545,7 +1043,7 @@
   }
   function updateRecolorHint() {
     var h = $("recolorHint"); if (!h) return;
-    var has = state.singleCues.length || state.a1Cues.length || state.a2Cues.length;
+    var has = allCues().length;
     if (has) { h.style.color = ""; h.textContent = "İpucu: birden çok klip seçip tek renge çevirebilirsin. Değişiklik geri alınabilir (Ctrl+Z)."; }
     else { h.style.color = "var(--warn)"; h.textContent = "⚠ Önce \"Tek Stil\" veya \"Konuşmacıya Göre\" ile altyazı oluşturup timeline'a ekle — renk değiştirme o listeyi kullanır (panel kapanınca sıfırlanır)."; }
   }
@@ -572,8 +1070,7 @@
       var raw = await evalES("getSelectedSubTimes()");
       var times = []; try { times = JSON.parse(raw) || []; } catch (e) {}
       if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra bir renk seç.", "Renk değiştir"); return; }
-      var isSpk = (state.genMode === "speaker");
-      var cues = isSpk ? state.a1Cues.concat(state.a2Cues) : state.singleCues;
+      var cues = allCues();
       if (!cues.length) { uiAlert("Panelde altyazı listesi boş. Panel kapanınca liste sıfırlanır — o videoyu tekrar 'Altyazı Oluştur'.", "Renk değiştir"); updateRecolorHint(); return; }
       var matched = [];
       for (var t = 0; t < times.length; t++) {
@@ -588,21 +1085,58 @@
       var range = { start: spanStart - 0.05, end: Infinity };
       if (st) { st.hidden = false; st.style.color = "var(--muted)"; st.textContent = "⏳ " + matched.length + " altyazının rengi değiştiriliyor…"; }
       await evalES('saveProject()');   // renk değişimi öncesi kaydet (Geri Al için)
-      var r = isSpk ? await placeSpeaker(range) : await placeSingle(range);
-      if (r != null) setRecolorStatus(r); else if (st) st.hidden = true;
+      var r = await placeCurrent(range);
+      if (r != null) { setRecolorStatus(r); saveSession(); } else if (st) st.hidden = true;
     } catch (e) { if (st) { st.hidden = false; st.style.color = "var(--bad)"; st.textContent = "✕ " + (e.message || e); } }
     finally { _recoloring = false; if (btn) btn.classList.remove("busy"); }
   }
+  /* Timeline'daki altyazının YAZISINI yerinde düzelt. Eskiden metin hatası görünce ya Premiere'de
+     tek tek elle düzeltmek ya da panelde düzeltip yeniden basmak gerekiyordu; ikincisi tüm zaman
+     aralığını silip yeniden bastığı için timeline'da elle yapılan konum/süre ayarları uçuyordu. */
+  function fixStatus(msg, renk) {
+    var el = $("fixStatus"); if (!el) return;
+    el.textContent = msg || ""; el.style.color = renk || "var(--muted)";
+  }
+  if ($("btnFixRead")) $("btnFixRead").addEventListener("click", async function () {
+    if (!CEP) { fixStatus("Önizleme modu.", "var(--warn)"); return; }
+    var raw = await evalES("getSelectedSubText()");
+    var list = []; try { list = JSON.parse(raw) || []; } catch (e) {}
+    if (!list.length) { fixStatus("Timeline'da altyazı klibi seçili değil.", "var(--warn)"); return; }
+    $("fixText").value = list[0] || "";
+    fixStatus(list.length > 1 ? (list.length + " klip seçili — Uygula hepsini aynı yapar") : "Okundu.",
+      list.length > 1 ? "var(--warn)" : "var(--good)");
+  });
+  if ($("btnFixApply")) $("btnFixApply").addEventListener("click", async function () {
+    if (!CEP) { fixStatus("Önizleme modu.", "var(--warn)"); return; }
+    var t = String($("fixText").value || "").replace(/\s+/g, " ").trim();
+    if (!t) { fixStatus("Önce yazıyı gir.", "var(--warn)"); return; }
+    var btn = this; if (btn.disabled) return; btn.disabled = true;
+    try {
+      await evalES("saveProject()");   // Geri Al için
+      // Metin DOSYA üzerinden geçirilir: evalScript string literaline gömmek Türkçe karakter,
+      // tırnak ve ters bölü açısından kırılgan (altyazı yerleştirme de aynı sebeple dosya kullanıyor).
+      pipeline.ensureDir(cfg.workDir);
+      var tf = path.join(cfg.workDir, "fixtext_" + Date.now() + ".txt");
+      fs.writeFileSync(tf, t, "utf8");
+      var r = await evalES('setSelectedSubTextFile("' + esPath(tf) + '")');
+      try { fs.unlinkSync(tf); } catch (eDel) {}
+      var msg = String(r).replace(/^[a-z_]+:/, "");
+      fixStatus((String(r).indexOf("ok:") === 0 ? "✓ " : "⚠ ") + msg,
+        String(r).indexOf("ok:") === 0 ? "var(--good)" : "var(--warn)");
+    } catch (eFix) { fixStatus("✕ " + friendlyError(eFix), "var(--bad)"); }
+    finally { btn.disabled = false; }
+  });
+
   $("btnAddTimeline").addEventListener("click", async function () {
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de timeline'a eklenir."); return; }
     var btn = this; if (btn.disabled) return; btn.disabled = true;   // çift-tık koruması (mükerrer yerleştirmeyi önler)
     try {
       await evalES('saveProject()');   // yerleştirmeden önce kaydet (Geri Al için)
       progressBusy("Timeline'a ekleniyor…");
-      var r = (state.mode === "speaker") ? await placeSpeaker() : await placeSingle();
+      var r = await placeCurrent();
       if (r != null) showResult(r); else $("progressBox").hidden = true;
     }
-    catch (e) { progressFail("❌ " + (e.message || e), "bad"); uiAlert((e.message || e) + "", "Hata"); }
+    catch (e) { progressFail("❌ " + friendlyError(e), "bad"); logLine("HATA: " + (e.message || e)); uiAlert(friendlyError(e), "Hata"); }
     finally { btn.disabled = false; }
   });
   // Geri Al: son işlemden önce kaydedilen sürüme dön (proje yeniden açılır)
@@ -621,11 +1155,9 @@
 
   // ---------- transkript export (SRT / TXT / YouTube bölüm) ----------
   function exportCues() {
-    if (state.mode === "speaker") {
-      var all = state.a1Cues.concat(state.a2Cues).map(function (c) { return { start: c.start, end: c.end, text: c.text }; });
-      all.sort(function (a, b) { return a.start - b.start; }); return all;
-    }
-    return state.singleCues;
+    var all = allCues().map(function (c) { return { start: c.start, end: c.end, text: c.text }; });
+    all.sort(function (a, b) { return a.start - b.start; });
+    return all;
   }
   function saveAs(defName, filters, content) {
     var p = null;
@@ -731,7 +1263,7 @@
       acDone("Bitti — " + res.count + " boşluk bulundu (eşik " + res.threshold + "dB)");
     } catch (e) {
       if (state.cancelled) acFail("İptal edildi", "warn");
-      else { acFail("❌ " + (e.message || e), "bad"); acLogLine("HATA: " + (e.message || e)); }
+      else { acFail("❌ " + friendlyError(e), "bad"); acLogLine("HATA: " + (e.message || e)); }
     }
     finally { btn.disabled = false; $("acCancel").hidden = true; }
   });
@@ -830,6 +1362,11 @@
     fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
     refreshRecolorBtns();   // Renk Değiştir sekmesi buton grid'i
     if (state.styles.length) logLine(state.styles.length + " stil: " + state.styles.map(function (s) { return s.name; }).join(", "));
+    try { cleanupOldTemp(); } catch (eTmp) {}            // eski geçici WAV'lar birikmesin
+    // Kaydedilmiş oturum varsa geri yüklemeyi teklif et (panel kapanınca liste uçmasın)
+    try { offerSessionRestore(); } catch (eSes) {}
+    // Konuşmacı ayırma CPU'ya düşmüşse bunu görünür yap — sessizce 5-15 kat yavaşlıyordu
+    if (cfg.diarizeDevice !== "cuda") logLine("Not: konuşmacı ayırma CPU'da çalışacak (yavaş). Hızlandırmak için “Konuşmacıya Göre” sekmesindeki GPU kutusunu işaretle.");
     // Oto-güncelleme (arka planda, sessiz — internet yoksa/başarısızsa paneli etkilemez)
     try {
       var updater = require(path.join(extRoot, "js", "updater.js"));
@@ -856,12 +1393,32 @@
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
   function wirePersistence() {
-    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk"];
+    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk", "selCensor"];
     for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
+    // Sansür eskiden açık/kapalı bir kutuydu; kayıtlı eski değeri yeni üç seviyeye taşı
+    if ($("selCensor") && lsGet("selCensor", null) == null) $("selCensor").value = (lsGet("censor", "1") === "1") ? "all" : "off";
     restoreSegs();
-    // Küfür sansürü toggle — varsayılan AÇIK
-    var cc = $("chkCensor");
-    if (cc) { cc.checked = lsGet("censor", "1") === "1"; cc.addEventListener("change", function () { lsSet("censor", cc.checked ? "1" : "0"); }); }
+    // Ayrı kanal modu toggle'ı — açıkken diarizasyon (AI tahmini) devre dışı kalır
+    var ak = $("chkAyriKanal");
+    if (ak) {
+      ak.checked = lsGet("ayriKanal", "0") === "1";
+      var uygula = function (tara) {
+        var on = ak.checked;
+        if ($("kanalBox")) $("kanalBox").hidden = !on;
+        if ($("diarizeBox")) $("diarizeBox").hidden = on;
+        var not = $("rsFriendsNote"); if (not) not.textContent = on ? "Her kanal ayrı kişi" : "AI otomatik ayıracak";
+        lsSet("ayriKanal", on ? "1" : "0");
+        if (on && tara && CEP && cfg) scanChannels();
+      };
+      ak.addEventListener("change", function () { uygula(true); });
+      var dg = $("chkDiarGpu");
+      if (dg) {
+        dg.checked = lsGet("diarGpu", (cfg && cfg.diarizeDevice === "cuda") ? "1" : "0") === "1";
+        dg.addEventListener("change", function () { lsSet("diarGpu", dg.checked ? "1" : "0"); });
+      }
+      uygula(false);   // ilk yüklemede sadece görünürlük; tarama kullanıcı isteyince
+    }
+    if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
   }
 
   try { if (CEP) initCEP(); else initMock(); wirePersistence(); }

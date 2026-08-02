@@ -4,13 +4,21 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 
 ## Yapı
 - Panel arayüzü: `index.html` + `js/app.js` + `js/pipeline.js` — CEP (CSInterface.js, `--enable-nodejs --mixed-context`).
-- Karakter sözlüğü: `js/sozluk.js` — özel isimleri düzeltir (Tofi/Moni/Dora/Mimi/Niko). İki katman: motora `--hotwords` ipucu + transkript sonrası kesin kelime düzeltmesi. Liste `sozluk.json`'da (gitignore'lu), panelden düzenlenir.
+- Karakter sözlüğü: `js/sozluk.js` — özel isimleri düzeltir (Tofi/Moni/Dora/Mimi/Niko). İki katman: motora `--hotwords` ipucu + transkript sonrası kesin kelime düzeltmesi (zincirlenmiş Türkçe ekler dahil: "Tofilerden"). Liste `sozluk.json`'da (gitignore'lu), panelden düzenlenir.
+
+## Üretim modları (js/app.js)
+- **Tek Stil** (`runSingle`) — tek kanal ya da **Mix** (A1+A2 birleşik).
+- **Konuşmacıya Göre** (`runSpeaker`) — A2 karışık kanal, pyannote ile AI konuşmacı ayırma.
+- **Ayrı Kanal** (`runChannels`) — A2/A3/A4… her kanal bir kişi. Diarizasyon YOK, ayrım %100 doğru,
+  üst üste konuşmalar da çıkar. Çakışan konuşmalara greedy katman atanır (her katman bir video kanalı tüketir).
+- Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
 - Host katmanı: `jsx/host.jsx` — **ExtendScript (ES3)**: `let`/`const`/arrow/optional-chaining **YOK**. Premiere'i bu dosya sürer.
 - Manifest: `CSXS/manifest.xml` — BundleId `com.yusufwrl.premierepanel`, PPRO 14+, CSXS 9.
 - Motor harici: `%ENGINE%\Faster-Whisper-XXL` (varsayılan `C:\Users\yusuf\YusufwrlEngine`). Repoya dahil değil, gitignore'lu (~3GB).
 
 ## Komutlar (PowerShell)
-- Geliştirici kurulumu / güncelleme: `powershell -NoProfile -ExecutionPolicy Bypass -File .\install-dev.ps1` (veya `KUR.bat`). PlayerDebugMode'u açar, klasörü `%APPDATA%\Adobe\CEP\extensions`'a junction'lar.
+- **Değişiklikleri panele gönder (her seferinde gerekir): `powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-dev.ps1`** — kurulu panel junction değil KOPYA olduğu için repo değişiklikleri kendiliğinden yansımaz. Kullanıcıya özel dosyaları korur.
+- İlk kurulum (PlayerDebugMode): `powershell -NoProfile -ExecutionPolicy Bypass -File .\install-dev.ps1` (veya `KUR.bat`). ⚠ Bu betik junction kurar — bu yolda CEF'i bozuyor, junction oluşursa kaldırıp `deploy-dev.ps1` kullan.
 - Kurulumdan sonra Premiere'i **tamamen kapat-aç** → Window (Pencere) > Extensions > Yusufwrl Premiere.
 - Otomatik-güncelleme zip'i: `powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\pack-panel.ps1`.
 - GitHub sürümü yayınla: `powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\publish-github.ps1` (commit + push + release; `gh` kurulu ve girişli).
@@ -25,3 +33,6 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 - `config.json` `%ENGINE%` / `~` token'ları kullanır; makineye özel yol **gömme** (auto-updater config.json'ı ezer). Kullanıcıya/makineye özel dosyalar: `engine-root.txt`, `diarize-device.txt`, `sozluk.json` — gitignore'lu ve **üç yerde birden** korunmalı: `pack-panel.ps1` `$exclude`, `updater.js` `copyDir` skip listesi, `.gitignore`.
 - Debug: panel açıkken Chrome/Edge'de `http://localhost:8088` → DevTools (panel HTML/JS). `host.jsx` için VS Code "ExtendScript Debugger".
 - **Premiere 2026 (UXP):** CEP panelleri 2026 sürümünde yüklenmeyebilir. Panel görünmüyorsa muhtemel sebep bu; CEP hâlâ Premiere 2024/2025'te çalışır. Uzun vadede UXP'ye taşınması gerekir.
+- **Kurulu panel junction DEĞİL, KOPYA:** `%APPDATA%\Adobe\CEP\extensions\com.yusufwrl.premierepanel` ayrı bir klasör (OneDrive + Türkçe karakterli yol CEF'i bozduğu için ASCII yola kopyalanmış). Repo'daki değişiklikler oraya **kopyalanmadan** panele yansımaz — `install-dev.ps1` ya da elle `Copy-Item`. Sürüm numarası güncel görünüp kodun eski olması bu yüzden olur.
+- **ExtendScript'e metin geçerken dosya kullan:** `evalScript` string literaline gömülen Türkçe karakter/tırnak/ters bölü kırılgan. Altyazı yerleştirme ve metin düzeltme metni `work` klasöründeki geçici dosyadan okur (`_readFileUTF8`).
+- **Motor `--initial_prompt` varsayılanı `auto`** (hazır Türkçe preset). Özel isim ipucu için onu ezme; `--hotwords` ayrı kanaldır ve preset'i bozmaz. `--reprompt` varsayılanı `True` olduğu için ipucu tüm video boyunca taşınır.

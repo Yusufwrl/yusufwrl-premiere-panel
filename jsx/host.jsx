@@ -3,12 +3,15 @@
  * Panel (main.js) bu fonksiyonları CSInterface.evalScript ile çağırır.
  */
 
+// JSON string kaçışı. C0 kontrol karakterleri (TAB, satır sonu vb.) ham bırakılırsa panel
+// tarafındaki JSON.parse patlar — MOGRT metninde bunlar gerçekten görülebiliyor.
 function _jsonEsc(s) {
     if (s === null || s === undefined) return "";
     s = String(s);
     s = s.replace(/\\/g, "\\\\");
     s = s.replace(/"/g, '\\"');
     s = s.replace(/[\r\n]/g, " ");
+    s = s.replace(/[\x00-\x1f]/g, " ");   // kalan C0 kontrol karakterleri (TAB vb.)
     return s;
 }
 
@@ -46,6 +49,28 @@ function getA1ClipsJSON(trackIdx) {
     return '{"sequenceName":"' + _jsonEsc(seq.name) + '",' +
            '"clipCount":' + track.clips.numItems + ',' +
            '"clips":[' + parts.join(",") + ']}';
+}
+
+/*
+ * Sekanstaki SES kanallarını ve her birindeki klip sayısını döndürür.
+ * "Ayrı kanal" modu bunu kullanır: hangi kanallarda konuşma var, kaç kanal seçilebilir.
+ * Video kanalı sayısı da döner — her ek konuşmacı katmanı bir video kanalı tükettiği için
+ * panel "yeterli video kanalın var mı" uyarısını buna göre verir.
+ */
+function getAudioTracksJSON() {
+    var seq = app.project.activeSequence;
+    if (!seq) return '{"error":"no_sequence"}';
+    var out = [];
+    var n = 0;
+    try { n = seq.audioTracks.numTracks; } catch (eN) { n = 0; }
+    for (var i = 0; i < n; i++) {
+        var say = 0;
+        try { say = seq.audioTracks[i].clips.numItems; } catch (e) { say = 0; }
+        out.push('{"idx":' + i + ',"clips":' + say + '}');
+    }
+    var vt = 0;
+    try { vt = seq.videoTracks.numTracks; } catch (eV) { vt = 0; }
+    return '{"videoTracks":' + vt + ',"tracks":[' + out.join(",") + ']}';
 }
 
 function _basename(p) { return String(p).replace(/^.*[\\\/]/, ""); }
@@ -260,6 +285,82 @@ function getSelectedSubTimes() {
         }
         return "[" + out.join(",") + "]";
     } catch (e) { return "[]"; }
+}
+
+/*
+ * Timeline'da SEÇİLİ altyazı kliplerinin METNİNİ döndürür (JSON dizi).
+ * Panelde "seçili klibin yazısını düzelt" akışı için: önce mevcut metin okunur, kullanıcı
+ * düzeltir, sonra setSelectedSubText ile yerine yazılır.
+ */
+function getSelectedSubText() {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "[]";
+        var out = [];
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
+            var tr = seq.videoTracks[v];
+            for (var i = 0; i < tr.clips.numItems; i++) {
+                var cl = tr.clips[i];
+                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
+                if (!sel) continue;
+                var mc = null; try { mc = cl.getMGTComponent(); } catch (e2) {}
+                if (!mc) continue;
+                var t = _getMGTText(cl);
+                out.push('"' + _jsonEsc(t == null ? "" : t) + '"');
+            }
+        }
+        return "[" + out.join(",") + "]";
+    } catch (e) { return "[]"; }
+}
+
+/*
+ * Seçili altyazı kliplerinin metnini YERİNDE değiştirir.
+ * Klip silinip yeniden import EDİLMEZ — bu yüzden konum, süre ve elle yapılmış her ayar korunur.
+ * (Panelde metni düzeltip yeniden yerleştirmek tüm zaman aralığını silip baştan basıyor ve
+ *  timeline'da elle yapılan düzenlemeleri yok ediyordu.)
+ */
+/*
+ * Metni DOSYADAN okuyup uygular. Metni evalScript'in string literaline gömmek Türkçe karakter,
+ * tırnak ve ters bölü açısından kırılgan; altyazı yerleştirme de aynı sebeple dosya kullanıyor.
+ */
+function setSelectedSubTextFile(txtPath) {
+    var t = "";
+    try { t = _readFileUTF8(txtPath); } catch (e) { return "err:Metin dosyası okunamadı"; }
+    t = String(t).replace(/[\r\n]+$/, "");
+    if (!t) return "err:Metin boş";
+    return setSelectedSubText(t);
+}
+
+function setSelectedSubText(newText) {
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Metin Düzelt"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        // ÖNCE seçili klipleri topla: _setTextAllWays içindeki setSelected çağrısı seçimi
+        // değiştirdiği için, tararken değiştirmek sonraki klipleri kaçırır.
+        var hedef = [];
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
+            var tr = seq.videoTracks[v];
+            for (var i = 0; i < tr.clips.numItems; i++) {
+                var cl = tr.clips[i];
+                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
+                if (!sel) continue;
+                var mc = null; try { mc = cl.getMGTComponent(); } catch (e2) {}
+                if (mc) hedef.push(cl);
+            }
+        }
+        if (!hedef.length) return "err:Seçili altyazı klibi yok";
+        var degisen = 0, atlanan = 0;
+        for (var h = 0; h < hedef.length; h++) {
+            var yol = _setTextAllWays(hedef[h], newText);
+            if (yol && yol !== "notfound") degisen++; else atlanan++;
+        }
+        // Hiçbiri değişmediyse BAŞARI dönme — panel yeşil tik gösterip kullanıcıyı yanıltıyordu.
+        if (!degisen) return "err:Yazı alanı bulunamadı (" + atlanan + " klip). Bu MOGRT'de metin katmanı farklı olabilir.";
+        return "ok:" + degisen + " altyazının yazısı değişti" + (atlanan ? (", " + atlanan + " atlandı") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 /*

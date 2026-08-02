@@ -127,7 +127,9 @@ async function _renderTimelineChunk(clips, ffmpegExe, outWav, sIdx) {
     inputArgs.push("-ss", String(inPoint), "-t", String(c.durationSec), "-i", c.mediaPath);
     const delayMs = Math.round(Math.max(0, c.timelineStartSec || 0) * 1000);
     const si = (c._sIdx != null) ? c._sIdx : sIdx;   // dosyada o akış yoksa mevcut sona düşülür
-    filters.push(`[${i}:a:${si}]aresample=16000,adelay=${delayMs}|${delayMs}[a${i}]`);
+    // adelay'de "all=1" ŞART: tek değer verilirse SADECE 1. kanal gecikir, 5.1/çok kanallı
+    // kaynakta 3.-6. kanallar 0. saniyede de duyulur ve o klibin altyazı zamanları kayar.
+    filters.push(`[${i}:a:${si}]aresample=16000,adelay=${delayMs}:all=1[a${i}]`);
     labels.push(`[a${i}]`);
   });
   let filterComplex, mapLabel;
@@ -240,9 +242,39 @@ function _trLower(s) { return String(s).replace(/İ/g, "i").replace(/I/g, "ı").
 
 // Küfür/hakaret kökleri (4+ harf, düşük yanlış-pozitif; _trLower normalinde). Kısa/riskli kökler
 // (am/sik/mal/göt vb.) prefix ile ASLA kullanılmaz — masum kelimeleri sansürler.
-var _PROFANITY_ROOTS = ["orospu", "piç", "yavşa", "pezevenk", "kahpe", "kaltak", "gavat", "siktir",
-  "sikey", "sikik", "yarrak", "yarak", "puşt", "ibne", "ipne", "şerefsiz", "namussuz", "haysiyetsiz",
-  "sürtük", "fahişe", "gerizekalı", "gerzek", "dangalak", "salak", "aptal", "ahmak", "şıllık"];
+// AĞIR küfür — "Sadece ağır" seviyesinde de maskelenir
+var _PROFANITY_HARD = ["orospu", "oruspu", "piç", "yavşa", "pezevenk", "kahpe", "kaltak", "gavat", "siktir",
+  "hassiktir", "sikey", "sikik", "siker", "sikiş", "yarrak", "yarak", "puşt", "ibne", "ipne",
+  "sürtük", "fahişe", "amcık", "kancık", "godoş", "taşak"];
+// HAFİF hakaret — arkadaş şakalaşmasında normal; sadece "Hepsi" seviyesinde maskelenir
+var _PROFANITY_MILD = ["şerefsiz", "namussuz", "haysiyetsiz", "gerizekalı", "gerzek", "dangalak",
+  "salak", "aptal", "ahmak", "şıllık", "aşağılık", "beyinsiz", "ahlaksız", "terbiyesiz"];
+var _PROFANITY_ROOTS = _PROFANITY_HARD.concat(_PROFANITY_MILD);
+
+/* Türkçe ünsüz yumuşaması: kök ek alınca son sessiz harf değişir (salak -> salağın, kitap -> kitabı).
+   Yumuşamış hâl eklenmezse "salak" maskelenir ama "salağın" SANSÜRSÜZ geçer.
+   Tek heceli köklerde yumuşama olmaz (piç -> piçi), o yüzden en az 2 sesli harf aranır. */
+function _softenRoot(r) {
+  var map = { "k": "ğ", "p": "b", "t": "d", "ç": "c" };
+  // "nk" -> "ng" (pezevenk -> pezevengi); tek "k" kuralı bunu kaçırıyordu
+  if (/nk$/.test(r)) return r.slice(0, -1) + "g";
+  var soft = map[r.charAt(r.length - 1)];
+  if (!soft) return null;
+  if ((r.match(/[aeıioöuü]/g) || []).length < 2) return null;
+  return r.slice(0, -1) + soft;
+}
+// Aranacak önekler: kökler + yumuşamış hâlleri
+function _prefixesOf(roots) {
+  var out = [];
+  for (var i = 0; i < roots.length; i++) {
+    out.push(roots[i]);
+    var s = _softenRoot(roots[i]);
+    if (s) out.push(s);
+  }
+  return out;
+}
+var _PROFANITY_PREFIXES = _prefixesOf(_PROFANITY_ROOTS);
+var _PROFANITY_PREFIXES_HARD = _prefixesOf(_PROFANITY_HARD);
 
 // Kelimenin ortasını yıldızlar: ilk+son harf açık, ortadakiler '*' (aptal -> a***l). İşaretleri korur.
 function _maskWord(w) {
@@ -257,37 +289,100 @@ function _maskWord(w) {
   return out;
 }
 
-// Metindeki küfür/hakaretleri (köke göre prefix eşleşme) maskeler; boşlukları korur.
-function censorText(text) {
+/* Metindeki küfür/hakaretleri (köke göre prefix eşleşme) maskeler; boşlukları korur.
+   mode: "hard" = sadece ağır küfür, diğer her doğru değer = hepsi (hakaretler dahil).
+   "salak/aptal" gibi hafif takılmalar arkadaş videolarında normal olduğu için ayrı seviye var. */
+function censorText(text, mode) {
+  var liste = (mode === "hard") ? _PROFANITY_PREFIXES_HARD : _PROFANITY_PREFIXES;
   var toks = String(text).split(/(\s+)/);
   for (var i = 0; i < toks.length; i++) {
     if (/^\s*$/.test(toks[i])) continue;
     var core = _trLower(toks[i]).replace(/[^a-zçğıöşü]/g, "");
     if (!core) continue;
-    for (var r = 0; r < _PROFANITY_ROOTS.length; r++) {
-      if (core.indexOf(_PROFANITY_ROOTS[r]) === 0) { toks[i] = _maskWord(toks[i]); break; }
+    for (var r = 0; r < liste.length; r++) {
+      if (core.indexOf(liste[r]) === 0) { toks[i] = _maskWord(toks[i]); break; }
     }
   }
   return toks.join("");
 }
 
-// Türkçe soru/enklitik ekleri — önceki kelimeye yapışır.
+/* Türkçe soru/enklitik ekleri — önceki kelimeye yapışır, yoksa 3 kelimelik cue'dan bir slot yer
+   ve ek yetim kalır ("Sen bunu gördün" + "müydünüz"). Elle yazılan liste hep eksik kalıyordu,
+   bu yüzden ünlü uyumuna göre ÜRETİLİYOR. Düz regex kullanılamaz: "muz", "mim", "mısır" gibi
+   masum kelimeleri yakalar — bu yüzden tam eşleşmeli kapalı bir küme şart. */
 var _TR_PARTICLES = (function () {
-  var list = ["mi","mı","mu","mü","miyim","misin","miyiz","misiniz","mısın","mıyım","mıyız","mısınız",
-    "muyum","musun","muyuz","musunuz","müyüm","müsün","müyüz","müsünüz","midir","mıdır","mudur","müdür",
-    "miydi","mıydı","muydu","müydü","miydim","miydin","mıydım","mıydın","muydum","muydun","müydüm","müydün",
-    "miymiş","mıymış","muymuş","müymüş","mıydık","miydik","muyduk","müydük"];
-  var s = {}; for (var i = 0; i < list.length; i++) s[list[i]] = true; return s;
+  // [taban, geniş-zaman şahıs ekleri, geçmiş-zaman şahıs ekleri, dir, ydi, ymiş, yse]
+  var gruplar = [
+    ["mi", ["yim","sin","yiz","siniz","ler"], ["m","n","k","niz","ler"], "dir", "ydi", "ymiş", "yse"],
+    ["mı", ["yım","sın","yız","sınız","lar"], ["m","n","k","nız","lar"], "dır", "ydı", "ymış", "ysa"],
+    ["mu", ["yum","sun","yuz","sunuz","lar"], ["m","n","k","nuz","lar"], "dur", "ydu", "ymuş", "ysa"],
+    ["mü", ["yüm","sün","yüz","sünüz","ler"], ["m","n","k","nüz","ler"], "dür", "ydü", "ymüş", "yse"]
+  ];
+  var s = {};
+  for (var i = 0; i < gruplar.length; i++) {
+    var g = gruplar[i], t = g[0], genis = g[1], hepsi = g[1].concat(g[2]);
+    s[t] = true;
+    // Tabana SADECE geniş zaman şahıs ekleri gelir. Geçmiş zaman ekleri (-m, -n, -k) tabana
+    // doğrudan EKLENMEZ: "mi"+"m" = "mim", "mu"+"m" = "mum" — ikisi de gerçek Türkçe kelime
+    // ve masum kullanımları soru eki sanılıp önceki kelimeye yapışırdı.
+    for (var j = 0; j < genis.length; j++) s[t + genis[j]] = true;        // miyim, misin, …
+    for (var k = 3; k <= 6; k++) {                                        // midir, miydi, miymiş, miyse
+      s[t + g[k]] = true;
+      for (var m = 0; m < hepsi.length; m++) s[t + g[k] + hepsi[m]] = true;   // miydim, miydiniz, miymişsin
+    }
+  }
+  return s;
 })();
 
-// Türkçe dolgu/söz kelimeleri — önceki kelimeye yapışır ki ayrı cue'ya düşmesin.
-// "gördün mü ya", "kitap falan", "oldu yani" gibi. Cümle başındaki "ya"/"yani" için
-// birleştirme koşullu yapılır (önceki kelime cümle sonu değilse, aynı konuşmacı, kısa boşluk).
+/* Türkçe dolgu/söz kelimeleri — önceki kelimeye yapışır ki ayrı cue'ya düşmesin.
+   "gördün mü ya", "kitap falan", "oldu yani" gibi. Cümle başındaki "ya"/"yani" için
+   birleştirme koşullu yapılır (önceki kelime cümle sonu değilse, aynı konuşmacı, kısa boşluk).
+   DİKKAT — "şey", "bak", "böyle", "tamam", "lan" BİLEREK eklenmedi: bunlar gerçek anlam taşır
+   ve önceki kelimeye yapıştırılırsa cümlenin anlamı bozulur. */
 var _TR_FILLERS = (function () {
-  var list = ["ya", "falan", "filan", "işte", "yani"];
+  var list = ["ya", "falan", "filan", "işte", "yani", "hani", "yav", "be", "aynen", "abi", "kanka"];
   var s = {}; for (var i = 0; i < list.length; i++) s[list[i]] = true; return s;
 })();
-function _bareWord(s) { return String(s).toLowerCase().replace(/[.,;:!?…"'`()\[\]]/g, ""); }
+// Türkçe küçük harf ŞART: düz toLowerCase "İşte" -> "i̇şte" (araya görünmez U+0307 girer) verir
+// ve _TR_FILLERS eşleşmesi hiç tutmaz.
+function _bareWord(s) { return _trLower(s).replace(/[.,;:!?…"'`()\[\]]/g, ""); }
+
+/* HALÜSİNASYON FİLTRESİ — Whisper sessizlikte metin uydurabiliyor. Gerçek çıktıda videonun
+   SON satırı "Altyazı M.K." çıkmıştı: model uydurmuş ve timeline'a altyazı olarak basılmıştı.
+   Motorun no_speech_prob skoru bunu yakalıyor, AMA skor segment değil 30 SANİYELİK PENCERE
+   özelliği — aynı penceredeki bütün segmentler aynı skoru taşıyor (ölçüm: 35 pencerenin 35'i,
+   pencere başına ortalama 12 segment). Düz "skoru yüksekse sil" kuralı 10-19 GERÇEK altyazıyı
+   uyarısız silerdi. Bu yüzden DÖRT koşul birden aranır.
+   Kara liste ("abone ol", "teşekkür ederiz") BİLEREK yapılmadı: bir YouTuber'ın outro'su tanımı
+   gereği videonun sonundadır, kara liste er geç gerçek outro'yu siler. */
+function filterHallucinations(data) {
+  var segs = (data && data.segments) || [];
+  /* "O pencerede az segment" koşulu SADECE uzun/yoğun kayıtta koruma sağlıyor: toplam segment
+     sayısı azsa koşul kendiliğinden sağlanır ve filtre GERÇEK son cümleyi siler (kısa önizleme,
+     süre aralığı, ayrı kanal modunda az konuşan kişi…). Bu yüzden filtre yalnızca yeterince
+     uzun kayıtlarda çalışır — uydurma bir satır bırakmak, gerçek altyazı silmekten iyidir. */
+  if (segs.length < 20) return [];
+  var sonZaman = 0, pencere = {};
+  for (var i = 0; i < segs.length; i++) {
+    if (Number(segs[i].end) > sonZaman) sonZaman = Number(segs[i].end);
+    var k = String(segs[i].no_speech_prob);
+    pencere[k] = (pencere[k] || 0) + 1;
+  }
+  var atilan = [], oncekiEnd = null;
+  data.segments = segs.filter(function (s) {
+    var skor = Number(s.no_speech_prob), bosluk = (oncekiEnd == null) ? 99 : (Number(s.start) - oncekiEnd);
+    oncekiEnd = Number(s.end);
+    if (!isFinite(skor) || skor < 0.6) return true;                             // 1) konuşma-yok skoru yüksek mi
+    if (Number(s.start) < sonZaman - 3) return true;                            // 2) videonun son 3 sn'sinde mi
+    if ((pencere[String(s.no_speech_prob)] || 0) > 2) return true;              // 3) o pencerede az segment mi
+    var metin = String(s.text || "").trim();
+    if (!metin || metin.split(/\s+/).length > 5) return true;                   // 4) kısa metin mi
+    if (bosluk < 1.0) return true;                                              // 5) öncesinde sessizlik var mı
+    atilan.push(metin);
+    return false;
+  });
+  return atilan;
+}
 
 // Whisper JSON -> düz kelime listesi
 function flattenWords(data) {
@@ -337,7 +432,7 @@ function assignSpeakers(words, intervals) {
 }
 
 // Kelimeleri 2-3 kelimelik cue nesnelerine böl {start,end,text,speaker}. censor=true ise küfür maskelenir.
-function buildCues(words, maxWords, censor) {
+function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) | "hard" (sadece agir)
   var GAP = 0.7; maxWords = maxWords || 3;
   // soru eki birleştir
   var merged = [];
@@ -345,8 +440,23 @@ function buildCues(words, maxWords, censor) {
     var wr = words[r];
     var bare = _bareWord(wr.word);
     var pv = merged.length > 0 ? merged[merged.length - 1] : null;
-    if (pv && _TR_PARTICLES[bare]) {
-      // soru eki: koşulsuz yapışır
+    // Apostrofla başlayan ek AYRI kelime gelmiş ("Tofi" + "'ye"): boşluksuz yapıştır, yoksa
+    // ekranda tek başına "'ye" yazan bir altyazı çıkıyor.
+    if (pv && /^['’]/.test(wr.word) && wr.word.length <= 6
+        && !/[.!?…]$/.test(pv.word)                                       // önceki cümleyi bitirmemiş
+        && (wr.start - pv.end) <= 0.35                                    // ek bitişik gelir, boşluk olmaz
+        && (!wr.speaker || !pv.speaker || wr.speaker === pv.speaker)) {   // aynı konuşmacı
+      /* Sadece GERÇEK ek yapıştırılır. ‘ (sol tek tırnak) bilerek dışarıda: o tırnak AÇMA
+         karakteri ve alıntının ilk kelimesini bir öncekine kaynatıyordu. */
+      pv.word += wr.word; pv.end = wr.end;
+    } else if (pv && _TR_PARTICLES[bare]
+               && !/[.!?…]$/.test(pv.word)                                   // önceki kelime cümleyi bitirmemiş
+               && (wr.start - pv.end) <= GAP                                  // araya uzun duraklama girmemiş
+               && (!wr.speaker || !pv.speaker || wr.speaker === pv.speaker)) { // aynı konuşmacı
+      /* Soru eki önceki kelimeye yapışır — AMA koşulsuz değil. Üretilen küme kaçınılmaz olarak
+         gerçek Türkçe kelimeler de içeriyor ("müdür", "müdürler", "müdürsünüz"); koşulsuz
+         birleştirme "Ders bitti." + 2 sn sessizlik + "Müdürler geldi" cümlelerini tek altyazıya
+         kaynatıp altyazıyı saniyelerce erken başlatıyordu. */
       pv.word += " " + wr.word; pv.end = wr.end;
     } else if (pv && _TR_FILLERS[bare]
                && !/[.!?…]$/.test(pv.word)                                   // önceki kelime cümleyi bitirmemiş
@@ -355,7 +465,12 @@ function buildCues(words, maxWords, censor) {
       pv.word += " " + wr.word; pv.end = wr.end;
     } else merged.push({ start: wr.start, end: wr.end, word: wr.word, speaker: wr.speaker });
   }
-  // grupla (konuşmacı değişince de böl)
+  /* Grupla (konuşmacı değişince de böl).
+     KARAKTER SINIRI ŞART: yukarıdaki birleştirmeler (soru eki, dolgu, apostroflu ek) metni
+     pv.word'ün İÇİNE yazıyor, yani burada tek kelime sayılıyorlar. Sadece kelime sayısına
+     bakılırsa "gördün müydünüz" gibi birleşikler yüzünden cue MOGRT'ye sığmayacak kadar
+     uzayabiliyor. MAX_CHARS aynı zamanda yetim birleştirmede de kullanılıyor. */
+  var MAX_CHARS = 38;
   var groups = [], cur = [];
   function flush() { if (cur.length) { groups.push(cur); cur = []; } }
   for (var i = 0; i < merged.length; i++) {
@@ -366,17 +481,28 @@ function buildCues(words, maxWords, censor) {
       else if (w.speaker && prev.speaker && w.speaker !== prev.speaker) flush();
     }
     cur.push(w);
-    var hard = /[.!?…:]$/.test(w.word), soft = /,$/.test(w.word);
-    if (cur.length >= maxWords || hard || (soft && cur.length >= 2)) flush();
+    // "2." gibi SIRA SAYILARI cümle sonu değildir ("2. bölüm", "1. sıra") — rakam+nokta bölmez.
+    var hard = /[!?…:]$/.test(w.word) || (/\.$/.test(w.word) && !/\d\.$/.test(w.word));
+    var soft = /,$/.test(w.word);
+    var harf = 0; for (var hq = 0; hq < cur.length; hq++) harf += cur[hq].word.length + (hq ? 1 : 0);
+    if (cur.length >= maxWords || harf >= MAX_CHARS || hard || (soft && cur.length >= 2)) flush();
   }
   flush();
-  // tek kelimelik cue'yu öncekine bağla (aynı konuşmacı)
+  /* Yetim tek-kelimelik cue'ları öncekine bağla.
+     ESKİ KOŞUL "önceki grup maxWords'ten az" idi; gerçek veride yetimlerin %88'inde önceki grup
+     zaten doluydu, yani kural neredeyse hiç çalışmıyordu (728 cue'nun 109'u tek kelime, çoğu
+     0.1-0.3 sn ekranda yanıp sönüyordu). Yeni ölçüt kelime SAYISI değil METNİN HARF SAYISI:
+     MOGRT'ye sığdığı sürece birleşsin. Cümle sonu koruması ŞART — nokta cleanPunct'ta silindiği
+     için iki ayrı cümle tek satıra kaynarsa ekranda anlamsız görünür. */
+  function _grupMetin(g) { var t = ""; for (var q = 0; q < g.length; q++) t += (q ? " " : "") + g[q].word; return t; }
   for (var c = groups.length - 1; c > 0; c--) {
-    if (groups[c].length === 1 && groups[c - 1].length < maxWords) {
-      var a = groups[c][0], bg = groups[c - 1][groups[c - 1].length - 1];
-      var sameSp = (!a.speaker || !bg.speaker || a.speaker === bg.speaker);
-      if (a.start - bg.end <= GAP && sameSp) { groups[c - 1] = groups[c - 1].concat(groups[c]); groups.splice(c, 1); }
-    }
+    if (groups[c].length !== 1) continue;
+    var a = groups[c][0], onceki = groups[c - 1], bg = onceki[onceki.length - 1];
+    var sameSp = (!a.speaker || !bg.speaker || a.speaker === bg.speaker);
+    if (!sameSp || (a.start - bg.end) > GAP) continue;
+    if (/[.!?…:]$/.test(bg.word)) continue;                                    // önceki cümleyi bitirmiş
+    if (cleanPunct(_grupMetin(onceki) + " " + a.word).length > MAX_CHARS) continue;   // satır taşar
+    groups[c - 1] = onceki.concat(groups[c]); groups.splice(c, 1);
   }
   var cues = [];
   for (var k = 0; k < groups.length; k++) {
@@ -384,7 +510,7 @@ function buildCues(words, maxWords, censor) {
     if (end <= start) end = start + 0.4;
     var text = ""; for (var mm = 0; mm < g.length; mm++) text += (mm ? " " : "") + g[mm].word;
     text = cleanPunct(text);
-    if (censor) text = censorText(text);
+    if (censor) text = censorText(text, censor);
     if (!text) continue;
     cues.push({ start: start, end: end, text: text, speaker: g[0].speaker || null });
   }
@@ -396,11 +522,13 @@ function buildCues(words, maxWords, censor) {
     var minDur = Math.max(0.8, cu.text.length / CPS);        // ~17 karakter/saniye
     var target = Math.max(cu.end, cu.start + minDur);         // en az minDur; doğal daha uzunsa koru
     if (target - cu.start > MAX_DUR) target = cu.start + MAX_DUR;
-    if (ci + 1 < cues.length) {                              // sonraki cue'ya taşma engeli
-      var nextStart = cues[ci + 1].start;
-      if (target > nextStart - MIN_GAP) target = nextStart - MIN_GAP;
-    }
-    cu.end = Math.max(cu.start + 0.05, target);               // en az 0.05 sn görünür kalsın
+    var tavan = (ci + 1 < cues.length) ? (cues[ci + 1].start - MIN_GAP) : Infinity;
+    if (target > tavan) target = tavan;                      // sonraki cue'ya taşma engeli
+    /* Taban 0.05 sn. Normalde minDur (>=0.8 sn) zaten çok daha uzun bir süre veriyor; bu taban
+       yalnızca kelime zaman damgalarının ÇAKIŞTIĞI (tavan, cue'nun kendi başlangıcının altına
+       indiği) durumda devreye giriyor. Daha uzun tutmak timeline'da klip çakışması demek —
+       Premiere'de gerçek bir sorun olduğu için taşma pahasına uzatma yapılmıyor. */
+    cu.end = Math.max(cu.start + 0.05, target);
   }
   return cues;
 }
@@ -478,15 +606,27 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   if (opts.diarize) {
     // pyannote_v3.1: kullanıcı testinde reverb_v2'den daha iyi sonuç verdi (+MIT lisanslı, ticari-güvenli).
     // Cihaz makineye özel: çalışan GPU'da cuda (hızlı), Blackwell/desteksiz GPU'da cpu.
-    args.push("--diarize", "pyannote_v3.1", "--diarize_device", (cfg.diarizeDevice || "cpu"));
+    args.push("--diarize", "pyannote_v3.1", "--diarize_device", (opts.diarizeDevice || cfg.diarizeDevice || "cpu"));
     // Otomatik kümeleme benzer sesleri birleştirebilir (5 kişi -> 2). Kullanıcı sayıyı
     // verirse modeli tam o kadar konuşmacıya zorlarız (daha hassas ayırma).
     var ns = parseInt(opts.numSpeakers, 10);
     if (ns > 0) args.push("--num_speakers", String(ns));
+    else {
+      /* Kesin sayı bilinmiyorsa alt/üst sınır ver. Otomatik kümeleme benzer sesleri BİRLEŞTİRME
+         eğiliminde (4 arkadaş -> 2 konuşmacı) ve panelde bunu düzeltmek imkânsız: sonradan
+         konuşmacı EKLENEMİYOR. Fazla bölme ise bedava — iki konuşmacıya aynı rengi verirsin.
+         Bu yüzden alt sınır ("en az N kişi") pratikte en faydalı ayar. */
+      var mn = parseInt(opts.minSpeakers, 10), mx = parseInt(opts.maxSpeakers, 10);
+      if (mn > 0) args.push("--min_speakers", String(mn));
+      if (mx > 0) args.push("--max_speakers", String(mx));
+    }
     args.push("--output_format", "json", "srt");
   } else args.push("--output_format", "json");
   args.push("--output_dir", outDir);
 
+  /* Hızlı önizleme bayrağı ipucusuz YEDEK kopyaya da girmeli; yoksa motor --hotwords'ü
+     tanımayıp yedeğe düşüldüğünde hızlı mod sessizce kapanıyor. */
+  if (opts.batched) args.push("--batched");
   // İpucusuz kopya — motor --hotwords'ü tanımazsa (eski sürüm) buna geri dönülür.
   const argsNoHot = args.slice();
   // Karakter/özel isim ipucu: modele "bu isimler geçecek" der, doğru yazma olasılığı artar.
@@ -517,6 +657,8 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   }
   if (!fs.existsSync(jsonPath)) throw new Error("JSON üretilemedi: " + jsonPath);
   const data = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  const uydurma = filterHallucinations(data);
+  if (uydurma.length && onLog) onLog("[whisper] " + uydurma.length + " uydurma satır atıldı: " + uydurma.join(" / ") + "\n");
   const words = flattenWords(data);
   // Karakter isimlerini düzelt (Toffy'ye -> Tofi'ye). Model ipucuna uymamış olsa bile
   // burası deterministik: sözlükteki yanlış yazımlar doğrusuyla değiştirilir.
@@ -532,7 +674,9 @@ async function transcribe(cfg, wavPath, onLog, opts) {
       onLog("[whisper] UYARI: konuşmacı ayırma istendi ama SRT üretilmedi, konuşmacı ayrımı atlandı.\n");
     }
   }
-  const cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, !!opts.censor);
+  // DİKKAT: "!!" KULLANMA — censor üç değerli (false | "all" | "hard"); boolean'a çevirmek
+  // "sadece ağır küfür" seçeneğini sessizce "hepsi" yapar.
+  const cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor);
   try { fs.unlinkSync(jsonPath); } catch (e) {}
   try { if (fs.existsSync(srtPath)) fs.unlinkSync(srtPath); } catch (e) {}
   if (onLog) onLog("[whisper] bitti (" + cues.length + " satır).\n");
@@ -625,5 +769,5 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav,
   buildCues, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
-  fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk,
+  fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
 };

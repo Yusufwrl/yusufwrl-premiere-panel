@@ -51,9 +51,29 @@ var _EK = (function () {
     "ne", "na", "le", "la", "yle", "yla", "ile", "ler", "lar", "lere", "lara", "leri", "ları",
     "si", "sı", "su", "sü", "m", "n", "miz", "mız", "niz", "nız", "yiz", "yız",
     "ce", "ca", "ci", "cı", "cu", "cü", "li", "lı", "lu", "lü", "siz", "sız",
-    "gil", "gile", "gili", "gilde", "gilden", "yim", "yım", "sin", "sın"];
+    "gil", "gile", "gili", "gilde", "gilden", "yim", "yım", "sin", "sın",
+    // ek fiil ve zaman ekleri: "Tofiydi", "Tofiymiş", "Tofiyken", "Tofiyse"
+    "ydi", "ydı", "ydu", "ydü", "ymiş", "ymış", "ymuş", "ymüş", "yse", "ysa",
+    "yken", "ken", "dir", "dır", "dur", "dür", "tir", "tır", "tur", "tür",
+    "ki", "lik", "lık", "luk", "lük", "cik", "cık", "cuk", "cük", "ndeki", "ndaki"];
   var s = {}; for (var i = 0; i < list.length; i++) s[list[i]] = true; return s;
 })();
+
+/* Kalan harfler geçerli bir EK ZİNCİRİ mi? ("lerden" = "ler" + "den")
+   Tek ekli biçimler zaten tek adımda çözülüyordu ama "Tofilerden", "Monilerin", "Tofiydi"
+   gibi zincirlenmiş — ve tamamen normal — Türkçe yazımlar çözülemiyor, her videoda elle
+   düzeltiliyordu.
+   İKİ GÜVENLİK SINIRI: (1) zincirin ARA halkaları en az 2 harf olmalı — tek harfli eke izin
+   verilirse "mimik" -> "Mimi"+"k" gibi masum kelimeler bozuluyor; (2) en fazla 3 halka. */
+function _ekZinciri(kalan, kalanAdim) {
+  if (!kalan) return true;
+  if (_EK[kalan]) return true;                       // tamamı tek ek (tek harfli olabilir: "m", "n")
+  if (kalanAdim <= 0) return false;
+  for (var L = Math.min(6, kalan.length - 1); L >= 2; L--) {
+    if (_EK[kalan.slice(0, L)] && _ekZinciri(kalan.slice(L), kalanAdim - 1)) return true;
+  }
+  return false;
+}
 
 // Kelimeyi baş-noktalama / gövde / son-noktalama olarak üçe ayırır ("(Toffy'ye," -> "(" + "Toffy'ye" + ",")
 function _bol(tok) {
@@ -104,7 +124,7 @@ function fixToken(tok, map) {
   if (!dogru && !ek) {
     for (var L = nk.length - 1; L >= 3; L--) {
       var onek = nk.slice(0, L), kalan = nk.slice(L);
-      if (map.tek[onek] && _EK[kalan]) { dogru = map.tek[onek]; ek = kok.slice(L); break; }
+      if (map.tek[onek] && _ekZinciri(kalan, 3)) { dogru = map.tek[onek]; ek = kok.slice(L); break; }
     }
   }
   if (!dogru) return null;
