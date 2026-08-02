@@ -193,6 +193,8 @@
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
+    // Süre aralığı menüleri aktif sekansın uzunluğuna göre — sekans değişmiş olabilir
+    if (name === "altyazi") { try { refreshRangeOptions(); } catch (e) {} }
   }
   var toolCards = document.querySelectorAll(".tool-card");
   for (var tcx = 0; tcx < toolCards.length; tcx++) toolCards[tcx].addEventListener("click", function () { goView(this.dataset.view); });
@@ -357,14 +359,11 @@
 
   // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
   function trOpts(extra) {
-    // "large-v3:batched" = hızlı önizleme modu; model adı ile bayrak burada ayrılır
-    var mv = String(($("selModel") && $("selModel").value) || "large-v3");
-    var hizli = /:batched$/.test(mv);
-    // Sansür: "off" | "hard" (sadece ağır küfür) | "all" (hakaretler dahil)
-    var cs = String(($("selCensor") && $("selCensor").value) || "all");
-    var o = { model: mv.replace(/:batched$/, ""), batched: hizli,
-      language: cfg.language, diarize: false,
-      censor: (cs === "off") ? false : cs,
+    /* Model ve sansür artık panelde seçilmiyor: her zaman en doğru model (config.json'daki
+       large-v3) ve tam sansür kullanılır. Seçenek sunmak fayda getirmiyordu — hızlı model
+       Türkçe'de belirgin kötü, sansürü kapatmak da YouTube için istenmiyor. */
+    var o = { model: cfg.model || "large-v3", language: cfg.language, diarize: false,
+      censor: "all",
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
     if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) o[k] = extra[k];
     return o;
@@ -406,34 +405,37 @@
   }
 
   // ---------- Süre aralığı (opsiyonel) ----------
-  // "1:30" -> 90 sn, "90" -> 90, "1:05:00" -> 3900. Boş/geçersiz -> null.
-  function parseTime(str) {
-    str = String(str == null ? "" : str).trim();
-    if (!str) return null;
-    /* KATI biçim kontrolü: "90", "1:30", "1:05:00" (ondalık saniye olabilir). Eskiden parseFloat
-       kullanılıyordu ve "1:00-2:00", "2dk", "1:30x" gibi girdilerde sondaki çöpü sessizce yutup
-       geçerli sayıyordu — kullanıcı yanlış aralıkla 30 dakika bekliyordu. */
-    if (!/^\d+(:\d{1,2}){0,2}([.,]\d+)?$/.test(str)) return null;
-    var parts = str.split(":"), val = 0;
-    for (var i = 0; i < parts.length; i++) {
-      var n = parseFloat(parts[i].replace(",", "."));
-      if (isNaN(n) || n < 0) return null;
-      val = val * 60 + n;
+  /* Açılır menüler sekansın gerçek uzunluğuna göre 30 saniyelik adımlarla doldurulur.
+     Eskiden serbest metin kutusuydu ve "1:00-2:00" gibi yanlış yazımlar sessizce tüm videoyu
+     işletiyordu; menüden geçersiz değer seçilemediği için o hata sınıfı tamamen kalktı. */
+  function fillRangeOptions(sure) {
+    var s1 = $("rangeStart"), s2 = $("rangeEnd");
+    if (!s1 || !s2 || !(sure > 0)) return;
+    var eskiS = s1.value, eskiE = s2.value, adim = 30;
+    s1.innerHTML = ""; s2.innerHTML = "";
+    var o0 = document.createElement("option"); o0.value = ""; o0.textContent = "baştan"; s1.appendChild(o0);
+    var o1 = document.createElement("option"); o1.value = ""; o1.textContent = "sona kadar"; s2.appendChild(o1);
+    for (var t = adim; t < sure; t += adim) {
+      var a = document.createElement("option"); a.value = String(t); a.textContent = fmtShort(t); s1.appendChild(a);
+      var b = document.createElement("option"); b.value = String(t); b.textContent = fmtShort(t); s2.appendChild(b);
     }
-    return val;
+    // sekans sonu tam adıma denk gelmiyorsa bitiş için son bir seçenek daha
+    if (sure % adim > 1) { var son = document.createElement("option"); son.value = String(Math.floor(sure)); son.textContent = fmtShort(sure); s2.appendChild(son); }
+    s1.value = eskiS; s2.value = eskiE;   // seçim korunsun (yoksa boşa döner)
+  }
+  // Sekans süresini okuyup menüleri doldurur (panel açılışında ve her üretim sonrası)
+  async function refreshRangeOptions() {
+    if (!CEP || !cfg) return;
+    try { var d = await getClips(0); fillRangeOptions(clipsEnd(d.clips)); } catch (e) {}
   }
   // Panel girdilerinden aralık okur. İkisi de boşsa null (= tüm video).
   function getRange() {
-    var sHam = String(($("rangeStart") && $("rangeStart").value) || "").trim();
-    var eHam = String(($("rangeEnd") && $("rangeEnd").value) || "").trim();
-    var s = parseTime(sHam), e = parseTime(eHam);
-    /* Yanlış yazım ("1:00-2:00", "1;30", "bir dakika") sessizce TÜM videoyu işletiyordu:
-       kullanıcı 30 dakika bekleyip yanlış sonuç alıyordu. Artık açıkça hata verilir. */
-    if (sHam && s == null) throw new Error("Başlangıç süresi anlaşılmadı: “" + sHam + "”. Örnek: 1:30");
-    if (eHam && e == null) throw new Error("Bitiş süresi anlaşılmadı: “" + eHam + "”. Örnek: 2:45");
-    if (s == null && e == null) return null;
-    var start = (s == null) ? 0 : s;
-    var end = (e == null) ? Infinity : e;
+    var sv = String(($("rangeStart") && $("rangeStart").value) || "");
+    var ev = String(($("rangeEnd") && $("rangeEnd").value) || "");
+    if (!sv && !ev) return null;
+    var start = sv ? parseFloat(sv) : 0;
+    var end = ev ? parseFloat(ev) : Infinity;
+    if (!isFinite(start) || start < 0) start = 0;
     if (isFinite(end) && end <= start) end = Infinity; // geçersiz bitiş -> sona kadar
     return { start: start, end: end };
   }
@@ -1397,7 +1399,6 @@
     path = require("path"); fs = require("fs"); pipeline = require(path.join(extRoot, "js", "pipeline.js"));
     cfg = pipeline.loadConfig(extRoot);
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
-    $("selModel").value = cfg.model || "large-v3";
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
     state.dict = SZ.load(extRoot);
@@ -1409,6 +1410,7 @@
     refreshRecolorBtns();   // Renk Değiştir sekmesi buton grid'i
     if (state.styles.length) logLine(state.styles.length + " stil: " + state.styles.map(function (s) { return s.name; }).join(", "));
     try { cleanupOldTemp(); } catch (eTmp) {}            // eski geçici WAV'lar birikmesin
+    try { refreshRangeOptions(); } catch (eRng) {}       // süre aralığı menüleri sekans uzunluğuna göre
     // Kaydedilmiş oturum varsa geri yüklemeyi teklif et (panel kapanınca liste uçmasın)
     try { offerSessionRestore(); } catch (eSes) {}
     // Konuşmacı ayırma CPU'ya düşmüşse bunu görünür yap — sessizce 5-15 kat yavaşlıyordu
@@ -1439,13 +1441,11 @@
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)
   function wirePersistence() {
-    var ids = ["acSens", "acMin", "selModel", "selStyleSingle", "selStyleA1", "selNumSpk", "selCensor", "selIstif"];
+    var ids = ["acSens", "acMin", "selStyleSingle", "selStyleA1", "selNumSpk", "selIstif"];
     for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
     // AutoCut gürültü azaltma — varsayılan KAPALI (analizi ~5 kat yavaşlatıyor)
     var dn = $("chkDenoise");
     if (dn) { dn.checked = lsGet("denoise", "0") === "1"; dn.addEventListener("change", function () { lsSet("denoise", dn.checked ? "1" : "0"); }); }
-    // Sansür eskiden açık/kapalı bir kutuydu; kayıtlı eski değeri yeni üç seviyeye taşı
-    if ($("selCensor") && lsGet("selCensor", null) == null) $("selCensor").value = (lsGet("censor", "1") === "1") ? "all" : "off";
     restoreSegs();
     // Ayrı kanal modu toggle'ı — açıkken diarizasyon (AI tahmini) devre dışı kalır
     var ak = $("chkAyriKanal");

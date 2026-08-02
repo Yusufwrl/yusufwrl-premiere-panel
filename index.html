@@ -160,17 +160,6 @@
           </div><!-- /diarizeBox -->
         </div>
 
-        <div class="field">
-          <label>Model</label>
-          <div class="select">
-            <select id="selModel">
-              <option value="large-v3">large-v3 · en doğru</option>
-              <option value="large-v3:batched">large-v3 · hızlı önizleme (~3x)</option>
-              <option value="medium">medium · hızlı</option>
-            </select>
-          </div>
-        </div>
-
         <details class="card dict-card" id="dictCard">
           <summary class="dict-summary">
             <span class="card-title" style="margin:0">Karakter İsimleri</span>
@@ -178,18 +167,8 @@
             <span class="dict-chev">▾</span>
           </summary>
           <div class="dict-body">
-            <p class="note" style="margin-top:0">
-              Yapay zekâ karakter isimlerini yanlış yazıyor (Tofi → “Toffy”, Moni → “Money”…).
-              Doğru yazımı ve modelin yaptığı yanlışları buraya yaz: hem motora önceden ipucu verilir,
-              hem de altyazı çıktıktan sonra <b style="color:var(--text)">kesin olarak</b> düzeltilir. Ekler korunur (“Toffy’ye” → “Tofi’ye”).
-            </p>
-            <textarea id="dictText" class="dict-text" rows="6" spellcheck="false"
+            <textarea id="dictText" class="dict-text" rows="7" spellcheck="false"
               placeholder="Tofi: toffy, tofy&#10;Moni: money, monny"></textarea>
-            <p class="note" style="margin-top:7px">
-              Her satıra bir karakter — <b style="color:var(--text)">DoğruYazım: yanlış1, yanlış2</b>.
-              İki kelimeye bölünen isimler için boşluklu yaz (<b style="color:var(--text)">to fi</b>).
-              Gerçek Türkçe kelimelere benzeyen yanlış yazım ekleme (ör. “mini”) — masum kelimeler bozulur.
-            </p>
             <div class="dict-actions">
               <button class="btn-ghost" id="dictSave" type="button">Kaydet</button>
               <button class="btn-ghost" id="dictReset" type="button">Varsayılanlar</button>
@@ -199,22 +178,11 @@
         </details>
 
         <div class="field">
-          <label>Süre aralığı <small style="color:var(--faint)">(opsiyonel — boş = tüm video)</small></label>
+          <label>Süre aralığı <small style="color:var(--faint)">(boş = tüm video)</small></label>
           <div style="display:flex;align-items:center;gap:8px">
-            <input type="text" class="input" id="rangeStart" placeholder="0:00" style="text-align:center;cursor:text" title="Başlangıç — dk:sn (ör. 0:00)">
+            <div class="select" style="flex:1"><select id="rangeStart"><option value="">baştan</option></select></div>
             <span style="color:var(--muted);flex-shrink:0">→</span>
-            <input type="text" class="input" id="rangeEnd" placeholder="son" style="text-align:center;cursor:text" title="Bitiş — dk:sn (ör. 1:00). Boş = videonun sonu">
-          </div>
-        </div>
-
-        <div class="field">
-          <label>Küfür sansürü <small style="color:var(--faint)">(a***l)</small></label>
-          <div class="select">
-            <select id="selCensor">
-              <option value="off">Kapalı</option>
-              <option value="hard">Sadece ağır küfür</option>
-              <option value="all">Hepsi (hakaretler dahil)</option>
-            </select>
+            <div class="select" style="flex:1"><select id="rangeEnd"><option value="">sona kadar</option></select></div>
           </div>
         </div>
 
