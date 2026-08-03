@@ -33,10 +33,15 @@ var VARSAYILAN = [
   { karakter: "Niko", adlar: ["pompa456", "adsadsaadas"], renk: 15 }
 ];
 
-// Karşılaştırma normali: Türkçe küçük harf + yalnız harf/rakam (Discord adlarında . _ - sık)
+/* Karşılaştırma normali.
+   DİKKAT: burada Türkçe "I -> ı" kuralı UYGULANMAZ. Discord kullanıcı adları Türkçe yazım
+   kuralına göre değil; "Irmak" yazan bir adı "ırmak"a çevirirsek dosyadaki "irmak" ile
+   eşleşmez. Her iki I de "i"ye indirilir.
+   Ayrıca sadece bilinen ayraçlar (. - _ boşluk) atılır — eskiden Latin dışı bütün harfler
+   siliniyordu ve Kiril/Japonca adlar boş dizeye düşüp hiç eşleşmiyordu. */
 function _norm(s) {
-  s = String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "ı").toLowerCase();
-  return s.replace(/[^a-z0-9çğıöşü]/g, "");
+  s = String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
+  return s.replace(/[.\-_\s]/g, "");
 }
 
 /* Craig dosya adından Discord adını çıkarır: "1-yusufwrl.m4a" -> "yusufwrl".
@@ -48,9 +53,11 @@ function adCikar(dosyaAdi) {
   ad = ad.replace(/\.[^.]+$/, "");                  // uzantıyı at
   var m = ad.match(/^\s*\d+\s*[-_.]\s*(.+)$/);      // "12-kullanici" / "3_kullanici"
   if (m) ad = m[1];
-  ad = ad.replace(/_\d+$/, "");                     // "kullanici_2" -> "kullanici"
-  return ad.trim();
+  return ad.trim();     // "_2" gibi ekler BURADA kırpılmaz; bkz. bul() — önce ham ad denenir
 }
+
+// "kullanici_2" -> "kullanici" (Craig aynı kişi iki kez bağlanınca ek koyabiliyor)
+function _ekKirp(ad) { return String(ad).replace(/_\d+$/, ""); }
 
 // Ad -> kişi kaydı. Bulunamazsa null.
 function bul(entries, ad) {
@@ -61,12 +68,15 @@ function bul(entries, ad) {
     var k = entries[i], adlar = (k && k.adlar) || [];
     for (var j = 0; j < adlar.length; j++) if (_norm(adlar[j]) === n) return k;
   }
-  // tam eşleşme yoksa: kayıtlı ad, dosyadaki adın içinde geçiyor mu (Craig ek koymuş olabilir)
-  for (var a = 0; a < entries.length; a++) {
-    var k2 = entries[a], ad2 = (k2 && k2.adlar) || [];
-    for (var b = 0; b < ad2.length; b++) {
-      var m = _norm(ad2[b]);
-      if (m.length >= 4 && n.indexOf(m) === 0) return k2;
+  /* Tam eşleşme yoksa YALNIZCA Craig'in eklediği "_<sayı>" ekini kırpıp tekrar dene.
+     Eskiden serbest önek eşleşmesi vardı (kayıtlı ad, dosya adının başında geçiyorsa kabul);
+     bu, kayıtlı OLMAYAN yeni bir arkadaşı sessizce yanlış karaktere yapıştırıyordu
+     (örnek: "monika" -> Moni; dosya Moni'nin kanalına Moni'nin rengiyle konuyordu). */
+  var kirpik = _norm(_ekKirp(ad));
+  if (kirpik && kirpik !== n) {
+    for (var a = 0; a < entries.length; a++) {
+      var k2 = entries[a], ad2 = (k2 && k2.adlar) || [];
+      for (var b = 0; b < ad2.length; b++) if (_norm(ad2[b]) === kirpik) return k2;
     }
   }
   return null;
@@ -87,6 +97,9 @@ function parseText(text) {
     var ln = lines[i].trim();
     if (!ln || ln.charAt(0) === "#") continue;
     var renk = 0;
+    // Kapanmamış köşeli parantez ("[Blue" gibi) adın parçası sayılıp Discord adını bozuyordu.
+    var acik = ln.match(/\[[^\]]*$/);
+    if (acik) ln = ln.slice(0, acik.index).trim();
     var rm = ln.match(/\[([^\]]+)\]\s*$/);
     if (rm) {
       var r = rm[1].trim();
@@ -124,7 +137,8 @@ function load(extRoot) {
       var raw = fs.readFileSync(p, "utf8");
       if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
       var j = JSON.parse(raw);
-      if (j && j.kisiler) return j.kisiler;
+      // dizi DEĞİLSE varsayılana dön — elle bozulmuş JSON paneli çökertiyordu
+      if (j && Object.prototype.toString.call(j.kisiler) === "[object Array]") return j.kisiler;
     }
   } catch (e) {}
   return defaults();
@@ -136,6 +150,6 @@ function save(extRoot, entries) {
 module.exports = {
   load: load, save: save, defaults: defaults,
   parseText: parseText, toText: toText,
-  adCikar: adCikar, bul: bul, karakterBul: karakterBul,
+  adCikar: adCikar, bul: bul, karakterBul: karakterBul, ekKirp: _ekKirp,
   LABELLER: LABELLER, DOSYA: DOSYA,
 };

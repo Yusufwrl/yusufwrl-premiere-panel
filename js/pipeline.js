@@ -703,6 +703,17 @@ async function trimWav(inWav, outWav, startSec, endSec, ffmpegExe) {
   return outWav;
 }
 
+/* Ses dosyasinin BASINI kirpar — KODEK KOPYALANIR, yeniden kodlama YOK.
+   trimWav bu is icin kullanilamaz: o altyazi hatti icin yazilmis ve ciktiyi sabit
+   16 kHz MONO pcm_s16le yaziyor; Craig'in 48 kHz kaydini oraya sokmak kalite kaybi olur.
+   "-c copy" ile uzanti ve kodek korunur (m4a -> m4a). */
+async function trimAudioCopy(inFile, outFile, startSec, ffmpegExe) {
+  const args = ["-ss", String(Math.max(0, startSec || 0)), "-i", inFile, "-c", "copy", "-y", outFile];
+  await run(ffmpegExe, args, null, { cwd: path.dirname(ffmpegExe) });
+  if (!fs.existsSync(outFile)) throw new Error("Kırpılmış ses üretilemedi: " + outFile);
+  return outFile;
+}
+
 /*
  * AutoCut analizi: HAZIR bir konuşma wav'ını (timeline'a hizalı) analiz eder.
  * voiceWav sekans zamanına hizalı olduğu için bulunan boşluklar SEKANS zamanıdır.
@@ -789,7 +800,7 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 }
 
 module.exports = {
-  loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav,
+  loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
   buildCues, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
 };

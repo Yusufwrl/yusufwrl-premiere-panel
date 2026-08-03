@@ -96,17 +96,26 @@ function getSequenceInfoJSON() {
 
 // Bir ses kanalındaki TÜM klipleri siler (A2'yi boşaltmak için).
 // ripple=false ŞART: true olsaydı sonraki klipler sola kayar ve tüm senkron bozulurdu.
-function clearAudioTrack(trackIdx) {
+function clearAudioTrack(trackIdx, korunacakAd) {
     try {
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
         var ix = parseInt(trackIdx, 10);
         if (isNaN(ix) || ix < 0 || ix >= seq.audioTracks.numTracks) return "err:A" + (ix + 1) + " kanalı yok";
-        var tr = seq.audioTracks[ix], silinen = 0;
+        var koru = (korunacakAd == null) ? "" : String(korunacakAd).toLowerCase();
+        var tr = seq.audioTracks[ix], silinen = 0, korunan = 0;
         for (var i = tr.clips.numItems - 1; i >= 0; i--) {
+            /* korunacakAd verilmisse o ada sahip klip SILINMEZ. Bu olmadan, A2'ye az once
+               yerlestirilen Craig klibi de siliniyordu (kullanici "eski karisik sesi temizle"
+               derken yeni koyulani kaybediyordu). */
+            if (koru) {
+                var nm = "";
+                try { nm = String(tr.clips[i].name).toLowerCase(); } catch (en) { nm = ""; }
+                if (nm && nm.indexOf(koru) !== -1) { korunan++; continue; }
+            }
             try { tr.clips[i].remove(false, false); silinen++; } catch (e1) {}
         }
-        return "ok:" + silinen + " klip silindi (A" + (ix + 1) + ")";
+        return "ok:" + silinen + " klip silindi (A" + (ix + 1) + ")" + (korunan ? (", " + korunan + " korundu") : "");
     } catch (e) { return "err:" + e.toString(); }
 }
 
@@ -187,10 +196,12 @@ function senkronUygula(planDosyaPath) {
             var once = 0;
             try { once = seq.audioTracks[it.kanal].clips.numItems; } catch (e3) {}
 
+            /* SADECE kanal seviyesi kullanilir. Sekans seviyesindeki
+               seq.overwriteClip(item, time, vIdx, aIdx) bicimi dokumante DEGIL (4 parametreli
+               imza insertClip'e ait) ve klibi Premiere'de HEDEFLENMIS kanala koyabiliyor —
+               bu da A1'deki OBS mikrofon kaydinin uzerine yazmak demek. */
             var oldu = false;
-            // önce sekans seviyesi (hedef ses kanalını açıkça söyler), sonra kanal seviyesi
-            try { oldu = seq.overwriteClip(pi, it.bas, 0, it.kanal); } catch (e4) { oldu = false; }
-            if (!oldu) { try { oldu = seq.audioTracks[it.kanal].overwriteClip(pi, it.bas); } catch (e5) {} }
+            try { oldu = seq.audioTracks[it.kanal].overwriteClip(pi, it.bas); } catch (e4) { oldu = false; }
 
             var sonra = 0;
             try { sonra = seq.audioTracks[it.kanal].clips.numItems; } catch (e6) {}
@@ -201,6 +212,9 @@ function senkronUygula(planDosyaPath) {
                     "(kanal tipi uyumsuz olabilir — Mono kanala stereo klip konamaz)";
             }
         }
+        // Hicbiri yerlesmediyse BASARI DONME: panel "ok:" gorunce akisa devam edip
+        // A2 temizligini bile teklif ediyordu.
+        if (!konan) return "err:Hicbir ses yerlestirilemedi. " + (ilkHata || "sebep bilinmiyor");
         return "ok:" + konan + " ses yerleştirildi" + (hata ? (", " + hata + " hata | " + ilkHata) : "");
     } catch (e) {
         return "err:" + e.toString();

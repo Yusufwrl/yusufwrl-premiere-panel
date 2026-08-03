@@ -1231,6 +1231,7 @@
   var SES_UZANTI = /\.(m4a|aac|mp3|flac|wav|ogg|opus|wma)$/i;
   function snkKlasorSec() {
     if (!CEP) { uiAlert("Önizleme modu — Premiere'de klasör seçilir."); return; }
+    if (!KISI || !HIZ) { uiAlert("Senkron modülleri yüklenemedi. Paneli yeniden kur (deploy-dev.ps1) ve Premiere'i yeniden başlat.", "Senkron"); return; }
     var yol = "";
     try {
       if (window.cep && window.cep.fs && window.cep.fs.showOpenDialogEx) {
@@ -1268,6 +1269,9 @@
   }
   function snkEslestir() {
     if (!snk.dosyalar.length) return;
+    // Hizalama/yerleştirme sürerken planı yeniden kurma: snkCalistir plan NESNELERİNE
+    // referans tutuyor, yeniden kurulursa yerleştirme eski plana göre yapılır.
+    if (snk.calisiyor) { snkLog("İşlem sürerken liste yenilenmez."); return; }
     var ceken = snkCekenKim();
     var karsi = (ceken === "Tofi") ? "Moni" : "Tofi";
     var eslesen = [], bilinmeyen = [];
@@ -1299,6 +1303,12 @@
     snk.cekenDosya = null;
     eslesen.forEach(function (e) { if (e.kisi.karakter === ceken) snk.cekenDosya = e.dosya; });
 
+    /* Çekenin kendi kaydı eşleşmediyse bilinmeyenler arasında kalır ve A4+'ya yerleştirilir —
+       sesi zaten A1'de olduğu için timeline'da ÇİFT çıkar. Kullanıcıyı açıkça uyar. */
+    if (!snk.cekenDosya && bilinmeyen.length) {
+      snkLog("UYARI: " + ceken + " adına kayıtlı bir dosya bulunamadı. Bilinmeyenler arasında kendi kaydın " +
+             "varsa onu YERLEŞTİRME — sesin zaten A1'de, çift çıkar.");
+    }
     snk.plan = plan;
     snkPlanCiz();
     $("snkPlanCard").hidden = false;
@@ -1484,7 +1494,9 @@
         try {
           var rc = await HIZ.offsetBul(cfg.ffmpegExe, refA1, snk.cekenDosya.yol,
             { maxKaymaSn: 180, workDir: cfg.workDir });
-          sonuclar.push({ karakter: "(kendi sesin)", offset: rc.offset, _kontrol: true });
+          // NOT: medyana KATILMAZ — farklı referansla (A1) ölçüldüğü için tutarlılık
+          // hesabını bozar; ayrıca 2 elemanlı dizide medyanı ortalamaya çevirirdi.
+          snk.cekenKontrol = rc.offset;
           snkLog("Kendi kaydın (A1 ile): " + (rc.offset >= 0 ? "+" : "") + rc.offset.toFixed(2) + " sn");
         } catch (e3) {}
       }
@@ -1513,6 +1525,7 @@
       if (!(await uiConfirm(msg, "Senkron"))) { snkFail("İptal edildi", "warn"); return; }
 
       // --- uygula ---
+      if (snk.iptal) throw new Error("İptal edildi");
       snkProgress(86, "Proje kaydediliyor…");
       await evalES("saveProject()");
 
@@ -1528,14 +1541,17 @@
           /* Uzantı ".wav" OLMAK ZORUNDA: trimWav çıktıyı pcm_s16le olarak yazıyor ve ffmpeg
              biçimi uzantıdan seçiyor. ".m4a" verilirse mp4 muxer'a PCM yazmaya çalışıp
              "Conversion failed" ile çöküyor (ölçüldü). */
-          var kirp = path.join(cfg.workDir, "snkkirp_" + k + "_" + Date.now() + ".wav");
-          await pipeline.trimWav(q.dosya.yol, kirp, -q.offset, Infinity, cfg.ffmpegExe);
+          /* Kodek KOPYALANIR (trimAudioCopy), yeniden kodlanmaz: trimWav altyazı hattı için
+             yazılmış ve çıktıyı 16 kHz MONO'ya düşürüyor — Craig'in 48 kHz kaydını bozardı. */
+          var kirp = path.join(cfg.workDir, "snkkirp_" + k + "_" + Date.now() + path.extname(q.dosya.yol));
+          await pipeline.trimAudioCopy(q.dosya.yol, kirp, -q.offset, cfg.ffmpegExe);
           q.konacakYol = kirp; q.konacakBas = 0;
           snk.temizlik.push(kirp);
           snkLog(q.karakter + ": kayıt videodan önce başlamış, başı kırpıldı (" + (-q.offset).toFixed(2) + " sn).");
         }
       }
 
+      if (snk.iptal) throw new Error("İptal edildi");
       snkProgress(92, "Premiere'e yerleştiriliyor…");
       var satirlar = [];
       yerlesecek.forEach(function (p) {
@@ -1564,7 +1580,10 @@
           "OBS'ten gelen ESKİ karışık Discord sesi hâlâ orada duruyor olabilir — o kanalı temizleyeyim mi?\n\n" +
           "(Not: A2'ye yeni ses zaten yerleşti. Temizlik yaparsan A2'deki TÜM eski klipler silinir.)", "A2 temizliği");
         if (sil) {
-          var t = await evalES("clearAudioTrack(1)");
+          /* Yerleştirilen klibin adını KORUNACAK olarak geçiyoruz. Bu olmadan clearAudioTrack
+             kanaldaki her şeyi siliyordu — az önce koyduğumuz Craig kaydı dahil. */
+          var korunacak = String(karsiPlan.dosya.dosya).replace(/\.[^.]+$/, "");
+          var t = await evalES('clearAudioTrack(1,"' + esPath(korunacak) + '")');
           snkLog("A2 temizliği: " + t);
         }
       }
