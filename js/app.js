@@ -1281,6 +1281,23 @@
       else bilinmeyen.push(d);
     });
 
+    /* AYNI karaktere birden çok dosya düşebilir: kişi Discord'dan düşüp yeniden bağlanınca
+       Craig "_2" ekli ikinci dosya üretir, bir karaktere iki hesap kayıtlıysa da olur.
+       Bu durum eskiden SESSİZCE bozuyordu:
+         - A2'nin sahibinde aşağıdaki döngü sonuncuyu alıyor, öteki dosya hiçbir satıra
+           girmediği için tabloda bile görünmeden kayboluyordu;
+         - diğer karakterlerde ise iki dosya iki ayrı kanala konup ses ÇİFT çıkıyordu.
+       Artık ilk dosya ana kayıt; kalanlar "(2. kayıt)" etiketiyle ayrı satırda görünür. */
+    var sayac = {}, tekrar = [];
+    eslesen = eslesen.filter(function (e) {
+      var ad = e.kisi.karakter;
+      sayac[ad] = (sayac[ad] || 0) + 1;
+      if (sayac[ad] === 1) return true;
+      e.sira = sayac[ad];
+      tekrar.push(e);
+      return false;
+    });
+
     /* Kanal ataması: çeken A1'de zaten var (OBS), Craig'deki kendi dosyası SADECE hizalama
        referansı olarak kullanılır, timeline'a konmaz. Karşı taraf A2'ye, A3 oyun sesi olduğu
        için atlanır, kalanlar A4'ten itibaren sıralanır. */
@@ -1295,6 +1312,20 @@
     eslesen.forEach(function (e) {
       if (e.kisi.karakter === ceken || e.kisi.karakter === karsi) return;   // A1/A2 zaten ayrıldı
       plan.push({ kanal: sonrakiKanal++, karakter: e.kisi.karakter, dosya: e.dosya, renk: e.kisi.renk });
+    });
+    /* Aynı kişinin ek kayıtları. Çekenin ikinci kaydı YERLEŞTİRİLMEZ — sesi zaten A1'de,
+       konursa çift çıkar. Diğerleri kendi kanalını alır ve etiketinden anlaşılır. */
+    tekrar.forEach(function (e) {
+      if (e.kisi.karakter === ceken) {
+        snkLog(e.dosya.dosya + " — " + ceken + " adına ikinci kayıt. Sesin zaten A1'de, yerleştirilmiyor.");
+        return;
+      }
+      snkLog(e.dosya.dosya + " — " + e.kisi.karakter + " adına " + e.sira + ". kayıt (kişi düşüp yeniden " +
+             "bağlanmış olabilir). Ayrı kanala konuyor; gerekmiyorsa Premiere'de o kanalı sil.");
+      plan.push({
+        kanal: sonrakiKanal++, karakter: e.kisi.karakter + " (" + e.sira + ". kayıt)",
+        dosya: e.dosya, renk: e.kisi.renk
+      });
     });
     bilinmeyen.forEach(function (d) {
       plan.push({ kanal: sonrakiKanal++, karakter: "?", dosya: d, bilinmeyen: true, renk: 0 });

@@ -5,6 +5,7 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 ## Yapı
 - Panel arayüzü: `index.html` + `js/app.js` + `js/pipeline.js` — CEP (CSInterface.js, `--enable-nodejs --mixed-context`).
 - Karakter sözlüğü: `js/sozluk.js` — özel isimleri düzeltir (Tofi/Moni/Dora/Mimi/Niko). İki katman: motora `--hotwords` ipucu + transkript sonrası kesin kelime düzeltmesi (zincirlenmiş Türkçe ekler dahil: "Tofilerden"). Liste `sozluk.json`'da (gitignore'lu), panelden düzenlenir.
+- Senkron kartı: `js/kisiler.js` (Discord adı → karakter + Premiere renk etiketi) + `js/hizala.js` (ses hizalama). Liste `kisiler.json`'da (gitignore'lu), panelden düzenlenir.
 
 ## Üretim modları (js/app.js)
 - **Tek Stil** (`runSingle`) — tek kanal ya da **Mix** (A1+A2 birleşik).
@@ -18,6 +19,13 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
   karışık kanalda konuşmacıyı tahmin etmenin doğasında. `pipeline.transcribe`'ın `diarize` desteği kodda
   duruyor (eski oturumların geri yüklenmesi ve olası ihtiyaç için), UI'dan erişilmiyor.
 - Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
+
+## Senkron kartı (Craig kayıtları)
+Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.m4a`) otomatik hizalar, doğru kanala koyar, renk etiketi verir. Diarizasyonun yerini alır — ayrım %100 doğru.
+- **Kanal kuralı sabit:** A1 = videoyu çeken (OBS mikrofonu, dokunulmaz) · A2 = Tofi/Moni'den diğeri · A3 = oyun sesi (dokunulmaz) · A4+ = kalanlar. Çekenin Craig kaydı **timeline'a konmaz**, yalnızca hizalama referansıdır (sesi zaten A1'de).
+- Hizalama enerji zarfı çapraz korelasyonu (`js/hizala.js`): kaba 200 ms → ince 20 ms, Pearson r. **Güvenilirlik sinyali korelasyon değil, medyan tutarlılığıdır** — tek başına r doğru eşleşmeyi yanlıştan ayıramıyor (ölçüldü). `tutarlilikKontrol` diğerlerinden sapan kaymayı işaretler.
+- Her karakterin her videoda olması gerekmez — eksik karakter normaldir, hata değil. Aynı kişiye iki dosya düşerse (Craig `_2` eki) ilki ana kayıt, kalanlar "(2. kayıt)" etiketiyle ayrı kanala gider.
+- Premiere'de **ses kanalı ekleme API'si yok** — kanal yetmezse panel uyarır, kullanıcı elle ekler. Yerleştirme yalnızca `audioTracks[i].overwriteClip(item, saniye)` ile yapılır; sekans düzeyindeki 4 parametreli biçim hedef kanalı garanti etmez ve A1'i ezebilir.
 - Host katmanı: `jsx/host.jsx` — **ExtendScript (ES3)**: `let`/`const`/arrow/optional-chaining **YOK**. Premiere'i bu dosya sürer.
 - Manifest: `CSXS/manifest.xml` — BundleId `com.yusufwrl.premierepanel`, PPRO 14+, CSXS 9.
 - Motor harici: `%ENGINE%\Faster-Whisper-XXL` (varsayılan `C:\Users\yusuf\YusufwrlEngine`). Repoya dahil değil, gitignore'lu (~3GB).
@@ -36,7 +44,7 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 - Sürüm çıkarken `version.json` **ve** `CSXS/manifest.xml` (ExtensionBundleVersion) birlikte artır. `installer.iss` AppVersion ayrı ve ayrıca güncellenir.
 - **ffmpeg PATH'e gerekmez** — pipeline.js motorun içindeki `ffmpeg.exe`'yi tam yolla çağırır (Faster-Whisper-XXL kendi ffmpeg'ini getirir). **ffprobe YOK** — akış bilgisi `ffmpeg -i` çıktısından ayrıştırılır (`_probeAudioCount`).
 - **Track ≠ ses akışı:** A1/A2/A3 track'i, medya dosyasının 1./2./3. ses akışına eşlenir — bu yalnızca OBS çoklu-kanal kaydında (tek dosya, çok akış) geçerli. Tek akışlı kayıtta ffmpeg `filter_complex` içindeki `[i:a:1]` "matches no streams" ile ÇÖKER (`-map`'in aksine `?` ile opsiyonel yapılamaz). `buildTimelineAudio` akış sayısını ölçüp olmayan akışı istemez.
-- `config.json` `%ENGINE%` / `~` token'ları kullanır; makineye özel yol **gömme** (auto-updater config.json'ı ezer). Kullanıcıya/makineye özel dosyalar: `engine-root.txt`, `diarize-device.txt`, `sozluk.json` — gitignore'lu ve **üç yerde birden** korunmalı: `pack-panel.ps1` `$exclude`, `updater.js` `copyDir` skip listesi, `.gitignore`.
+- `config.json` `%ENGINE%` / `~` token'ları kullanır; makineye özel yol **gömme** (auto-updater config.json'ı ezer). Kullanıcıya/makineye özel dosyalar: `engine-root.txt`, `diarize-device.txt`, `sozluk.json`, `kisiler.json` — gitignore'lu ve **beş yerde birden** korunmalı: `.gitignore`, `pack-panel.ps1` `$exclude`, `updater.js` `copyDir` skip listesi, `installer.iss` `Excludes`, `deploy-dev.ps1` `$koru`. Yeni bir kullanıcı dosyası eklerken beşini de güncelle.
 - Debug: panel açıkken Chrome/Edge'de `http://localhost:8088` → DevTools (panel HTML/JS). `host.jsx` için VS Code "ExtendScript Debugger".
 - **Premiere 2026 (UXP):** CEP panelleri 2026 sürümünde yüklenmeyebilir. Panel görünmüyorsa muhtemel sebep bu; CEP hâlâ Premiere 2024/2025'te çalışır. Uzun vadede UXP'ye taşınması gerekir.
 - **Kurulu panel junction DEĞİL, KOPYA:** `%APPDATA%\Adobe\CEP\extensions\com.yusufwrl.premierepanel` ayrı bir klasör (OneDrive + Türkçe karakterli yol CEF'i bozduğu için ASCII yola kopyalanmış). Repo'daki değişiklikler oraya **kopyalanmadan** panele yansımaz — `install-dev.ps1` ya da elle `Copy-Item`. Sürüm numarası güncel görünüp kodun eski olması bu yüzden olur.

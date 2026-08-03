@@ -6,7 +6,8 @@
   paneli acmiyordu; bu yuzden panel ASCII bir yolda AYRI KOPYA olarak duruyor.
   Sonuc: repo'da yapilan degisiklik, bu betik calistirilmadan panele YANSIMAZ.
 
-  Kullaniciya ozel dosyalar (engine-root.txt, diarize-device.txt, sozluk.json) ASLA ezilmez.
+  Kullaniciya ozel dosyalar (engine-root.txt, diarize-device.txt, sozluk.json, kisiler.json)
+  ASLA ezilmez — $include disinda tutulduklari icin kopyalama onlara hic dokunmaz.
 
   Kullanim:
     powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-dev.ps1
@@ -19,7 +20,7 @@ $dst = Join-Path $env:APPDATA "Adobe\CEP\extensions\com.yusufwrl.premierepanel"
 # Panele giren dosya/klasorler (pack-panel.ps1 ile ayni liste)
 $include = @("index.html", "config.json", "update.json", "version.json", ".debug", "js", "jsx", "css", "CSXS")
 # Kurulu kopyada varsa DOKUNULMAYACAK dosyalar
-$koru = @("engine-root.txt", "diarize-device.txt", "sozluk.json")
+$koru = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json")
 
 if (-not (Test-Path $dst)) {
   New-Item -ItemType Directory -Path $dst -Force | Out-Null
