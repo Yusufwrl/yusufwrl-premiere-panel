@@ -1256,7 +1256,7 @@
       uiAlert("Bu klasörde ses dosyası yok. Craig'den “Çoklu Parça” indirdiğinden ve ZIP'i çıkardığından emin ol.", "Senkron");
       return;
     }
-    snkLog(snk.dosyalar.length + " ses dosyası bulundu.");
+    snkLog(snk.dosyalar.length + " ses dosyası bulundu: " + snk.dosyalar.map(function (d) { return d.ad; }).join(", "));
     $("snkCekenCard").hidden = false;
     snkEslestir();
   }
@@ -1285,7 +1285,7 @@
     var karsiKayit = null;
     eslesen.forEach(function (e) { if (e.kisi.karakter === karsi) karsiKayit = e; });
     if (karsiKayit) plan.push({ kanal: 1, karakter: karsi, dosya: karsiKayit.dosya, renk: karsiKayit.kisi.renk });
-    else plan.push({ kanal: 1, karakter: karsi, bos: true, not: "bu kişinin kaydı klasörde yok" });
+    else plan.push({ kanal: 1, karakter: karsi, bos: true, not: "bu videoda yok — kanal boş kalacak" });
     plan.push({ kanal: 2, karakter: "Oyun sesi", kilit: true, not: "dokunulmaz" });
 
     eslesen.forEach(function (e) {
@@ -1311,7 +1311,9 @@
     box.innerHTML = "";
     snk.plan.forEach(function (p) {
       var row = document.createElement("div");
-      row.className = "snk-row" + (p.kilit ? " kilit" : "") + ((p.bos || p.bilinmeyen || p.aykiri) ? " sorunlu" : "");
+      /* Kırmızı (sorunlu) yalnızca GERÇEK sorunlarda: tanınmayan kişi ya da diğerlerinden
+         sapan hizalama. Bir karakterin o videoda olmaması normaldir — soluk gösterilir. */
+      row.className = "snk-row" + ((p.kilit || p.bos) ? " kilit" : "") + ((p.bilinmeyen || p.aykiri) ? " sorunlu" : "");
       var kn = document.createElement("div"); kn.className = "snk-kanal"; kn.textContent = "A" + (p.kanal + 1);
       row.appendChild(kn);
 
@@ -1367,10 +1369,30 @@
       box.appendChild(row);
     });
 
-    // kanal bütçesi uyarısı
-    var gereken = 0;
-    snk.plan.forEach(function (p) { if (p.kanal + 1 > gereken) gereken = p.kanal + 1; });
+    var gereken = 0, yerlesecekSayi = 0;
+    snk.plan.forEach(function (p) {
+      if (p.kanal + 1 > gereken) gereken = p.kanal + 1;
+      if (p.dosya && !p.kilit) yerlesecekSayi++;
+    });
     var u = $("snkUyari");
+
+    /* Yerleştirilecek dosya yoksa NEDENİNİ açıkça söyle. En sık durum: kullanıcı tek başına
+       test kaydı almış, klasörde yalnızca kendi dosyası var — o da kural gereği timeline'a
+       konmaz (sesi zaten A1'de), sadece hizalama referansı olur. Tablodaki "kaydı yok"
+       satırından bu anlaşılmıyordu. */
+    if (u && !yerlesecekSayi) {
+      u.hidden = false; u.style.color = "var(--warn)";
+      u.textContent = snk.cekenDosya
+        ? ("Klasörde sadece SENİN kaydın var (" + snk.cekenDosya.dosya + "). Sesin zaten A1'de olduğu için " +
+           "yerleştirilecek bir şey yok; bu dosya yalnızca hizalama referansı olarak kullanılır. " +
+           "Arkadaşlarınla birlikte kayıt alman gerekiyor.")
+        : "Klasörde tanınan bir kayıt yok. Craig'den “Çoklu Parça” indirdiğinden ve ZIP'i çıkardığından emin ol.";
+      $("snkUygula").hidden = true;
+      return;
+    }
+    $("snkUygula").hidden = false;
+
+    // kanal bütçesi uyarısı
     if (u) {
       if (snk.sesKanalSayisi && gereken > snk.sesKanalSayisi) {
         u.hidden = false; u.style.color = "var(--warn)";
