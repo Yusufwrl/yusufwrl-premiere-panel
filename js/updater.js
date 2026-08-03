@@ -17,6 +17,31 @@ const { spawn } = require("child_process");
 function stripBom(s) { return (s && s.charCodeAt(0) === 0xFEFF) ? s.slice(1) : s; }
 function readJson(p, def) { try { return JSON.parse(stripBom(fs.readFileSync(p, "utf8"))); } catch (e) { return def; } }
 
+/*
+ * Kullaniciya/makineye ozel dosyalar — guncelleme bunlarin UZERINE YAZMAZ.
+ *
+ * BU BES DOSYA HER YERDE AYNI. Tekrarlandigi yerler:
+ *   1) .gitignore
+ *   2) installer\panel-files.ps1  ($PanelUserFiles)  <- pack-panel.ps1 ve deploy-dev.ps1
+ *                                                       listeyi buradan okur, ayri liste tutmaz
+ *   3) installer\installer.iss    (Excludes)
+ *   4) installer\kur.ps1          ($koru)
+ *   5) burasi                     (KULLANICI_DOSYALARI)
+ * Yeni bir kullanici dosyasi eklerken BESINI birden guncelle.
+ */
+var KULLANICI_DOSYALARI = ["engine-root.txt", "diarize-device.txt", "sozluk.json",
+                           "kisiler.json", "assemblyai-key.txt"];
+
+/*
+ * config.json listenin PARCASI DEGIL — yalnizca burada ve installer\kur.ps1'de korunur.
+ * installer.iss Excludes'a SAKIN EKLEME: pakette geliyor ve TEMIZ kurulumda gerekiyor,
+ * dislanirsa hic kopyalanmaz -> js\pipeline.js loadConfig() readFileSync'te patlar ve
+ * panel hic acilmaz. Guncellemede uzerine yazilmiyor; asagida configBirlestir() ile
+ * birlestiriliyor: kullanicinin degerleri (maxWordsPerCue, device, fontName...) kalir,
+ * yeni surumde eklenen anahtarlar eklenir.
+ */
+var KORUNAN = KULLANICI_DOSYALARI.concat(["config.json"]);
+
 // "v1.2.0" / "1.2" karşılaştırması → 1: a yeni, -1: b yeni, 0: eşit
 function cmpVer(a, b) {
   var pa = String(a).replace(/^v/i, "").split("."), pb = String(b).replace(/^v/i, "").split(".");
@@ -47,17 +72,40 @@ function httpsGetJson(url, depth) {
 function download(url, dest) {
   return new Promise(function (resolve, reject) {
     var file = fs.createWriteStream(dest);
+    var bitti = false;                       // tek sonuc: hem hata hem basari icin
+    function hata(e) {
+      if (bitti) return; bitti = true;
+      try { file.destroy(); } catch (_) {}
+      try { fs.unlinkSync(dest); } catch (_) {}   // yarim zip diskte kalmasin
+      reject(e);
+    }
     function go(u, depth) {
-      if (depth > 6) { file.close(); return reject(new Error("çok fazla yönlendirme")); }
+      if (depth > 6) return hata(new Error("çok fazla yönlendirme"));
       var req = https.get(u, { headers: { "User-Agent": "YusufwrlPanel" } }, function (res) {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume(); return go(res.headers.location, depth + 1);
         }
-        if (res.statusCode !== 200) { res.resume(); return reject(new Error("HTTP " + res.statusCode)); }
+        if (res.statusCode !== 200) { res.resume(); return hata(new Error("HTTP " + res.statusCode)); }
+        // Sunucunun bildirdigi boyut: yarim inen zip'i "indi" sayip panelin uzerine acmayalim.
+        var beklenen = parseInt(res.headers["content-length"] || "0", 10) || 0;
+        res.on("error", hata);
         res.pipe(file);
-        file.on("finish", function () { file.close(function () { resolve(); }); });
+        file.on("error", hata);
+        file.on("finish", function () {
+          file.close(function () {
+            if (bitti) return;
+            var inen = 0;
+            try { inen = fs.statSync(dest).size; }
+            catch (e) { return hata(new Error("indirilen dosya bulunamadı")); }
+            if (beklenen && inen !== beklenen) {
+              return hata(new Error("indirme yarım kaldı (" + inen + "/" + beklenen + " bayt)"));
+            }
+            if (inen < 1024) return hata(new Error("indirilen paket çok küçük (" + inen + " bayt)"));
+            bitti = true; resolve();
+          });
+        });
       });
-      req.on("error", function (e) { try { fs.unlinkSync(dest); } catch (_) {} reject(e); });
+      req.on("error", hata);
       req.setTimeout(60000, function () { req.destroy(new Error("indirme zaman aşımı")); });
     }
     go(url, 0);
@@ -90,6 +138,64 @@ function copyDir(src, dst, skip) {
 }
 
 function rmrf(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (e) { try { fs.unlinkSync(p); } catch (_) {} } }
+
+/*
+ * Acilan zip'in icinde GERCEK panel kokunu bul ve dogrula.
+ * Neden: release'e yanlislikla "klasoruyle birlikte" sikistirilmis bir zip yuklenirse
+ * (icinde tek bir panel\ klasoru) eski kod hicbir dosyayi degistirmeden version.json'a
+ * yeni surumu yaziyordu — panel kodu eski kalip bir daha ASLA guncelleme almiyordu.
+ * Simdi: tek sarmalayici klasor varsa icine ininiyor, beklenen yapi yoksa hata veriliyor.
+ */
+function paketKoku(stage) {
+  function uygunMu(d) {
+    return fs.existsSync(path.join(d, "index.html")) &&
+           fs.existsSync(path.join(d, "CSXS", "manifest.xml"));
+  }
+  if (uygunMu(stage)) return stage;
+  var alt = fs.readdirSync(stage, { withFileTypes: true }).filter(function (e) { return e.isDirectory(); });
+  if (alt.length === 1) {
+    var ic = path.join(stage, alt[0].name);
+    if (uygunMu(ic)) return ic;
+  }
+  throw new Error("indirilen paket panel yapısında değil (index.html + CSXS\\manifest.xml yok)");
+}
+
+/*
+ * config.json'i EZMEDEN guncelle: kullanicinin degerleri kalir, paketteki YENI anahtarlar eklenir.
+ * (Eskiden dosya duz kopyalaniyordu; kullanicinin maxWordsPerCue / device ayarlari her
+ * guncellemede geri aliniyordu ve sebebi kullanici icin gorunmezdi.)
+ * Doner: eklenen yeni anahtar sayisi.
+ */
+function configBirlestir(paketKok, extRoot) {
+  var yeniYol = path.join(paketKok, "config.json");
+  if (!fs.existsSync(yeniYol)) return 0;
+  var hedef = path.join(extRoot, "config.json");
+  var yeni = readJson(yeniYol, null);
+  if (!yeni) return 0;                                   // pakette bozuk -> kullanicininkine dokunma
+  var eski = readJson(hedef, null);
+  if (!eski) { fs.copyFileSync(yeniYol, hedef); return 0; } // kullanicida yok/bozuk -> paketteki gecerli
+  var eklenen = 0;
+  for (var k in yeni) {
+    if (Object.prototype.hasOwnProperty.call(yeni, k) &&
+        !Object.prototype.hasOwnProperty.call(eski, k)) { eski[k] = yeni[k]; eklenen++; }
+  }
+  /* Bunlar KULLANICI AYARI DEGIL, panelin kendi program yollari: motor klasorunun ic
+     duzeni. Hepsi %ENGINE% token'i ile yazilir (makineye ozel yol icermez; o bilgi
+     engine-root.txt'te). Kullanicinin degeri dondurulursa, ileride motor duzeni
+     degistiginde (exe adi/konumu degisir, styles klasoru tasinir) yeni surum bu
+     degisikligi MEVCUT kullanicilara ASLA ulastiramaz: panel "motor bulunamadi" der ve
+     tek cozum kullanicinin config.json'i elle duzenlemesi olur. O yuzden paketten zorlanir. */
+  var PAKETTEN = ["engineExe", "ffmpegExe", "workDir", "stylesDir"];
+  var degisti = (eklenen > 0);
+  for (var j = 0; j < PAKETTEN.length; j++) {
+    var pk = PAKETTEN[j];
+    if (Object.prototype.hasOwnProperty.call(yeni, pk) && eski[pk] !== yeni[pk]) {
+      eski[pk] = yeni[pk]; degisti = true;
+    }
+  }
+  if (degisti) fs.writeFileSync(hedef, JSON.stringify(eski, null, 2), "utf8");
+  return eklenen;
+}
 
 // repo değeri gerçek mi (placeholder değil mi)?
 function isConfigured(repo) {
@@ -132,25 +238,56 @@ async function checkForUpdate(extRoot, ui) {
   var clean = String(remote).replace(/^v/i, "");
   var tmp = path.join(os.tmpdir(), "yusufwrl_update_" + clean + ".zip");
   var stage = path.join(os.tmpdir(), "yusufwrl_stage_" + clean);
+  // Yedek TEMP'e alinir; extensions klasorunun icine/yanina KONMAZ — CEP orayi tarayip
+  // ayni BundleId'li ikinci bir uzanti gormemeli.
+  var yedek = path.join(os.tmpdir(), "yusufwrl_yedek_" + local + "_" + Date.now());
+  var yedekAlindi = false, basarili = false;
   try {
     if (ui.setStatus) ui.setStatus("Güncelleme indiriliyor v" + clean + "…");
     log("İndiriliyor: " + asset.browser_download_url);
     await download(asset.browser_download_url, tmp);
     rmrf(stage); fs.mkdirSync(stage, { recursive: true });
     await unzip(tmp, stage);
-    // kullanıcıya/makineye özel dosyalar — ASLA ezme
-    // (motor kökü, diarization cihazı, karakter isimleri sözlüğü)
-    copyDir(stage, extRoot, ["engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json"]);
-    fs.writeFileSync(path.join(extRoot, "version.json"), JSON.stringify({ version: clean }, null, 2));
+    var kok = paketKoku(stage);                       // paket gercekten panel mi?
+
+    // Kopyalama ortasinda hata olursa (OneDrive/antivirus kilidi, disk dolu) panel yari
+    // yeni yari eski kalmasin: once mevcut kurulumun tam yedegini al.
+    fs.mkdirSync(yedek, { recursive: true });
+    copyDir(extRoot, yedek, []);
+    yedekAlindi = true;
+
+    try {
+      copyDir(kok, extRoot, KORUNAN);                 // kullanici dosyalarina dokunma
+      /* Eski surumlerden kalan .debug'i kaldir. Yeni paketlerde .debug YOK ama copyDir
+         yalnizca EKLIYOR, hicbir seyi silmiyor — yani daha once kurulmus her panelde dosya
+         oldugu yerde kaliyor ve son kullanicida gereksiz DevTools portunu (localhost:8088)
+         acik tutuyor. Gelistirici makinesinde zararsiz: deploy-dev.ps1 her deploy'da geri koyar. */
+      try { fs.unlinkSync(path.join(extRoot, ".debug")); } catch (_) {}
+      var yeniAnahtar = configBirlestir(kok, extRoot);
+      if (yeniAnahtar) log("config.json: " + yeniAnahtar + " yeni ayar eklendi (seninkiler korundu).");
+      fs.writeFileSync(path.join(extRoot, "version.json"), JSON.stringify({ version: clean }, null, 2));
+    } catch (eKopya) {
+      // Geri al: yedekteki eski dosyalari uzerine yaz. version.json henuz yazilmadigi icin
+      // panel eski surumde kalir ve guncelleme teklifi bir sonraki acilista tekrar cikar.
+      try { copyDir(yedek, extRoot, []); log("Kopyalama hatası — panel eski hâline geri alındı."); }
+      catch (eGeri) { log("Geri alma da başarısız: " + eGeri.message + " — yedek: " + yedek); }
+      throw eKopya;
+    }
+
+    basarili = true;
     if (ui.setStatus) ui.setStatus("");
     if (ui.alert) await ui.alert("Panel v" + clean + " kuruldu.\nPremiere'i kapatıp yeniden aç.", "Güncelleme tamam");
     else log("Güncelleme tamam (v" + clean + "). Premiere'i yeniden başlat.");
   } catch (e) {
     if (ui.setStatus) ui.setStatus("");
     log("Güncelleme başarısız: " + e.message);
-    if (ui.alert) ui.alert("Güncelleme başarısız: " + e.message + "\n(Paneli kapatıp tekrar dene.)", "Hata");
+    if (ui.alert) ui.alert("Güncelleme başarısız: " + e.message +
+      "\nPanel eski sürümde (v" + local + ") kaldı, bir şey bozulmadı.\n(Paneli kapatıp tekrar dene.)", "Hata");
   } finally {
     rmrf(tmp); rmrf(stage);
+    // Yedegi yalnizca is yolunda gittiyse sil; hata durumunda elle kurtarilabilsin diye dursun.
+    if (basarili) rmrf(yedek);
+    else if (yedekAlindi) log("Panelin güncelleme öncesi yedeği: " + yedek);
   }
 }
 

@@ -90,14 +90,20 @@
         <div class="card" id="panelSingle">
           <div class="card-title">Kaynak Ses</div>
           <div class="seg" id="segTrack">
-            <button class="seg-btn active" data-track="0">A1</button>
-            <button class="seg-btn" data-track="1">A2</button>
-            <button class="seg-btn" data-track="2">A3</button>
-            <button class="seg-btn" data-track="mix">Mix</button>
+            <button class="seg-btn active" data-track="0" title="Sadece senin mikrofonun yazıya dökülür">A1</button>
+            <button class="seg-btn" data-track="1" title="Sadece arkadaşların kanalı (Discord) yazıya dökülür">A2</button>
+            <button class="seg-btn" data-track="2" title="A3 genelde oyun sesidir; konuşma yoksa altyazı da çıkmaz">A3</button>
+            <!-- Eski etiket "Mix" idi: ne yaptığı hiçbir yerde yazmıyordu. Etiket artık kendini anlatıyor. -->
+            <button class="seg-btn" data-track="mix" title="A1 + A2 birlikte yazıya dökülür (A3 oyun sesi dahil edilmez)">A1+A2</button>
           </div>
+          <!-- Kanal numaraları tek başına bir şey anlatmıyordu; tek satırlık hatırlatma. -->
+          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord) · A3 = oyun sesi.</p>
           <div class="field" style="margin-top:12px;">
             <label>Stil</label>
-            <div class="select"><select id="selStyleSingle"><option value="">Düz altyazı (caption)</option></select></div>
+            <!-- "caption" yazılımcı olmayan kullanıcıya bir şey anlatmıyor: bu seçenek MOGRT yerine
+                 Premiere'in kendi altyazı kanalına döküyor, yani renk/animasyon olmuyor. Adı bunu söylesin.
+                 NOT: aynı metin js/app.js fillStyleOptions içinde de üretiliyor, orası da güncellenmeli. -->
+            <div class="select"><select id="selStyleSingle"><option value="">Renksiz düz altyazı (Premiere altyazı kanalı)</option></select></div>
           </div>
         </div>
 
@@ -187,11 +193,28 @@
               </button>
               <button class="btn-ghost" id="btnExportSrt" title="Altyazı dosyası (.srt)">SRT</button>
               <button class="btn-ghost" id="btnExportTxt" title="Düz metin (.txt)">TXT</button>
-              <button class="btn-ghost" id="btnExportChapters" title="YouTube bölüm zaman damgaları">Bölümler</button>
-              <input id="chapInterval" type="number" min="10" value="60" title="Bölüm aralığı (sn)" style="width:52px">
+              <!-- "Bölümler" ile aralığı birlikte tut: satır dar panelde alt satıra kayarsa ikisi birlikte kaysın.
+                   <span> DEĞİL <div>: içinde blok seviyesinde bir <div class="select"> var, <span> yalnızca
+                   metin-içi içerik alabilir (geçersiz HTML). Görünüm değişmez, .chap-group zaten inline-flex. -->
+              <div class="chap-group">
+                <button class="btn-ghost" id="btnExportChapters" title="YouTube bölüm zaman damgaları">Bölümler</button>
+                <!-- Eskiden stilsiz <input type="number"> idi: koyu panelde beyaz zeminli/Arial bir kutu
+                     çıkıyor, ne olduğu sadece tooltip'te yazıyordu ve "1" yazılıp binlerce bölüm üretilebiliyordu.
+                     Menüye çevrildi: hem temaya uyuyor hem kendini anlatıyor hem de saçma değer girilemiyor. -->
+                <div class="select chap-select">
+                  <!-- Tooltip birime bağlanmıyor: ilk seçenek saniye ("30 sn'de bir"), "kaç dakikada bir"
+                       diyen eski metin onunla çelişiyordu (kullanıcı 30'u 30 dakika sanabiliyordu). -->
+                  <select id="chapInterval" title="Ne kadar aralıkla bölüm başlığı üretilsin?">
+                    <option value="30">30 sn'de bir</option>
+                    <option value="60" selected>1 dk'da bir</option>
+                    <option value="120">2 dk'da bir</option>
+                    <option value="300">5 dk'da bir</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
-          <p class="note" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce). Renk yanlışsa noktaya tıkla.</p>
+          <p class="note" id="trHint" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce). Renk yanlışsa noktaya tıkla.</p>
           <div class="transcript" id="transcript"></div>
         </div>
 
@@ -377,5 +400,28 @@
 
   <script src="js/CSInterface.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    /* Başlıktaki sürüm rozeti (#brandSub) — CSS'i vardı ama hiç doldurulmuyordu, yüksekliği 0'dı.
+       Neden gerekli: kurulu panel repodaki klasörün KOPYASI (junction değil), yani kod sessizce
+       eski kalabiliyor ve bunu anlamanın görsel bir yolu yoktu. Sürüm başlıkta görünsün,
+       tooltip'te de hangi klasördeki kopyanın çalıştığı yazsın.
+       app.js'ten bağımsız ve tamamen try/catch içinde: okunamazsa panel etkilenmez. */
+    (function () {
+      var el = document.getElementById("brandSub");
+      if (!el) return;
+      if (typeof window.__adobe_cep__ === "undefined") {
+        // Tarayıcı önizlemesi (CEP yok). .brand-sub uppercase olduğu için Türkçe "i" bozulmasın diye kapatıyoruz.
+        el.style.textTransform = "none";
+        el.textContent = "önizleme";
+        return;
+      }
+      try {
+        var kok = new CSInterface().getSystemPath(SystemPath.EXTENSION);
+        var _fs = require("fs"), _path = require("path");
+        var v = JSON.parse(_fs.readFileSync(_path.join(kok, "version.json"), "utf8")).version;
+        if (v) { el.textContent = "v" + v; el.title = kok; }
+      } catch (e) {}
+    })();
+  </script>
 </body>
 </html>

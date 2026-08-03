@@ -37,10 +37,15 @@ var VARSAYILAN = [
    DİKKAT: burada Türkçe "I -> ı" kuralı UYGULANMAZ. Discord kullanıcı adları Türkçe yazım
    kuralına göre değil; "Irmak" yazan bir adı "ırmak"a çevirirsek dosyadaki "irmak" ile
    eşleşmez. Her iki I de "i"ye indirilir.
+   KÜÇÜK NOKTASIZ "ı" DA "i"ye iner: eskiden yalnız büyük harfler dönüştürülüyordu, yani
+   "Işık" -> "isik" olurken "ışık" -> "ışık" kalıyor ve aynı isim kendisiyle eşleşmiyordu.
+   (Kullanıcı panele adı Türkçe doğru yazıyor, Craig ise dosyaya Discord görünen adını
+   baş harfi büyük yazabiliyor.) Bu kişi ÇEKEN'in kendisiyse eşleşmeme daha da pahalı:
+   kendi kaydı referans sayılmak yerine timeline'a konup sesi çift çıkıyordu.
    Ayrıca sadece bilinen ayraçlar (. - _ boşluk) atılır — eskiden Latin dışı bütün harfler
    siliniyordu ve Kiril/Japonca adlar boş dizeye düşüp hiç eşleşmiyordu. */
 function _norm(s) {
-  s = String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
+  s = String(s == null ? "" : s).replace(/[İIı]/g, "i").toLowerCase();
   return s.replace(/[.\-_\s]/g, "");
 }
 
@@ -90,22 +95,37 @@ function karakterBul(entries, karakterAdi) {
 }
 
 /* Panel metin kutusu biçimi:  Karakter: ad1, ad2   (renk adı ya da numarası sonda köşeli parantezde)
-   Örn:  Moni: e, 31241324asdwq12123 [Blue] */
-function parseText(text) {
+   Örn:  Moni: e, 31241324asdwq12123 [Blue]
+
+   oncekiler (isteğe bağlı): düzenlemeden ÖNCEKİ kişi listesi. Köşeli parantezdeki renk
+   tanınmazsa ("[Blu]" gibi bir yazım hatası) o karakterin eski rengi korunur — eskiden
+   sessizce 0'a (Violet) düşüyordu ve kullanıcı Kaydet'e bastığı anda gerçek renk kalıcı
+   olarak kayboluyordu. Tanınmayan değer ayrıca entry.renkHatasi'na yazılır ki panel
+   "Bilinmeyen renk: Blu" diye uyarabilsin.
+   PARAMETRE VERİLMEZSE son yüklenen/kaydedilen liste (_sonListe) kullanılır: panel
+   parseText'i tek argümanla çağırıyor, o yüzden koruma yalnız parametreye bağlı kalsaydı
+   hiç devreye girmezdi. */
+function parseText(text, oncekiler) {
   var out = [], lines = String(text == null ? "" : text).split(/\r?\n/);
   for (var i = 0; i < lines.length; i++) {
     var ln = lines[i].trim();
     if (!ln || ln.charAt(0) === "#") continue;
-    var renk = 0;
+    var renk = 0, renkHatasi = null;
     // Kapanmamış köşeli parantez ("[Blue" gibi) adın parçası sayılıp Discord adını bozuyordu.
     var acik = ln.match(/\[[^\]]*$/);
     if (acik) ln = ln.slice(0, acik.index).trim();
     var rm = ln.match(/\[([^\]]+)\]\s*$/);
     if (rm) {
       var r = rm[1].trim();
-      var sayi = parseInt(r, 10);
-      if (!isNaN(sayi) && sayi >= 0 && sayi < LABELLER.length) renk = sayi;
-      else { for (var q = 0; q < LABELLER.length; q++) if (_norm(LABELLER[q]) === _norm(r)) { renk = q; break; } }
+      var bulundu = false;
+      // Sadece TAM sayı kabul: "3abc" eskiden parseInt ile 3 sayılıyordu
+      if (/^\d+$/.test(r)) {
+        var sayi = parseInt(r, 10);
+        if (sayi >= 0 && sayi < LABELLER.length) { renk = sayi; bulundu = true; }
+      } else {
+        for (var q = 0; q < LABELLER.length; q++) if (_norm(LABELLER[q]) === _norm(r)) { renk = q; bulundu = true; break; }
+      }
+      if (!bulundu) renkHatasi = r;      // ne sayı ne bilinen renk adı — sessizce Violet'e DÜŞME
       ln = ln.slice(0, rm.index).trim();
     }
     var ix = ln.indexOf(":");
@@ -113,7 +133,14 @@ function parseText(text) {
     if (!kar) continue;
     var ham = (ix >= 0 ? ln.slice(ix + 1) : "").split(/[,;]/), adlar = [];
     for (var j = 0; j < ham.length; j++) { var v = ham[j].trim(); if (v) adlar.push(v); }
-    out.push({ karakter: kar, adlar: adlar, renk: renk });
+    var kayit = { karakter: kar, adlar: adlar, renk: renk };
+    if (renkHatasi) {
+      kayit.renkHatasi = renkHatasi;
+      // eski rengi koru (varsa) — parametre yoksa diskten gelen son listeye bak
+      var onceki = karakterBul(oncekiler || _sonListe, kar);
+      if (onceki && onceki.renk != null && LABELLER[onceki.renk]) kayit.renk = onceki.renk;
+    }
+    out.push(kayit);
   }
   return out;
 }
@@ -130,7 +157,12 @@ function toText(entries) {
 
 function defaults() { return JSON.parse(JSON.stringify(VARSAYILAN)); }
 
+/* Son yüklenen/kaydedilen liste. parseText, tanınmayan bir renk etiketi gördüğünde eski rengi
+   buradan okur; panel parseText'i tek argümanla çağırdığı için tek koruma noktası budur. */
+var _sonListe = null;
+
 function load(extRoot) {
+  var sonuc = null;
   try {
     var p = path.join(extRoot, DOSYA);
     if (fs.existsSync(p)) {
@@ -138,13 +170,23 @@ function load(extRoot) {
       if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
       var j = JSON.parse(raw);
       // dizi DEĞİLSE varsayılana dön — elle bozulmuş JSON paneli çökertiyordu
-      if (j && Object.prototype.toString.call(j.kisiler) === "[object Array]") return j.kisiler;
+      if (j && Object.prototype.toString.call(j.kisiler) === "[object Array]") sonuc = j.kisiler;
     }
   } catch (e) {}
-  return defaults();
+  if (!sonuc) sonuc = defaults();
+  _sonListe = sonuc;
+  return sonuc;
 }
 function save(extRoot, entries) {
-  fs.writeFileSync(path.join(extRoot, DOSYA), JSON.stringify({ kisiler: entries || [] }, null, 2), "utf8");
+  // renkHatasi yalnızca panelin uyarı vermesi için üretilen geçici bir işaret; diske yazma
+  var temiz = [], liste = entries || [];
+  for (var i = 0; i < liste.length; i++) {
+    var k = liste[i];
+    if (!k) continue;
+    temiz.push({ karakter: k.karakter, adlar: k.adlar || [], renk: (k.renk != null ? k.renk : 0) });
+  }
+  fs.writeFileSync(path.join(extRoot, DOSYA), JSON.stringify({ kisiler: temiz }, null, 2), "utf8");
+  _sonListe = temiz;    // yazma başarılıysa "bilinen son iyi liste" bu olur
 }
 
 module.exports = {

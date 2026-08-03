@@ -18,10 +18,25 @@ $here = $PSScriptRoot
 Write-Host ""
 Write-Host "=== Yusufwrl Premiere kuruluyor ===" -ForegroundColor Cyan
 
+# --- Onceki kurulumdan kalan motor yolunu oku (panel silinmeden ONCE) ---
+$oncekiEngine = ""
+$erfEski = Join-Path $PanelDst "engine-root.txt"
+if (Test-Path $erfEski) {
+  try { $oncekiEngine = (Get-Content $erfEski -Raw -Encoding UTF8).Trim() } catch {}
+}
+
 # --- Motor hedefini belirle ---
 if (-not $EngineDst) {
+  if ($oncekiEngine -and (Test-Path $oncekiEngine)) {
+    # Motor zaten kurulu ve nerede oldugunu biliyoruz. Varsayilana donmek, sadece panel
+    # guncelleyen bir pakette (engine\ yok) engine-root.txt'i motorun OLMADIGI bir yola
+    # cevirir ve panel tamamen calismaz hale gelirdi. Test-Path ayni zamanda bozuk/eski
+    # kayitlari eler (yol yoksa varsayilana dusuluyor).
+    $EngineDst = $oncekiEngine
+    Write-Host "Mevcut motor klasoru kullanilacak: $EngineDst" -ForegroundColor Cyan
+  }
   # Kullanici adinda ASCII-disi (Turkce vb.) karakter varsa CEF takilir -> sade yola kur
-  if ($env:USERNAME -match '[^\x00-\x7F]') { $EngineDst = "C:\YusufwrlEngine" }
+  elseif ($env:USERNAME -match '[^\x00-\x7F]') { $EngineDst = "C:\YusufwrlEngine" }
   else { $EngineDst = Join-Path $env:USERPROFILE "YusufwrlEngine" }
 }
 
@@ -38,11 +53,78 @@ $panelSrc = Join-Path $here "panel"
 if (-not (Test-Path $panelSrc)) { throw "panel\ klasoru bulunamadi: $panelSrc" }
 $extRoot = Split-Path $PanelDst -Parent
 New-Item -ItemType Directory -Path $extRoot -Force | Out-Null
-if (Test-Path $PanelDst) { Remove-Item $PanelDst -Recurse -Force }
+
+# KULLANICI DOSYALARINI KURTAR: asagidaki Remove-Item kurulu panelin TAMAMINI siliyor.
+# Bu betik "tekrar kurmak icin KUR.bat'a cift tikla" diye tasarlandigindan, korunmazsa
+# aylarca doldurulan sozluk.json / kisiler.json her yeniden kurulumda sifirlaniyordu.
+# BU BES DOSYA HER YERDE AYNI: .gitignore, installer\panel-files.ps1 ($PanelUserFiles;
+# pack-panel.ps1 ve deploy-dev.ps1 listeyi oradan okur), installer\installer.iss (Excludes),
+# js\updater.js (KULLANICI_DOSYALARI) ve burasi -> BESINI birden guncelle.
+# config.json bu listede DEGIL: pakette gelir, asagida BIRLESTIRILIYOR (bkz. satir ~90).
+$koru  = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json", "assemblyai-key.txt")
+$yedek = Join-Path $env:TEMP ("panel_koru_" + [guid]::NewGuid().ToString("N"))
+$korunan = @()
+
+if (Test-Path $PanelDst) {
+  New-Item -ItemType Directory -Path $yedek -Force | Out-Null
+  foreach ($k in $koru) {
+    $f = Join-Path $PanelDst $k
+    if (Test-Path $f) { Copy-Item $f $yedek -Force; $korunan += $k }
+  }
+  # config.json ayri: geri yazilmiyor, asagida yeni surumle BIRLESTIRILIYOR.
+  $cfgVar = Join-Path $PanelDst "config.json"
+  if (Test-Path $cfgVar) { Copy-Item $cfgVar $yedek -Force }
+  Remove-Item $PanelDst -Recurse -Force
+}
+
 # panel\ ICERIGINI hedefe kopyala (panel klasorunu degil)
 New-Item -ItemType Directory -Path $PanelDst -Force | Out-Null
 Copy-Item (Join-Path $panelSrc "*") -Destination $PanelDst -Recurse -Force
+
+# Kenara alinan kullanici dosyalarini geri koy
+foreach ($k in $korunan) {
+  $f = Join-Path $yedek $k
+  if (Test-Path $f) { Copy-Item $f $PanelDst -Force }
+}
+
+# config.json: kullanicinin ayarlari (maxWordsPerCue, device, fontName...) kalsin,
+# yeni surumde eklenen anahtarlar da gelsin.
+$cfgEski = Join-Path $yedek "config.json"
+$cfgYeni = Join-Path $PanelDst "config.json"
+if ((Test-Path $cfgEski) -and (Test-Path $cfgYeni)) {
+  try {
+    $y = Get-Content $cfgYeni -Raw | ConvertFrom-Json
+    $e = Get-Content $cfgEski -Raw | ConvertFrom-Json
+    $eklenen = 0
+    # Bunlar kullanici ayari DEGIL, panelin kendi program yollari (motor klasorunun ic
+    # duzeni; hepsi %ENGINE% token'li, makineye ozel yol icermez). Kullanicidaki eski deger
+    # korunursa motor duzeni degistiginde yeni surum bunu mevcut kullaniciya ulastiramaz ve
+    # panel "motor bulunamadi" der. O yuzden paketteki deger ZORLANIR (-Force).
+    $paketten = @("engineExe", "ffmpegExe", "workDir", "stylesDir")
+    foreach ($p in $y.PSObject.Properties) {
+      if ($paketten -contains $p.Name) {
+        $e | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
+        continue
+      }
+      if (($e.PSObject.Properties.Name) -notcontains $p.Name) {
+        $e | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value
+        $eklenen++
+      }
+    }
+    # BOM'suz UTF-8 yaz: panel dosyayi utf8 okuyor (js/pipeline.js loadConfig)
+    [System.IO.File]::WriteAllText($cfgYeni, ($e | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+    $korunan += "config.json"
+    if ($eklenen) { Write-Host "      config.json: $eklenen yeni ayar eklendi, seninkiler korundu." }
+  } catch {
+    Write-Host "      config.json birlestirilemedi - paketteki kullanildi." -ForegroundColor Yellow
+  }
+}
+
+if (Test-Path $yedek) { Remove-Item $yedek -Recurse -Force }
 Write-Host "[2/5] Panel kuruldu: $PanelDst"
+if ($korunan.Count) {
+  Write-Host "      Korunan kisisel dosyalar: $($korunan -join ', ')" -ForegroundColor Cyan
+}
 
 # --- 3) Motor -> hedef ---
 $engineSrc = Join-Path $here "engine"

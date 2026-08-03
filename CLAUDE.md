@@ -8,7 +8,7 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 - Senkron kartı: `js/kisiler.js` (Discord adı → karakter + Premiere renk etiketi) + `js/hizala.js` (ses hizalama). Liste `kisiler.json`'da (gitignore'lu), panelden düzenlenir.
 
 ## Üretim modları (js/app.js)
-- **Tek Stil** (`runSingle`) — tek kanal ya da **Mix** (A1+A2 birleşik).
+- **Tek Stil** (`runSingle`) — tek kanal ya da **A1+A2** (birleşik; panel düğmesinin etiketi budur, eski adı "Mix"ti).
 - **Konuşmacıya Göre** (`runChannels`) — A2/A3/A4… **her kanal bir kişi** (Craig bot ya da OBS ile kişi başı kayıt).
   Ayrım %100 doğru, üst üste konuşmalar da çıkar. Kanal satırlarında işaret kutusu (oyun sesi/karışık kanal atlanır)
   ve isim alanı var; ikisi de kanal numarasına göre localStorage'da hatırlanır.
@@ -39,12 +39,15 @@ Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.
 - Kurulum .exe'si (Inno Setup gerekir): `& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\installer.iss` (ISCC PATH'te değildir).
 
 ## Tuzaklar
+- **Altyazı boş video kanalı ister.** host'ta hedef kanal `idx = (videoKanalSayısı - 1) - lane`; en alttaki kanal (idx 0) kullanıcının görüntüsüdür ve **asla kullanılmaz** → `vt >= enÜstLane + 2`. Tek Stil 2, Konuşmacıya Göre 3 video kanalı ister; `videoKanaliYeterMi()` yetmezse yerleştirmeyi durdurup kaç kanal ekleneceğini söyler. Temizlik de yalnız **kendi MOGRT'lerimize** dokunur (`_stilBeyazListe`, cue dosyasındaki `#STILLER|` satırı) — kullanıcının grafikleri ve görüntüsü silinmez.
 - **Derleme yok** — HTML/JS/JSX düz dosyalar. Dosya değişince paneli kapat-aç (ya da Premiere'i yeniden başlat) → yeniden yüklenir.
 - Panel JS'i CEP'in **kendi eski Node'unda** çalışır, sistem Node v24'te değil. ES5 tarzı kal; sadece `require()` ile built-in modüller.
 - Sürüm çıkarken `version.json` **ve** `CSXS/manifest.xml` (ExtensionBundleVersion) birlikte artır. `installer.iss` AppVersion ayrı ve ayrıca güncellenir.
 - **ffmpeg PATH'e gerekmez** — pipeline.js motorun içindeki `ffmpeg.exe`'yi tam yolla çağırır (Faster-Whisper-XXL kendi ffmpeg'ini getirir). **ffprobe YOK** — akış bilgisi `ffmpeg -i` çıktısından ayrıştırılır (`_probeAudioCount`).
 - **Track ≠ ses akışı:** A1/A2/A3 track'i, medya dosyasının 1./2./3. ses akışına eşlenir — bu yalnızca OBS çoklu-kanal kaydında (tek dosya, çok akış) geçerli. Tek akışlı kayıtta ffmpeg `filter_complex` içindeki `[i:a:1]` "matches no streams" ile ÇÖKER (`-map`'in aksine `?` ile opsiyonel yapılamaz). `buildTimelineAudio` akış sayısını ölçüp olmayan akışı istemez.
-- `config.json` `%ENGINE%` / `~` token'ları kullanır; makineye özel yol **gömme** (auto-updater config.json'ı ezer). Kullanıcıya/makineye özel dosyalar: `engine-root.txt`, `diarize-device.txt`, `sozluk.json`, `kisiler.json` — gitignore'lu ve **beş yerde birden** korunmalı: `.gitignore`, `pack-panel.ps1` `$exclude`, `updater.js` `copyDir` skip listesi, `installer.iss` `Excludes`, `deploy-dev.ps1` `$koru`. Yeni bir kullanıcı dosyası eklerken beşini de güncelle.
+- `config.json` `%ENGINE%` / `~` token'ları kullanır; makineye özel yol **gömme** (auto-updater config.json'ı ezer). Program yolları (motor/ffmpeg) kullanıcı ayarı DEĞİLDİR — `updater.js` `configBirlestir()` onları yeni sürümden zorla alır, yoksa güncelleme sonrası eski yol kalıp motor bulunamaz.
+- **Kullanıcı dosyaları:** `engine-root.txt`, `diarize-device.txt`, `sozluk.json`, `kisiler.json`, `assemblyai-key.txt`. Liste artık **tek kaynakta**: `installer/panel-files.ps1` → `$PanelUserFiles` (`pack-panel.ps1` ve `deploy-dev.ps1` bunu okur). Ayrıca **elle tutulan üç kopya** var: `.gitignore`, `installer/installer.iss` `Excludes`, `installer/kur.ps1` `$koru`, ve `js/updater.js` `copyDir` skip listesi. Yeni bir kullanıcı dosyası eklerken `panel-files.ps1` + bu üçü/dördü güncellenir.
+  ⚠ `config.json` bu listeye **AİT DEĞİL** — `installer.iss` `Excludes`'a eklenirse temiz kurulumda panel hiç açılmaz.
 - Debug: panel açıkken Chrome/Edge'de `http://localhost:8088` → DevTools (panel HTML/JS). `host.jsx` için VS Code "ExtendScript Debugger".
 - **Premiere 2026 (UXP):** CEP panelleri 2026 sürümünde yüklenmeyebilir. Panel görünmüyorsa muhtemel sebep bu; CEP hâlâ Premiere 2024/2025'te çalışır. Uzun vadede UXP'ye taşınması gerekir.
 - **Kurulu panel junction DEĞİL, KOPYA:** `%APPDATA%\Adobe\CEP\extensions\com.yusufwrl.premierepanel` ayrı bir klasör (OneDrive + Türkçe karakterli yol CEF'i bozduğu için ASCII yola kopyalanmış). Repo'daki değişiklikler oraya **kopyalanmadan** panele yansımaz — `install-dev.ps1` ya da elle `Copy-Item`. Sürüm numarası güncel görünüp kodun eski olması bu yüzden olur.

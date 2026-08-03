@@ -94,9 +94,28 @@ function getSequenceInfoJSON() {
            ',"clipCounts":[' + dolu.join(",") + ']}';
 }
 
+/* Klip "korunacak ad" ile eslesiyor mu? Once klibin ADINA, tutmazsa MEDYA DOSYASININ adina
+   bakar. Tek kritere (klip adi) guvenmek korumayi sessizce delik birakiyordu: panel kirpilmis
+   bir kopya yerlestirdiginde (snkkirp_...) ya da Premiere klibi baska adlandirdiginda orijinal
+   Craig adi klip adinda gecmiyor, koruma tutmuyor ve az once yerlesen kayit siliniyordu. */
+function _klipKoruEslesir(cl, koru) {
+    if (!koru) return false;
+    var nm = "";
+    try { nm = String(cl.name).toLowerCase(); } catch (e1) { nm = ""; }
+    if (nm && nm.indexOf(koru) !== -1) return true;
+    var mp = "";
+    try { mp = String(cl.projectItem.getMediaPath()); } catch (e2) { mp = ""; }
+    if (mp) { mp = _basename(mp).toLowerCase(); if (mp && mp.indexOf(koru) !== -1) return true; }
+    return false;
+}
+
 // Bir ses kanalındaki TÜM klipleri siler (A2'yi boşaltmak için).
 // ripple=false ŞART: true olsaydı sonraki klipler sola kayar ve tüm senkron bozulurdu.
 function clearAudioTrack(trackIdx, korunacakAd) {
+    /* Undo grubu: M klip silmek tek Ctrl+Z ile geri alinabilsin. Grup olmadan her silme ayri
+       bir undo adimiydi; kullanici yanlislikla temizledigi kanali geri getirmek icin onlarca
+       kez Ctrl+Z'ye basmak zorunda kaliyordu. */
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl A2 Temizlik"); _ug = true; } catch (eug) {}
     try {
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
@@ -104,19 +123,32 @@ function clearAudioTrack(trackIdx, korunacakAd) {
         if (isNaN(ix) || ix < 0 || ix >= seq.audioTracks.numTracks) return "err:A" + (ix + 1) + " kanalı yok";
         var koru = (korunacakAd == null) ? "" : String(korunacakAd).toLowerCase();
         var tr = seq.audioTracks[ix], silinen = 0, korunan = 0;
+        /* GUVENLIK: korunacak bir ad verildiyse, once o adin kanalda GERCEKTEN bulundugunu
+           dogrula. Bulunamazsa hic silme. Aksi halde ad yanlis uretildiginde (ornegin
+           yerlestirilen dosya kirpilmis kopyaysa) koruma sessizce tutmaz ve kanaldaki
+           HER SEY silinir — kullanicinin az once yerlesen kaydi dahil. */
+        if (koru) {
+            var bulundu = false;
+            for (var c0 = 0; c0 < tr.clips.numItems; c0++) {
+                if (_klipKoruEslesir(tr.clips[c0], koru)) { bulundu = true; break; }
+            }
+            // Metin düzgün Türkçe: bu dize doğrudan kullanıcıya gösteriliyor, ASCII hâli
+            // panelin geri kalanıyla uyumsuz görünüyordu (evalScript DÖNÜŞÜ olduğu için
+            // Türkçe karakter sorun çıkarmaz — sorun yalnız evalScript'e metin GEÇERKEN var).
+            if (!bulundu) return "err:Korunacak klip (" + korunacakAd + ") A" + (ix + 1) +
+                                 " kanalında bulunamadı; güvenlik için hiçbir şey silinmedi.";
+        }
         for (var i = tr.clips.numItems - 1; i >= 0; i--) {
-            /* korunacakAd verilmisse o ada sahip klip SILINMEZ. Bu olmadan, A2'ye az once
+            /* korunacakAd verilmisse o kayda ait klip SILINMEZ. Bu olmadan, A2'ye az once
                yerlestirilen Craig klibi de siliniyordu (kullanici "eski karisik sesi temizle"
                derken yeni koyulani kaybediyordu). */
-            if (koru) {
-                var nm = "";
-                try { nm = String(tr.clips[i].name).toLowerCase(); } catch (en) { nm = ""; }
-                if (nm && nm.indexOf(koru) !== -1) { korunan++; continue; }
-            }
+            if (koru && _klipKoruEslesir(tr.clips[i], koru)) { korunan++; continue; }
             try { tr.clips[i].remove(false, false); silinen++; } catch (e1) {}
         }
         return "ok:" + silinen + " klip silindi (A" + (ix + 1) + ")" + (korunan ? (", " + korunan + " korundu") : "");
-    } catch (e) { return "err:" + e.toString(); }
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 /*
@@ -135,6 +167,10 @@ function clearAudioTrack(trackIdx, korunacakAd) {
  *    bu yüzden setColorLabel her dosya için AÇIKÇA çağrılır.
  */
 function senkronUygula(planDosyaPath) {
+    /* Undo grubu: N dosyanin yerlestirilmesi + renk etiketleri tek Ctrl+Z ile geri alinabilsin.
+       Grup olmadan her klip ayri bir undo adimiydi; yanlis klasor secildiginde kullanicinin
+       tek tek onlarca kez geri alma yapmasi gerekiyordu. */
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Senkron"); _ug = true; } catch (eug) {}
     try {
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
@@ -152,30 +188,88 @@ function senkronUygula(planDosyaPath) {
         }
         if (!isler.length) return "err:Plan boş";
 
-        // 1) Dosyaları kendi bin'ine al
-        var root = app.project.rootItem, bin = null;
-        try { bin = root.createBin("Craig Sesleri"); } catch (eb) { bin = null; }
-        if (!bin) bin = root;
-        try { app.project.importFiles(yollar, true, bin, false); }
-        catch (ei) { return "err:Dosyalar projeye alınamadı: " + ei.toString(); }
-
-        // 2) İçe alınan öğeleri medya yoluna göre eşle
+        // Öğe arama yardımcıları (import ELEMESİ bunları kullandığı için yukarıda duruyorlar)
         function _norm(s) { return String(s).replace(/\\/g, "/").toLowerCase(); }
-        function _bul(yol) {
+        // SADECE medya yolu eşleşmesi. Import elemesinde ad eşleşmesi kullanılmaz: farklı
+        // klasördeki aynı adlı (ör. iki Craig kaydında da "1-tofi.m4a") dosya, yenisi hiç
+        // import edilmeden eskisiyle karıştırılır ve timeline'a YANLIŞ ses konurdu.
+        function _bulYol(yol) {
             var hedef = _norm(yol);
             for (var k = 0; k < bin.children.numItems; k++) {
                 var ch = bin.children[k], mp = "";
                 try { mp = ch.getMediaPath(); } catch (e) { mp = ""; }
                 if (mp && _norm(mp) === hedef) return ch;
             }
-            // yol eşleşmezse dosya adına düş
+            return null;
+        }
+        function _bul(yol) {
+            var r = _bulYol(yol);
+            if (r) return r;
+            /* yol eşleşmezse dosya adına düş — AMA yalnız BU çalıştırmada import edilenlere bak.
+               "Craig Sesleri" bin'i artık yeniden kullanıldığı için içinde önceki kayıtlardan
+               kalan AYNI ADLI dosyalar duruyor ("1-tofi.m4a" her Craig kaydında var). Yol
+               eşleşmesi herhangi bir sebeple tutmazsa (OneDrive/Türkçe yol, junction, UNC,
+               Premiere'in farklı normalize etmesi) ad-fallback ESKİ kaydı döndürüp timeline'a
+               YANLIŞ oturumun sesini koyuyordu; hiçbir uyarı da çıkmıyordu. */
             var ad = _basename(yol).replace(/\.[^.]+$/, "").toLowerCase();
             for (var m = 0; m < bin.children.numItems; m++) {
-                var c2 = bin.children[m], nm = "";
+                var c2 = bin.children[m], nm = "", nid2 = "";
+                try { nid2 = String(c2.nodeId); } catch (e3) { nid2 = ""; }
+                if (nid2 && eskiOgeler["#" + nid2]) continue;   // önceki çalıştırmadan kalma: ada göre EŞLEME
                 try { nm = String(c2.name).replace(/\.[^.]+$/, "").toLowerCase(); } catch (e2) {}
                 if (nm === ad) return c2;
             }
             return null;
+        }
+
+        // 1) Dosyaları kendi bin'ine al
+        /* Once MEVCUT "Craig Sesleri" bin'ini ara. Premiere ayni isimde bin olusturmaya izin
+           verdigi icin kosulsuz createBin her calistirmada bir kopya daha yaratiyor; proje
+           paneli ayni dosyalarin 3-4 kopyasiyla doluyor ve kullanici timeline'dakinin hangisi
+           oldugunu ayirt edemiyordu. (ProjectItemType.BIN = 2; sabit yoksa ad eslesmesi yeter.) */
+        var root = app.project.rootItem, bin = null, BIN_AD = "Craig Sesleri";
+        try {
+            for (var b0 = 0; b0 < root.children.numItems; b0++) {
+                var ch0 = root.children[b0], ad0 = "", tip0 = 2;
+                try { ad0 = String(ch0.name); } catch (eb1) { ad0 = ""; }
+                if (ad0 !== BIN_AD) continue;
+                try { tip0 = parseInt(ch0.type, 10); } catch (eb2) { tip0 = 2; }
+                if (isNaN(tip0)) tip0 = 2;   // tip okunamadi: ad zaten eslesti, bin kabul et
+                if (tip0 === 2) { bin = ch0; break; }
+            }
+        } catch (eb0) { bin = null; }
+        /* Seçilen öğe gerçekten gezilebilir bir bin mi? Yukarıda tip okunamazsa öğe koşulsuz
+           bin sayılıyor; bin değilse `bin.children` undefined olur ve ilk kullanımı (_bulYol)
+           koruma try'ının DIŞINDA olduğu için tüm senkron "err:..." ile iptal olurdu.
+           Doğrulanamıyorsa yok say, hemen aşağıdaki createBin'e düş. */
+        if (bin) {
+            var binOk = false;
+            try { binOk = (bin.children != null && bin.children.numItems >= 0); } catch (eb3) { binOk = false; }
+            if (!binOk) bin = null;
+        }
+        if (!bin) { try { bin = root.createBin(BIN_AD); } catch (eb) { bin = null; } }
+        if (!bin) bin = root;
+
+        /* Import ÖNCESİ bin içeriğinin fotoğrafı. Bin yeniden kullanıldığı için içinde önceki
+           kayıtlardan kalan aynı adlı dosyalar olabiliyor; `_bul`'un ad-fallback'i onlardan
+           birini yakalarsa timeline'a yanlış oturumun sesi konur. Fallback yalnız bu
+           çalıştırmada import edilenlere bakacak (yol eşleşmesi zaten `_bulYol` ile yapılıyor).
+           nodeId okunamazsa o öğe için eski davranış sürer — kötüleştirmez. */
+        var eskiOgeler = {};
+        try {
+            for (var q0 = 0; q0 < bin.children.numItems; q0++) {
+                var nid = ""; try { nid = String(bin.children[q0].nodeId); } catch (eq1) { nid = ""; }
+                if (nid) eskiOgeler["#" + nid] = true;
+            }
+        } catch (eq0) {}
+
+        /* Yalnizca projede HENUZ OLMAYAN dosyalari import et — bin yeniden kullanildiginda
+           ayni medyanin kopyalari birikmesin. */
+        var eksik = [];
+        for (i = 0; i < yollar.length; i++) { if (!_bulYol(yollar[i])) eksik.push(yollar[i]); }
+        if (eksik.length) {
+            try { app.project.importFiles(eksik, true, bin, false); }
+            catch (ei) { return "err:Dosyalar projeye alınamadı: " + ei.toString(); }
         }
 
         var konan = 0, hata = 0, ilkHata = "";
@@ -214,11 +308,11 @@ function senkronUygula(planDosyaPath) {
         }
         // Hicbiri yerlesmediyse BASARI DONME: panel "ok:" gorunce akisa devam edip
         // A2 temizligini bile teklif ediyordu.
-        if (!konan) return "err:Hicbir ses yerlestirilemedi. " + (ilkHata || "sebep bilinmiyor");
+        if (!konan) return "err:Hiçbir ses yerleştirilemedi. " + (ilkHata || "sebep bilinmiyor");
         return "ok:" + konan + " ses yerleştirildi" + (hata ? (", " + hata + " hata | " + ilkHata) : "");
     } catch (e) {
         return "err:" + e.toString();
-    }
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 function _basename(p) { return String(p).replace(/^.*[\\\/]/, ""); }
@@ -389,7 +483,23 @@ function _findClipNear(vTrack, startSec, TICKS) {
 // MOGRT değerinden düz metni çıkarır (string ya da {text:...} JSON olabilir).
 function _extractText(v) {
     if (typeof v === "string") {
-        if (v.charAt(0) === "{") { try { var o = JSON.parse(v); if (o && typeof o.text === "string") return o.text; } catch (e) {} }
+        if (v.charAt(0) === "{") {
+            /* ExtendScript ES3'tur ve JSON YERLESIGI GARANTI DEGILDIR. Eskiden burada yalniz
+               JSON.parse vardi; JSON tanimsizsa ReferenceError catch'e dusuyor ve fonksiyon
+               ham JSON metnini altyazi sanip ekrana basiyordu ("{"text":"selam"}" gibi).
+               Once yerlesik denenir, yoksa "text" alani elle ayiklanir. */
+            try {
+                if (typeof JSON !== "undefined" && JSON && typeof JSON.parse === "function") {
+                    var o = JSON.parse(v);
+                    if (o && typeof o.text === "string") return o.text;
+                }
+            } catch (e) {}
+            var m = v.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+            if (m) {
+                return m[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t")
+                           .replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+            }
+        }
         return v;
     }
     if (v && typeof v.text === "string") return v.text;
@@ -727,6 +837,40 @@ function addStyledFromSelected(cuesFilePath, vTrackIndex) {
  * Çoklu-stil yerleştirme: her cue satırı "startSec|endSec|mogrtPath|metin".
  * Farklı konuşmacılar farklı MOGRT ile timeline'a gelir.
  */
+/* TEMIZLIK BEYAZ LISTESI — hedef video kanalinda hangi kliplerin "bizim altyazimiz" sayilip
+   silinebilecegini belirler. Iki kaynak:
+     1) cue dosyasinin basindaki "#STILLER|Ad1|Ad2|..." satiri — panelin TANIDIGI butun stil
+        adlari. Kullanici stili degistirip yeniden basarsa eski kliplerin adi farklidir;
+        yalnizca bu calistirmadaki stile bakarsak onlar silinmez ve ekranda CIFT altyazi olur.
+     2) bu calistirmada kullanilan MOGRT dosya adlari (baslik satiri gelmese de calissin diye).
+   Listede OLMAYAN hicbir klibe dokunulmaz — kullanicinin kendi grafikleri ve goruntusu guvende. */
+function _stilBeyazListe(lines, cues) {
+    /* Anahtarlar "#" onekiyle tutulur. Duz nesnede "constructor"/"toString"/"valueOf" gibi
+       adlar Object.prototype uzerinden HER ZAMAN dogru donerdi; adi tam olarak boyle olan
+       bir klip beyaz listede sayilip SILINIRDI. Onek bu tuzagi tamamen kapatir. */
+    var ad = {}, i, j, p, b;
+    for (i = 0; i < lines.length; i++) {
+        if (!lines[i] || lines[i].slice(0, 9) !== "#STILLER|") continue;
+        p = lines[i].slice(9).split("|");
+        for (j = 0; j < p.length; j++) {
+            b = String(p[j]).replace(/^\s+|\s+$/g, "").replace(/\.[^.]+$/, "");
+            if (b) ad["#" + b.toLowerCase()] = true;
+        }
+    }
+    for (i = 0; i < cues.length; i++) {
+        b = String(cues[i].mg).replace(/\\/g, "/");
+        b = b.slice(b.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "");
+        if (b) ad["#" + b.toLowerCase()] = true;
+    }
+    return ad;
+}
+
+// Beyaz liste sorgusu — anahtar oneki tek yerde bilinsin.
+function _bizimAltyazimizMi(liste, klipAdi) {
+    var n = String(klipAdi == null ? "" : klipAdi).replace(/\.[^.]+$/, "").toLowerCase();
+    return n ? (liste["#" + n] === true) : false;
+}
+
 function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
     var _ug = false; try { app.beginUndoGroup("Yusufwrl Altyazı"); _ug = true; } catch (eug) {}
     try {
@@ -750,18 +894,30 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
         if (vTrackIndex === undefined || vTrackIndex === null) vIdx = seq.videoTracks.numTracks - 1;
         else if (vTrackIndex < 0) vIdx = seq.videoTracks.numTracks + vTrackIndex;
         else vIdx = vTrackIndex;
-        if (vIdx < 0) vIdx = 0;
+        /* vIdx 0 = en alttaki video kanali = kullanicinin GORUNTUSU. Oraya altyazi basmak
+           hem goruntuyu ezer hem de asagidaki temizlik onu siler. 0'a kelepceleme, DUR. */
+        if (vIdx < 1) return "err:Altyazı için boş bir video kanalı gerekiyor. Premiere'de " +
+                             "görüntünün üstüne bir video kanalı ekleyip tekrar dene.";
 
         // SADECE basılacak zaman aralığındaki klipleri temizle — parça parça (süre aralığı)
         // yerleştirmede önceki bölümleri silmesin. Aralık = ilk cue başı .. son cue sonu.
         var spanS = cues[0].s, spanE = cues[0].e;
         for (var si = 1; si < cues.length; si++) { if (cues[si].s < spanS) spanS = cues[si].s; if (cues[si].e > spanE) spanE = cues[si].e; }
+        /* Yalnizca KENDI altyazilarimizi sil (bu calistirmadaki MOGRT adlari). Eskiden
+           aralikta kalan her klip siliniyordu; hedef kanalda kullanicinin bir goruntusu
+           varsa o da gidiyordu. */
+        var mgAd0 = _stilBeyazListe(lines, cues);
+        var korunan0 = 0;
         try {
             var vt0 = seq.videoTracks[vIdx];
             for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
                 try {
                     var cl0 = vt0.clips[k], cs0 = cl0.start.seconds, ce0 = cl0.end.seconds;
-                    if (ce0 > spanS + 0.05 && cs0 < spanE - 0.05) cl0.remove(false, false);
+                    if (!(ce0 > spanS + 0.05 && cs0 < spanE - 0.05)) continue;
+                    var nm0 = "";
+                    try { nm0 = String(cl0.name); } catch (en0) { nm0 = ""; }
+                    if (!_bizimAltyazimizMi(mgAd0, nm0)) { korunan0++; continue; }   // bizim altyazimiz degil
+                    cl0.remove(false, false);
                 } catch (er) {}
             }
         } catch (ec) {}
@@ -778,16 +934,34 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
             _setEndSec(ti, cues[c].e, TICKS);
             placed++;
         }
-        return "ok:" + placed + " eklendi" + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+        if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
+        return "ok:" + placed + " eklendi" + (korunan0 ? (", " + korunan0 + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
     } catch (e) {
         return "err:" + e.toString();
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
+/* Sekansin gercek kare yuksekligini okur (1080 varsayilan). Iki farkli API denenir; ikisi de
+   yoksa 1080'e duser (eski davranis). */
+function _seqHeight(seq) {
+    var h = 0;
+    try { h = parseInt(seq.frameSizeVertical, 10); } catch (e1) { h = 0; }
+    if (!h || isNaN(h) || h < 16) {
+        try { h = parseInt(seq.getSettings().videoFrameHeight, 10); } catch (e2) { h = 0; }
+    }
+    if (!h || isNaN(h) || h < 16) h = 1080;
+    return h;
+}
+
 // Klibi ekranda yukarı kaydırır (üst üste konuşmada istifleme). Başarılıysa true döner.
 // Position özelliğini önce Motion/Vector Motion'da, bulamazsa herhangi bir bileşende arar (S8).
-function _shiftUp(ti, offsetPx) {
+// seqH: sekansin kare yuksekligi. MOGRT'lerde Position NORMALIZE (0-1) geldigi icin pikseli
+// bolerken gercek yukseklik sart: 1080 sabiti 4K'da kaymayi iki katina, 720p'de yariya
+// dusuruyordu (altyazilar ya karenin ortasina firliyor ya da ic ice giriyordu).
+function _shiftUp(ti, offsetPx, seqH) {
     if (!offsetPx || offsetPx <= 0) return false;
+    seqH = parseInt(seqH, 10);
+    if (!seqH || isNaN(seqH) || seqH < 16) seqH = 1080;   // parametre gelmezse eski davranis
     try {
         var posProp = null;
         // 1. tur: adı Motion/Vector Motion olan bileşen; 2. tur: Position'ı olan herhangi bileşen
@@ -810,7 +984,7 @@ function _shiftUp(ti, offsetPx) {
         var x = pos[0], y = pos[1];
         // normalize (0-1) mi yoksa piksel mi: küçük değerler normalize kabul edilir
         var norm = (Math.abs(x) <= 2 && Math.abs(y) <= 2);
-        var dy = norm ? (offsetPx / 1080.0) : offsetPx;
+        var dy = norm ? (offsetPx / (seqH * 1.0)) : offsetPx;
         posProp.setValue([x, y - dy], true);
         return true;
     } catch (e) { return false; }
@@ -842,17 +1016,31 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
 
         var TICKS = 254016000000;
         var top = seq.videoTracks.numTracks - 1;
+        var seqH = _seqHeight(seq);   // istifleme kaymasi bu yukseklige gore normalize edilir
         // SADECE basılacak zaman aralığındaki klipleri temizle (parça parça yerleştirme korunur)
         var spanS = cues[0].s, spanE = cues[0].e;
         for (var s8 = 1; s8 < cues.length; s8++) { if (cues[s8].s < spanS) spanS = cues[s8].s; if (cues[s8].e > spanE) spanE = cues[s8].e; }
+        /* TEMIZLIK YALNIZ KENDI ALTYAZILARIMIZA: eskiden bu dongu zaman araligindaki HER
+           klibi siliyordu. Lane hesabi kullanicinin goruntu kanalina denk geldiginde
+           (az video kanali varsa oluyor) 30 dakikalik oyun goruntusu siliniyordu.
+           Artik sadece bu calistirmada kullanilan MOGRT adlarina sahip klipler silinir. */
+        var mgAdlari = _stilBeyazListe(lines, cues);
+        var korunanKlip = 0;
         for (var L = 0; L <= maxLane; L++) {
-            var idx = top - L; if (idx < 0) continue;
+            var idx = top - L;
+            /* idx 0 = en alttaki video kanali = kullanicinin GORUNTUSU. Oraya asla dokunma.
+               Panel tarafi zaten yeterli kanal yoksa yerlestirmeyi durduruyor; bu son savunma. */
+            if (idx < 1) continue;
             try {
                 var vt = seq.videoTracks[idx];
                 for (var k = vt.clips.numItems - 1; k >= 0; k--) {
                     try {
                         var clx = vt.clips[k], csx = clx.start.seconds, cex = clx.end.seconds;
-                        if (cex > spanS + 0.05 && csx < spanE - 0.05) clx.remove(false, false);
+                        if (!(cex > spanS + 0.05 && csx < spanE - 0.05)) continue;
+                        var nmx = "";
+                        try { nmx = String(clx.name); } catch (enx) { nmx = ""; }
+                        if (!_bizimAltyazimizMi(mgAdlari, nmx)) { korunanKlip++; continue; }   // bizim altyazimiz degil
+                        clx.remove(false, false);
                     } catch (er) {}
                 }
             } catch (ec) {}
@@ -860,7 +1048,10 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
 
         var placed = 0, failed = 0, firstErr = "", needShift = 0, shifted = 0;
         for (var c = 0; c < cues.length; c++) {
-            var idx2 = top - cues[c].lane; if (idx2 < 0) idx2 = 0;
+            /* idx2'yi 0'a KELEPCELEME: 0 = kullanicinin goruntu kanali ve importMGT oraya
+               altyazi koyunca goruntuyu ezer. Yeterli kanal yoksa o altyaziyi ATLA. */
+            var idx2 = top - cues[c].lane;
+            if (idx2 < 1) { failed++; if (!firstErr) firstErr = "yeterli video kanalı yok (en az " + (cues[c].lane + 2) + " gerekiyor)"; continue; }
             var mf = new File(cues[c].mg);
             if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
             var ti = null;
@@ -869,10 +1060,11 @@ function addLanedSubtitles(cuesFilePath, yOffsetPx) {
             if (!ti) { failed++; continue; }
             _setTextAllWays(ti, cues[c].t);
             _setEndSec(ti, cues[c].e, TICKS);
-            if (cues[c].shift > 0) { needShift++; if (_shiftUp(ti, cues[c].shift)) shifted++; }
+            if (cues[c].shift > 0) { needShift++; if (_shiftUp(ti, cues[c].shift, seqH)) shifted++; }
             placed++;
         }
-        return "ok:" + placed + " eklendi" + (needShift ? (", " + shifted + "/" + needShift + " kaydırıldı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+        if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
+        return "ok:" + placed + " eklendi" + (needShift ? (", " + shifted + "/" + needShift + " kaydırıldı") : "") + (korunanKlip ? (", " + korunanKlip + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
     } catch (e) {
         return "err:" + e.toString();
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
@@ -969,6 +1161,24 @@ function _rippleDeleteRange(seq, s, e, fps, doluV, doluA) {
     for (i = 0; i < seq.audioTracks.numTracks; i++) removed += _ripTrack(seq.audioTracks[i], s, e, eps);
     return removed;
 }
+/* Kanal kilitli mi? Sürümlere göre isLocked bazen metot bazen alan olabiliyor.
+   TANINMAYAN bir değer gelirse "kilitli değil" kabul edilir. Risk asimetrik: yanlış-negatifte
+   yalnızca eski davranış sürer, yanlış-pozitifte AutoCut komple ölür — `!!tr.isLocked` ham
+   hâliyle bir metot NESNESİ geldiğinde (bazı Adobe host nesnelerinde typeof "function"
+   dönmez) her zaman true oluyor ve dolu her kanal "kilitli" sayılıp kesim hiç başlamıyordu. */
+function _kanalKilitli(tr) {
+    var v = null;
+    try {
+        if (typeof tr.isLocked === "function") v = tr.isLocked();
+        else v = tr.isLocked;
+    } catch (e) { return false; }
+    if (v === true) return true;
+    if (v === false || v === null || v === undefined) return false;
+    if (typeof v === "number") return (v !== 0);
+    if (typeof v === "string") { v = v.toLowerCase(); return (v === "true" || v === "1"); }
+    return false;   // metot nesnesi / bilinmeyen tip: kilit yok say
+}
+
 // [s,e] aralığını tek bir klip tam kaplıyor mu? (kayıt sürekliliği kontrolü, H2/H3)
 function _trackCovers(tr, s, e, eps) {
     for (var i = 0; i < tr.clips.numItems; i++) {
@@ -981,6 +1191,11 @@ function _trackCovers(tr, s, e, eps) {
 
 // TAM KESME: tüm kanalları razorla + ortadaki parçayı ripple-sil (bulunan tüm boşluklar).
 function autoCut(intervalsFilePath) {
+    /* Undo grubu artik finally ile kapatiliyor. Eskiden endUndoGroup yalnizca "mutlu yolda"
+       cagriliyordu; arada bir hata olursa grup ACIK kaliyor ve kullanicinin bundan sonra
+       Premiere'de elle yaptigi her duzenleme ayni gruba yaziliyordu — tek Ctrl+Z saatlerce
+       suren isi geri aliyordu. */
+    var _ug = false;
     try {
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
@@ -1019,8 +1234,27 @@ function autoCut(intervalsFilePath) {
 
         pr("Kesilecek boşluk: " + ivs.length);
 
+        /* KILITLI KANAL DENETIMI: Premiere kilitli kanalda ne razor'a ne de remove'a izin
+           veriyor; _ripTrack hatayi yutuyor. Diger kanallar ripple ile sola kayarken kilitli
+           kanal yerinde kaliyor — 900 kesimde dakikalarca birikmis, geri donusu zor bir
+           desenkron demek (kullanicinin A3 "oyun sesi" kanalini kilitlemesi cok olasi).
+           Bu yuzden DOLU + KILITLI kanal varsa hic baslamiyoruz. isLocked() olmayan
+           surumlerde cagri try icinde eleniyor ve eski davranis surer. */
+        var kilitli = [];
+        for (var lv = 0; lv < seq.videoTracks.numTracks; lv++) {
+            try { if (seq.videoTracks[lv].clips.numItems > 0 && _kanalKilitli(seq.videoTracks[lv])) kilitli.push("V" + (lv + 1)); } catch (el1) {}
+        }
+        for (var la = 0; la < seq.audioTracks.numTracks; la++) {
+            try { if (seq.audioTracks[la].clips.numItems > 0 && _kanalKilitli(seq.audioTracks[la])) kilitli.push("A" + (la + 1)); } catch (el2) {}
+        }
+        if (kilitli.length) {
+            return "err:Şu kanallar kilitli: " + kilitli.join(", ") +
+                   ". Kesim yapılırsa bu kanallar kaymaz, ses görüntüden kayar. " +
+                   "Premiere'de kanalın kilit simgesine basıp kilidi aç, sonra tekrar dene.";
+        }
+
         // Tek Ctrl+Z ile geri alınabilsin (destekleniyorsa)
-        try { app.beginUndoGroup("Yusufwrl AutoCut"); } catch (eug) {}
+        try { app.beginUndoGroup("Yusufwrl AutoCut"); _ug = true; } catch (eug) {}
 
         // A1 (audio track 0) sürekli kayıt referansıdır; bir aralığı tam kaplamıyorsa
         // (kayıtta gerçek boşluk) o kesimi atla — desenkron üretme (H2/H3).
@@ -1043,9 +1277,12 @@ function autoCut(intervalsFilePath) {
         var done = 0, failed = 0, noop = 0, skippedCover = 0, firstErr = "";
         for (var k = 0; k < ivs.length; k++) {
             var cs = ivs[k].s, ce = ivs[k].e;
-            if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04)) { skippedCover++; continue; }
-            var tcS = _secToTC(cs, fpsFrac), tcE = _secToTC(ce, fpsFrac);
+            /* _trackCovers ve _secToTC de ic try'in ICINDE: disarida kaldiklarinda biri hata
+               atarsa dongu tamamen kirilip disa firliyordu (bir kanal gecersiz kilindiginda
+               oluyor). Artik o kesim "hata" sayilip digerlerine devam ediliyor. */
             try {
+                if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04)) { skippedCover++; continue; }
+                var tcS = _secToTC(cs, fpsFrac), tcE = _secToTC(ce, fpsFrac);
                 var m0 = 0; try { m0 = $.hiresTimer; } catch (em) {}
                 for (var v = 0; v < qeV.length; v++) { qeV[v].razor(tcS); qeV[v].razor(tcE); }
                 for (var a = 0; a < qeA.length; a++) { qeA[a].razor(tcS); qeA[a].razor(tcE); }
@@ -1056,7 +1293,6 @@ function autoCut(intervalsFilePath) {
                 if (rem > 0) done++; else noop++;              // hiçbir klip silinmediyse "done" sayma (H4)
             } catch (e1) { failed++; if (!firstErr) firstErr = e1.toString(); }
         }
-        try { app.endUndoGroup(); } catch (eug2) {}
         var durAfter = _seqDuration(seq);
         var tTop = 0; try { tTop = ($.hiresTimer - t0) / 1000000; } catch (et2) {}
         // Faz zamanlaması: bir dahaki yavaşlık şikâyetinde nerede takıldığı ÖLÇÜLEBİLİR olsun.
@@ -1071,7 +1307,7 @@ function autoCut(intervalsFilePath) {
             + (overlay ? (" | UYARI: " + overlay + " overlay video kanalı var — senkron için AutoCut'ı altyazıdan ÖNCE çalıştır") : "");
     } catch (e) {
         return "err:" + e.toString();
-    }
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 // Projeyi kaydet (kesim/altyazı öncesi güvenlik ağı).

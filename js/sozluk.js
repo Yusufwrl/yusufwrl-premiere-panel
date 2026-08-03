@@ -56,7 +56,11 @@ var _EK = (function () {
     "ydi", "ydı", "ydu", "ydü", "ymiş", "ymış", "ymuş", "ymüş", "yse", "ysa",
     "yken", "ken", "dir", "dır", "dur", "dür", "tir", "tır", "tur", "tür",
     "ki", "lik", "lık", "luk", "lük", "cik", "cık", "cuk", "cük", "ndeki", "ndaki"];
-  var s = {}; for (var i = 0; i < list.length; i++) s[list[i]] = true; return s;
+  /* Object.create(null): düz "{}" nesnesinde arama Object.prototype'a da düşüyor, yani
+     _EK["constructor"] / _EK["toString"] doğruymuş gibi cevap veriyordu ve bu kelimeler
+     geçerli bir Türkçe ek sanılıyordu. Prototipsiz nesnede yalnızca gerçekten eklenen
+     anahtarlar bulunur. */
+  var s = Object.create(null); for (var i = 0; i < list.length; i++) s[list[i]] = true; return s;
 })();
 
 /* Kalan harfler geçerli bir EK ZİNCİRİ mi? ("lerden" = "ler" + "den")
@@ -84,9 +88,15 @@ function _bol(tok) {
 }
 
 /* Sözlük girdilerinden arama tablosu üretir.
-   { tek: {normVaryant: "DoğruAd"}, ikili: {"iki kelime": "DoğruAd"} } — girdi yoksa null. */
+   { tek: {normVaryant: "DoğruAd"}, ikili: {"iki kelime": "DoğruAd"} } — girdi yoksa null.
+
+   TABLOLAR PROTOTİPSİZ (Object.create(null)). Düz "{}" ile kurulduğunda arama
+   Object.prototype üzerinden de sonuç dönüyordu: map.tek["constructor"] Object yapıcısını
+   veriyor, aşağıdaki "!dogru" kontrolünü geçiyor ve metne birleştirilince altyazıya
+   "function Object() { [native code] }" yazılıyordu (ölçüldü). "toString", "valueOf",
+   "__proto__" için de aynı tuzak vardı. */
 function buildMap(entries) {
-  var tek = {}, ikili = {}, varMi = false;
+  var tek = Object.create(null), ikili = Object.create(null), varMi = false;
   entries = entries || [];
   for (var i = 0; i < entries.length; i++) {
     var e = entries[i];

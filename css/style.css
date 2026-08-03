@@ -145,9 +145,15 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .btn-primary:active { transform: translateY(1px) scale(.995); }
 .btn-primary:disabled { filter: grayscale(.4) brightness(.65); cursor: default; box-shadow: none; }
 .btn-primary:disabled::before { display: none; }
+/* white-space:nowrap eskiden "SONUÇ" bölümünün içinde ayrı bir .btn-ghost kuralındaydı;
+   oysa GLOBAL etki ediyordu (Kanalları Tara, Klasör Seç, modal İptal…). Niyet zaten global:
+   buton yazısı sarmak yerine satır sarsın. Tek yerde toplandı, bölüm başlığı artık yanıltmıyor. */
 .btn-ghost { display: inline-flex; align-items: center; gap: 6px; background: rgba(45,37,66,.5);
   border: 1px solid var(--border-strong); color: var(--text); font-size: 12px; font-weight: 600; font-family: inherit;
-  padding: 8px 12px; border-radius: 9px; cursor: pointer; transition: all .18s; }
+  padding: 8px 12px; border-radius: 9px; cursor: pointer; transition: all .18s; white-space: nowrap; }
+/* display:inline-flex, tarayıcının [hidden]{display:none} kuralını EZER — bu satır olmadan
+   JS'in b.hidden = true demesi butonu gizlemez (aynı tuzak .prog-badge ve .recolor-status'ta da çözüldü). */
+.btn-ghost[hidden] { display: none; }
 .btn-ghost:hover { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 4px 12px var(--accent-soft); }
 .btn-ghost:active { transform: scale(.97); }
 
@@ -191,10 +197,18 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 /* ---------- SONUÇ ---------- */
 .result { margin-top: 15px; animation: fade .35s ease; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.result-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+/* Panelin en dar hâli 440px (CSXS/manifest.xml MinSize). Sarma olmadan 4 buton + aralık menüsü
+   sıkışıyor, "Timeline'a Ekle" iki satıra kırılıyor ve satırdaki her şey 50px'e uzuyordu. */
+.result-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; flex-wrap: wrap; gap: 8px; }
 .result-info { font-size: 12.5px; color: var(--muted); }
 .result-info strong { color: var(--text); font-size: 16px; font-weight: 700; }
-.result-actions { display: flex; gap: 6px; }
+.result-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* NOT: .btn-ghost{white-space:nowrap} buradaydı ama global etkiliydi; asıl .btn-ghost bloğuna taşındı. */
+/* "Bölümler" butonu + aralık menüsü: hep yan yana, birlikte alt satıra kaysınlar */
+.chap-group { display: inline-flex; align-items: center; gap: 6px; }
+.chap-group .select { flex: 0 0 auto; }
+/* select'in genel kuralı width:100% — burada içeriğe göre daralsın, ▾ okuna da yer kalsın */
+.chap-select select { width: auto; padding: 8px 26px 8px 10px; font-size: 12px; font-weight: 600; }
 /* 300px ~6 satır gösteriyordu; 1500 satırlık transkripti 6'şar gezmek çok yavaş. */
 .transcript { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); max-height: 55vh; min-height: 220px; overflow-y: auto;
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0,0,0,.25); }

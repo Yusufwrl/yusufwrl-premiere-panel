@@ -10,9 +10,36 @@ const sozluk = require(path.join(__dirname, "sozluk.js"));   // karakter isimler
 
 // Çalışan ffmpeg/whisper süreçleri (İptal için)
 const _procs = [];
+/* İPTAL SAYACI — kullanıcı "İptal"e her bastığında 1 artar. Uzun süren bir iş başlarken
+   sayacın o anki değerini not eder (iptalDamgasi), hata yakaladığında damga değişmişse
+   hatanın sebebi kullanıcının İPTALİDİR. Bu bilgi olmadan transcribe, öldürülen motoru
+   "eski sürüm --hotwords'ü tanımadı" sanıp BAŞTAN bir kez daha çalıştırıyordu; iptale
+   basan kullanıcı 25-30 dakika daha GPU'nun boşuna dönmesini bekliyordu. */
+let _iptalSayaci = 0;
+function iptalDamgasi() { return _iptalSayaci; }
+function iptalEdildiMi(damga) { return _iptalSayaci !== damga; }
+
 function cancelAll() {
   const n = _procs.length;
-  for (let i = 0; i < _procs.length; i++) { try { _procs[i].kill(); } catch (e) {} }
+  _iptalSayaci++;
+  for (let i = 0; i < _procs.length; i++) {
+    const p = _procs[i];
+    /* Windows'ta motor (PyInstaller paketi) kendi ALT sürecini açıyor; sadece üstteki süreci
+       öldürmek GPU'yu asıl meşgul eden çocuğu hayatta bırakıyor. taskkill /T tüm ağacı kapatır.
+       "error" dinleyicisi ŞART: taskkill spawn edilemezse yakalanmayan olay paneli düşürür. */
+    try { p._iptalEdildi = true; } catch (e) {}   // run(): "çıkış kodu 1" değil "İptal edildi" desin
+    try {
+      if (process.platform === "win32" && p.pid) {
+        /* SIRA ÖNEMLİ: p.kill() anında öldürüyor, taskkill.exe ~30 ms sonra başlıyor. Üst süreç
+           o ana kadar ölürse taskkill "process not found" deyip AĞACA hiç dokunmuyor (ölçüldü),
+           motorun alt süreci GPU'yu tutmaya devam ediyor. Bu yüzden üst süreci taskkill
+           bittikten sonra öldürüyoruz; taskkill hiç çalışamazsa da (error) yine öldürüyoruz. */
+        const tk = spawn("taskkill", ["/PID", String(p.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+        tk.on("error", function () { try { p.kill(); } catch (e2) {} });
+        tk.on("close", function () { try { p.kill(); } catch (e2) {} });
+      } else { try { p.kill(); } catch (e2) {} }
+    } catch (e) { try { p.kill(); } catch (e2) {} }
+  }
   _procs.length = 0;
   return n;
 }
@@ -71,18 +98,32 @@ function run(exe, args, onLog, o) {
     function dump(tail) { if (o.logFile) { try { fs.writeFileSync(o.logFile, buf + (tail || ""), "utf8"); } catch (e) {} } }
     let proc;
     try { proc = spawn(exe, args, opts); }
-    catch (e) { dump("\nSPAWN HATASI: " + e.message); reject(e); return; }
+    catch (e) { dump("\nSPAWN HATASI: " + e.message); e.cikti = buf; reject(e); return; }
     _procs.push(proc);
     function unreg() { const ix = _procs.indexOf(proc); if (ix >= 0) _procs.splice(ix, 1); }
     proc.stdout.on("data", cap);
     proc.stderr.on("data", cap);
-    proc.on("error", (e) => { unreg(); dump("\nSPAWN HATASI: " + e.message); reject(e); });
+    proc.on("error", (e) => { unreg(); dump("\nSPAWN HATASI: " + e.message); e.cikti = buf; reject(e); });
     proc.on("close", (code) => {
       unreg();
       dump("\nÇIKIŞ KODU: " + code);
       if (code === 0) resolve();
-      else reject(new Error(exe + " çıkış kodu " + code +
-        (buf.trim() ? "\n" + buf.slice(-1200) : " (motor çıktı vermeden çöktü — DLL hatası olabilir)")));
+      else if (proc._iptalEdildi) {
+        // Süreci kullanıcının "İptal"i öldürdü — çağırana anlaşılır bir mesaj git (ffmpeg
+        // için de geçerli: log'da "ffmpeg çıkış kodu 1" yerine "İptal edildi" görünsün).
+        const iptalHata = new Error("İptal edildi");
+        iptalHata.iptal = true; iptalHata.cikti = buf;
+        reject(iptalHata);
+      }
+      else {
+        const hata = new Error(exe + " çıkış kodu " + code +
+          (buf.trim() ? "\n" + buf.slice(-1200) : " (motor çıktı vermeden çöktü — DLL hatası olabilir)"));
+        /* Hata mesajına yalnızca son 1200 karakter giriyor. Çağıran ("motor bu argümanı mı
+           tanımadı?" gibi) TAM çıktıya bakabilsin diye ham dökümü hataya iliştiriyoruz. */
+        hata.cikti = buf;
+        hata.cikisKodu = code;
+        reject(hata);
+      }
     });
   });
 }
@@ -159,8 +200,44 @@ function _chunkSize(clips) {
    konumlandırılmış WAV üretir, sonra parçalar amix (mixWavs) ile birleştirilir. */
 async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) {
   const sIdx = Number.isInteger(streamIndex) ? streamIndex : 0;
-  const valid = clips.filter((c) => c.mediaPath && c.durationSec > 0);
-  if (valid.length === 0) throw new Error("Bu kanalda ses klibi bulunamadı.");
+  /* Medya yolu okunamayan klipler ELENİR — ama sessizce değil. host.jsx getMediaPath/duration
+     çağrılarını try/catch'e alıp hata olursa mediaPath="" bırakıyor; bu iç içe sekans (nested
+     sequence), birleştirilmiş klip ve çevrimdışı medyada OLAĞAN. Eskiden bu klipler tek kelime
+     uyarı olmadan düşüyordu: üretim "bitti" diyor, o kliplerdeki konuşma altyazıda hiç yok. */
+  const valid = [], okunamayan = [];
+  for (let ci0 = 0; ci0 < clips.length; ci0++) {
+    const c0 = clips[ci0];
+    if (c0 && c0.mediaPath && c0.durationSec > 0) valid.push(c0); else okunamayan.push(c0);
+  }
+  if (okunamayan.length && onLog) {
+    onLog("[ffmpeg] UYARI: " + clips.length + " klipten " + okunamayan.length +
+      " tanesinin medya dosyası okunamadı (iç içe sekans / birleştirilmiş klip / çevrimdışı medya" +
+      " olabilir) — o kliplerdeki konuşma altyazıya GİRMEYECEK. Onları sekanstan çıkarıp ham ses" +
+      " dosyalarını koyarsan tamamı yazıya döküleceğinden emin olursun.\n");
+  }
+  if (valid.length === 0) {
+    // İki farklı durumu ayır: gerçekten klip yok mu, yoksa klip var ama medyası okunamadı mı?
+    if (okunamayan.length) throw new Error("Bu kanaldaki " + okunamayan.length +
+      " klibin medya dosyası okunamadı (iç içe sekans / birleştirilmiş klip / çevrimdışı medya olabilir). " +
+      "Klipleri ham ses dosyalarıyla değiştirip tekrar dene.");
+    throw new Error("Bu kanalda ses klibi bulunamadı.");
+  }
+  /* Çevrimdışı/taşınmış medya: dosya yoksa ffmpeg parçanın TAMAMINI anlaşılmaz bir hatayla
+     düşürüyor (üstelik uzun bir işin ortasında). Baştan, hangi dosya olduğunu söyleyerek dur. */
+  const tekilYollar = [], gorulenYol = {};
+  for (let vy = 0; vy < valid.length; vy++) {
+    const yol = valid[vy].mediaPath;
+    if (!gorulenYol[yol]) { gorulenYol[yol] = 1; tekilYollar.push(yol); }
+  }
+  const eksikler = [];
+  for (let ey = 0; ey < tekilYollar.length; ey++) {
+    try { if (!fs.existsSync(tekilYollar[ey])) eksikler.push(tekilYollar[ey]); } catch (e) {}
+  }
+  if (eksikler.length) {
+    const ornek = eksikler.slice(0, 3).map(function (y) { return path.basename(y); }).join(", ");
+    throw new Error("Ses dosyası bulunamadı (" + eksikler.length + " dosya): " + ornek +
+      (eksikler.length > 3 ? " …" : "") + ". Dosya taşındıysa/silindiyse Premiere'de medyayı yeniden bağla.");
+  }
   if (onLog) onLog("[ffmpeg] ses hazırlanıyor (" + valid.length + " klip)...\n");
 
   /* A1/A2/A3 track'i, medya dosyasının 1./2./3. SES AKIŞINA karşılık gelir — bu yalnızca
@@ -169,11 +246,7 @@ async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) 
      "matches no streams / Invalid argument" ile çöker. Bu yüzden akış sayısı ölçülür ve
      dosyada olmayan akış hiç istenmez — o klip için mevcut son akış kullanılır. */
   if (sIdx > 0) {
-    const gorulen = {}, tekil = [];
-    for (let vi = 0; vi < valid.length; vi++) {
-      if (!gorulen[valid[vi].mediaPath]) { gorulen[valid[vi].mediaPath] = 1; tekil.push(valid[vi].mediaPath); }
-    }
-    const sayilar = await _probeMany(tekil, ffmpegExe);
+    const sayilar = await _probeMany(tekilYollar, ffmpegExe);   // tekil yol listesi yukarıda çıkarıldı
     let dusen = 0;
     for (let vj = 0; vj < valid.length; vj++) {
       const n = sayilar[valid[vj].mediaPath] || 1;
@@ -245,7 +318,16 @@ function _trLower(s) { return String(s).replace(/İ/g, "i").replace(/I/g, "ı").
 // AĞIR küfür — "Sadece ağır" seviyesinde de maskelenir
 var _PROFANITY_HARD = ["orospu", "oruspu", "piç", "yavşa", "pezevenk", "kahpe", "kaltak", "gavat", "siktir",
   "hassiktir", "sikey", "sikik", "siker", "sikiş", "yarrak", "yarak", "puşt", "ibne", "ipne",
-  "sürtük", "fahişe", "amcık", "kancık", "godoş", "taşak"];
+  "sürtük", "fahişe", "amcık", "kancık", "godoş", "taşak",
+  /* "sik-" kökünün çekimleri: yukarıdaki beş kalıba (siktir/sikik/siker/sikiş/sikey) UYMAYAN
+     çekimler sansürsüz geçiyordu ("sikiyorum", "sikti gitti", "sikimde değil"). Panelde sansür
+     hep açık olduğu için bu satırlar doğrudan yayına çıkıyordu. Kök "sik" TEK BAŞINA hâlâ
+     eklenmiyor — "sikke" gibi masum kelimeleri maskelerdi; en az 4 harfli çekimler yazılıyor
+     ("sikke" bunların hiçbiriyle başlamaz, "sıkıntı" zaten noktasız ı ile yazılır). */
+  "sike", "sikiyo", "sikti", "sikim", "sikin", "sikil", "sikmek",
+  /* "amcık" listedeydi ama "amına koydu" sansürsüz geçiyordu. "ananas" bu öneklerden hiçbiriyle
+     başlamaz (ananas ≠ ananı), masum çakışma yok. */
+  "amına", "ananı", "avrad"];
 // HAFİF hakaret — arkadaş şakalaşmasında normal; sadece "Hepsi" seviyesinde maskelenir
 var _PROFANITY_MILD = ["şerefsiz", "namussuz", "haysiyetsiz", "gerizekalı", "gerzek", "dangalak",
   "salak", "aptal", "ahmak", "şıllık", "aşağılık", "beyinsiz", "ahlaksız", "terbiyesiz"];
@@ -362,23 +444,42 @@ function filterHallucinations(data) {
      süre aralığı, ayrı kanal modunda az konuşan kişi…). Bu yüzden filtre yalnızca yeterince
      uzun kayıtlarda çalışır — uydurma bir satır bırakmak, gerçek altyazı silmekten iyidir. */
   if (segs.length < 20) return [];
-  var sonZaman = 0, pencere = {};
+  // aynı metni saymak için normalize: noktalama/büyük-küçük fark etmesin
+  function _norm(t) { return _trLower(String(t || "")).replace(/[^a-zçğıöşü0-9 ]/g, "").replace(/\s+/g, " ").trim(); }
+  var sonZaman = 0, pencere = {}, tekrar = {};
   for (var i = 0; i < segs.length; i++) {
     if (Number(segs[i].end) > sonZaman) sonZaman = Number(segs[i].end);
     var k = String(segs[i].no_speech_prob);
     pencere[k] = (pencere[k] || 0) + 1;
+    // aynı pencerede birebir aynı metin kaç kez geçti (Whisper'ın tipik "takılma" deseni)
+    var tk = k + "|" + _norm(segs[i].text);
+    tekrar[tk] = (tekrar[tk] || 0) + 1;
   }
   var atilan = [], oncekiEnd = null;
   data.segments = segs.filter(function (s) {
     var skor = Number(s.no_speech_prob), bosluk = (oncekiEnd == null) ? 99 : (Number(s.start) - oncekiEnd);
     oncekiEnd = Number(s.end);
+    /* TAKILMA: model sessizlikte aynı cümleyi arka arkaya tekrarlıyor ("Yedim / Yedim / Yedim").
+       Gerçek konuşmada birebir aynı kısa cümle aynı 30 sn'lik pencerede nadiren 2 kez geçer.
+       Bu desen iki korumayı birden geçersiz kılıyordu: pencere kalabalık göründüğü için (3) ve
+       tekrarlar birbirine bitişik olduğu için (5) hiçbir satır atılamıyordu. */
+    var tekrarli = (tekrar[String(s.no_speech_prob) + "|" + _norm(s.text)] || 0) >= 2;
+    var basta = Number(s.start) <= 3, sonda = Number(s.start) >= sonZaman - 3;
     if (!isFinite(skor) || skor < 0.6) return true;                             // 1) konuşma-yok skoru yüksek mi
-    if (Number(s.start) < sonZaman - 3) return true;                            // 2) videonun son 3 sn'sinde mi
-    if ((pencere[String(s.no_speech_prob)] || 0) > 2) return true;              // 3) o pencerede az segment mi
+    /* 2) videonun SON ya da İLK 3 saniyesinde mi. Eskiden yalnız sona bakılıyordu; model intro
+       müziği/oyun sesi üzerinde videonun BAŞINDA da uyduruyor ve o satır hiç incelenmiyordu. */
+    if (!basta && !sonda) return true;
+    /* Videonun BAŞINDAKİ satırda 5. koruma ("öncesinde sessizlik") boşa çıkıyor: ilk segmentin
+       öncesi yok, bosluk hep 99 geliyor. Bu yüzden başta yalnızca TEKRAR deseni varsa (model
+       aynı cümleye takılmış) uydurma sayıyoruz; yoksa YouTuber'ın gerçek açılış cümlesi
+       ("Naber arkadaşlar") sessizce siliniyordu — ölçüldü. */
+    if (basta && !sonda && !tekrarli) return true;
+    if ((pencere[String(s.no_speech_prob)] || 0) > 2 && !tekrarli) return true;  // 3) o pencerede az segment mi
     var metin = String(s.text || "").trim();
     if (!metin || metin.split(/\s+/).length > 5) return true;                   // 4) kısa metin mi
-    if (bosluk < 1.0) return true;                                              // 5) öncesinde sessizlik var mı
-    atilan.push(metin);
+    if (bosluk < 1.0 && !tekrarli) return true;                                 // 5) öncesinde sessizlik var mı
+    // Nerede atıldığını yaz: kullanıcı "gerçek cümlem mi silindi" diye denetleyebilsin.
+    atilan.push(metin + (basta ? " (başta)" : " (sonda)"));
     return false;
   });
   return atilan;
@@ -391,6 +492,10 @@ function flattenWords(data) {
     (seg.words || []).forEach(function (w) {
       var t = String(w.word).replace(/\s+/g, " ").trim();
       var st = Number(w.start), en = Number(w.end);
+      /* Motor gerçek çıktıda start == end olan (SIFIR süreli) kelimeler üretebiliyor — ölçüldü,
+         binde 3-5 kelime. Bunlar cue'ların aynı saniyede başlamasına yol açıyor; buildCues bunu
+         ayrıca toparlıyor, burada sadece süreyi pozitife çekip zaman sırasını bozulmaz kılıyoruz. */
+      if (en <= st) en = st + 0.001;
       // geçersiz/eksik zaman damgalı kelimeyi ele (null/undefined/NaN → bozuk SRT önlenir)
       if (t && w.start != null && w.end != null && isFinite(st) && isFinite(en)) words.push({ start: st, end: en, word: t, speaker: null });
     });
@@ -514,6 +619,31 @@ function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) 
     if (!text) continue;
     cues.push({ start: start, end: end, text: text, speaker: g[0].speaker || null });
   }
+  /* NEREDEYSE AYNI ANDA BAŞLAYAN CUE'LARI TOPARLA — bunu süre döngüsünden ÖNCE yapmak şart.
+     Whisper gerçek çıktıda start == end olan (sıfır süreli) kelime damgaları üretiyor; bunlardan
+     doğan cue bir sonrakiyle aynı saniyede başlıyor. Aşağıdaki süre döngüsünde tavan
+     (sonraki cue - 0.08) cue'nun KENDİ başlangıcının altına düşüyor ve cue 0.05 sn'de kalıyor.
+     host.jsx cue'ları sırayla overwriteClip ile bastığı için aynı saniyeye gelen ikinci klip
+     birincinin üstüne yazıyor: o altyazı videoda HİÇ görünmüyor, panel yine de "eklendi" diyor.
+     Çözüm: sığıyorsa iki cue'yu birleştir, sığmıyorsa öncekinden zaman ödünç alarak geriye kaydır. */
+  var MIN_GORUNUR = 0.25;   // bir altyazının ekranda fark edilmesi için gereken en kısa süre
+  for (var z = 0; z + 1 < cues.length; z++) {
+    var cA = cues[z], cB = cues[z + 1];
+    if (cB.start - cA.start >= MIN_GORUNUR) continue;
+    var ayniKisi = (!cA.speaker || !cB.speaker || cA.speaker === cB.speaker);
+    if (ayniKisi && (cA.text.length + 1 + cB.text.length) <= MAX_CHARS) {
+      cA.text = cA.text + " " + cB.text;
+      cA.end = Math.max(cA.end, cB.end);
+      cues.splice(z + 1, 1);
+      z--;                                   // birleşen cue bir sonrakiyle de çakışıyor olabilir
+      continue;
+    }
+    /* Tek satıra sığmıyor (ya da farklı konuşmacı): cue'yu ERKEN başlat ki ekranda kalacak
+       yeri olsun. Önceki cue'nun da en az MIN_GORUNUR görünür kalması şartıyla geri çekilir. */
+    var alt = (z > 0) ? (cues[z - 1].start + MIN_GORUNUR) : 0;
+    var yeniBas = Math.max(alt, cB.start - MIN_GORUNUR);
+    if (yeniBas < cA.start) cA.start = yeniBas;
+  }
   // Okuma hızı (CPS) + min/max süre + ardıl cue boşluğu (S1/S2):
   // cue çok kısaysa okunacak kadar uzat, çok uzunsa kırp, sonrakine taşma.
   var MIN_GAP = 0.08, MAX_DUR = 7.0, CPS = 17;
@@ -529,6 +659,28 @@ function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) 
        indiği) durumda devreye giriyor. Daha uzun tutmak timeline'da klip çakışması demek —
        Premiere'de gerçek bir sorun olduğu için taşma pahasına uzatma yapılmıyor. */
     cu.end = Math.max(cu.start + 0.05, target);
+  }
+  // Metni komşuya taşırken konuşmacı KARIŞMAMALI — üstteki toparlama döngüsündeki
+  // `ayniKisi` kuralının aynısı (yoksa S1'in kelimesi S3'ün rengine yazılıyor).
+  function _ayniKisi(a, b) { return (!a.speaker || !b.speaker || a.speaker === b.speaker); }
+  /* SON EMNİYET — yukarıdaki toparlamaya rağmen 0.15 sn'nin (≈4 kare) altında kalan bir cue
+     Premiere'de pratikte görünmez ve bir sonraki klip onu ezer, yani METİN KAYBOLUR. Böyle bir
+     satırın metnini sığdığı komşuya taşıyıp cue'yu listeden düşürüyoruz: hiçbir kelime kaybolmaz.
+     Hiçbir komşuya sığmıyorsa dokunmuyoruz (eski davranış) — kelimeyi silmek daha kötü olurdu. */
+  for (var y = cues.length - 1; y >= 0; y--) {
+    if (cues[y].end - cues[y].start >= 0.15) continue;
+    var sn = (y + 1 < cues.length) ? cues[y + 1] : null;      // sonraki (zaman olarak en yakın)
+    var on = (y > 0) ? cues[y - 1] : null;                    // önceki
+    if (sn && _ayniKisi(cues[y], sn) && (cues[y].text.length + 1 + sn.text.length) <= MAX_CHARS) {
+      sn.text = cues[y].text + " " + sn.text;
+      sn.start = Math.min(sn.start, cues[y].start);
+      cues.splice(y, 1);
+    } else if (on && _ayniKisi(on, cues[y]) && (on.text.length + 1 + cues[y].text.length) <= MAX_CHARS) {
+      on.text = on.text + " " + cues[y].text;
+      // uzatırken sonraki cue'nun üstüne binme (0.05 tabanı bazen tavanı aşabiliyor)
+      on.end = Math.max(on.end, Math.min(cues[y].end, sn ? (sn.start - MIN_GAP) : Infinity));
+      cues.splice(y, 1);
+    }
   }
   return cues;
 }
@@ -578,6 +730,16 @@ function cuesToChapters(cues, opts) {
     t = Math.floor(picked.start / iv) * iv + iv;
   }
   return lines.join("\n") + "\n";
+}
+
+/* Motor "--hotwords diye bir argüman tanımıyorum" mu dedi? Yalnızca bu KANIT varken ipucusuz
+   yeniden deneme yapılır. Motor sürümleri farklı cümle kurduğu için birkaç kalıp birden aranır;
+   ikisi de (hem "hotwords" hem "tanımadım" ifadesi) çıktıda geçmiyorsa çökme sebebi başkadır
+   (CUDA belleği, bozuk WAV, disk dolu…) ve tekrar denemek sadece süreyi ikiye katlar. */
+function _hotwordsTaninmadi(e) {
+  var cikti = String((e && e.cikti) || (e && e.message) || "");
+  if (!/hotwords/i.test(cikti)) return false;
+  return /(unrecognized argument|unknown option|no such option|unexpected argument|invalid option|not recognized)/i.test(cikti);
 }
 
 /*
@@ -644,13 +806,28 @@ async function transcribe(cfg, wavPath, onLog, opts) {
 
   if (onLog) onLog("[whisper] " + (opts.diarize ? "konuşmacı ayırma + " : "") + "yazıya dökülüyor (GPU)...\n");
   const runOpts = { cwd: engDir, pathDirs: pathDirs, logFile: logFile };
+  const damga = iptalDamgasi();   // bu çalıştırma başlarken iptal sayacı kaçtı
   try {
     await run(cfg.engineExe, args, onLog, runOpts);
   } catch (e) {
-    // Motor --hotwords'ü tanımadıysa hiç çıktı üretmeden çöker; ipucusuz bir kez daha dene.
-    if (!fs.existsSync(jsonPath) && hot) {
-      if (onLog) onLog("[whisper] isim ipucu desteklenmedi, ipucusuz tekrar deneniyor...\n");
+    /* 1) İPTAL — kullanıcı "İptal"e bastıysa motoru BİZ öldürdük. Öldürülen süreç de sıfırdan
+       farklı çıkış kodu verdiği ve JSON yazamadığı için eski kod bunu "--hotwords desteklenmiyor"
+       sanıp motoru baştan çalıştırıyordu: iptal işe yaramıyor, GPU süresi ikiye katlanıyordu.
+       İptalde ASLA yeniden deneme yapma, hemen çık. */
+    if (iptalEdildiMi(damga)) {
+      if (onLog) onLog("[whisper] iptal edildi, motor durduruldu.\n");
+      throw new Error("İptal edildi");
+    }
+    /* 2) Yedek (ipucusuz) yol iki durumda çalışır: (a) motor açıkça "unrecognized argument
+       --hotwords" dedi, (b) motor TEK SATIR bile yazmadan çöktü — eski sürümlerin --hotwords'te
+       yaptığı buydu, o yüzden yalnız (a) aranırsa yedek yol hiç devreye girmez.
+       Çıktı dolu ama argüman hatası yoksa sebep başkadır (CUDA belleği, bozuk WAV, disk dolu) ve
+       tekrar denemek kullanıcıyı aynı hataya tam süre bekleterek ikinci kez sokar. */
+    var ciktiYok = !String((e && e.cikti) || "").trim();
+    if (!fs.existsSync(jsonPath) && hot && (_hotwordsTaninmadi(e) || ciktiYok)) {
+      if (onLog) onLog("[whisper] motor isim ipucunu (--hotwords) tanımadı, ipucusuz tekrar deneniyor...\n");
       try { await run(cfg.engineExe, argsNoHot, onLog, runOpts); } catch (e2) {}
+      if (iptalEdildiMi(damga)) throw new Error("İptal edildi");
     }
     if (!fs.existsSync(jsonPath)) throw e;
     if (onLog) onLog("[whisper] çıkışta uyardı ama transkript hazır.\n");
@@ -803,4 +980,7 @@ module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
   buildCues, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
+  // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında
+  // "kullanıcı iptal etti mi?" diye sorabilsin diye dışa açıldı.
+  iptalDamgasi, iptalEdildiMi,
 };
