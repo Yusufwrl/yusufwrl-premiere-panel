@@ -424,6 +424,99 @@
   });
 
   // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
+  /* ================= SHORTS (dikey video) =================
+     Dikey karede (1080x1920) satır yatayın ~yarısı kadar dar. İki şey değişir:
+       1) Altyazı kısalır — kelime uzunluğuna göre 1, en fazla 2 kelime.
+          Asıl belirleyici KARAKTER sınırı; sadece kelime sayısını 2'ye çekmek yetmiyor,
+          "arkadaşlar hazır mısınız" gibi iki uzun token 24 karakter ediyor (ölçüldü).
+       2) MOGRT'ler yatay için tasarlandığı için dikey karede yanlış yerde kalıyor;
+          host'a yükseklik ve ölçek bildirilir (cue dosyasındaki "#SHORTS|" satırı).
+     Sadece TEK STİL'de anlamlıdır: dikey karede üst üste katman zaten sığmaz. */
+  var SHORTS_MAX_KELIME = 2;
+  var SHORTS_MAX_KARAKTER = 16;
+
+  function shortsAcik() { var c = $("chkShorts"); return !!(c && c.checked); }
+  function shortsY() {
+    var r = $("rngShortsY"); var v = parseInt(r && r.value, 10);
+    if (isNaN(v) || v < 0 || v > 100) v = 58;
+    return v / 100;
+  }
+  function shortsOlcek() {
+    var r = $("rngShortsScale"); var v = parseInt(r && r.value, 10);
+    if (isNaN(v) || v < 10 || v > 300) v = 100;
+    return v;
+  }
+  /* Cue dosyasının başına giden satır. Shorts kapalıysa BOŞ döner ve host konuma
+     hiç dokunmaz — yatay videolarda eski davranış birebir sürer. */
+  function shortsBaslikSatiri() {
+    if (!shortsAcik()) return "";
+    return "#SHORTS|" + shortsY().toFixed(4) + "|" + shortsOlcek() + "\n";
+  }
+
+  /* Sekans gerçekten dikey mi? Kutu işaretli ama sekans yataysa (ya da tersi) altyazı
+     yanlış yere gider. Engellemiyoruz — kullanıcı bilerek yapıyor olabilir — ama söylüyoruz. */
+  async function shortsSekansKontrol() {
+    var u = $("shortsUyari"); if (!u) return;
+    if (!shortsAcik()) { u.hidden = true; return; }
+    var bilgi = null;
+    try { bilgi = JSON.parse(await evalES("getSequenceInfoJSON()")); } catch (e) { bilgi = null; }
+    if (!bilgi || bilgi.error || !bilgi.frameWidth || !bilgi.frameHeight) {
+      u.hidden = false;
+      u.textContent = "Sekans ölçüsü okunamadı — Shorts konumlandırması yine de uygulanacak.";
+      return;
+    }
+    if (bilgi.dikey) { u.hidden = true; return; }
+    u.hidden = false;
+    u.textContent = "⚠ Bu sekans " + bilgi.frameWidth + "x" + bilgi.frameHeight +
+      " (yatay). Shorts işaretli olduğu için altyazı dikey videoya göre konulacak — " +
+      "yatay videoda yanlış yerde durur. Dikey bir sekansta çalıştığından emin ol.";
+  }
+
+  /* Shorts açıkken "Konuşmacıya Göre" kapatılır: dikey karede üst üste katmanlar sığmıyor
+     ve Shorts konumlandırması yalnız Tek Stil yolunda (addMultiStyleSubtitles) uygulanıyor.
+     Kullanıcı o moddayken kutuyu işaretlerse Tek Stil'e geçirilir. */
+  function shortsModUygula() {
+    var acik = shortsAcik();
+    var spBtn = document.querySelector('#segMode .seg-btn[data-mode="speaker"]');
+    if (spBtn) {
+      spBtn.disabled = acik;
+      spBtn.style.opacity = acik ? ".45" : "";
+      spBtn.style.cursor = acik ? "not-allowed" : "";
+      spBtn.title = acik ? "Shorts açıkken kullanılamaz — dikey videoda Tek Stil kullanılır." : "";
+    }
+    if (acik && state.mode === "speaker") {
+      var tek = document.querySelector('#segMode .seg-btn[data-mode="single"]');
+      if (tek) tek.click();
+    }
+  }
+
+  function wireShorts() {
+    var c = $("chkShorts"); if (!c) return;
+    var ay = $("shortsAyar"), ry = $("rngShortsY"), ly = $("lblShortsY"),
+        rs = $("rngShortsScale"), ls = $("lblShortsScale");
+    function gorunum() {
+      if (ay) ay.hidden = !c.checked;
+      if (ly && ry) ly.textContent = "%" + ry.value;
+      if (ls && rs) ls.textContent = "%" + rs.value;
+    }
+    function sekansKontrolSessiz() {
+      // async: hata FIRLATMAZ, promise'i reddeder — düz try/catch yakalayamaz.
+      try { var p = shortsSekansKontrol(); if (p && p["catch"]) p["catch"](function () {}); } catch (e) {}
+    }
+    c.checked = lsGet("shorts", "0") === "1";
+    if (ry) ry.value = lsGet("shortsY", "58");
+    if (rs) rs.value = lsGet("shortsScale", "100");
+    gorunum(); shortsModUygula();
+    if (c.checked && CEP) sekansKontrolSessiz();
+
+    c.addEventListener("change", function () {
+      lsSet("shorts", c.checked ? "1" : "0");
+      gorunum(); shortsModUygula(); sekansKontrolSessiz();
+    });
+    if (ry) ry.addEventListener("input", function () { lsSet("shortsY", ry.value); gorunum(); });
+    if (rs) rs.addEventListener("input", function () { lsSet("shortsScale", rs.value); gorunum(); });
+  }
+
   function trOpts(extra) {
     /* Model ve sansür artık panelde seçilmiyor: her zaman en doğru model (config.json'daki
        large-v3) ve tam sansür kullanılır. Seçenek sunmak fayda getirmiyordu — hızlı model
@@ -431,6 +524,8 @@
     var o = { model: cfg.model || "large-v3", language: cfg.language, diarize: false,
       censor: "all",
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
+    // Shorts: dikey karede satır dar — kısa cue'lar (bkz. SHORTS bölümü).
+    if (shortsAcik()) { o.maxWords = SHORTS_MAX_KELIME; o.maxChars = SHORTS_MAX_KARAKTER; }
     if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) o[k] = extra[k];
     return o;
   }
@@ -960,7 +1055,7 @@
   }
 
   function writeCuesMulti(lines) {
-    var body = stilAdlariSatiri() + lines.map(function (l) {
+    var body = stilAdlariSatiri() + shortsBaslikSatiri() + lines.map(function (l) {
       return l.start.toFixed(3) + "|" + l.end.toFixed(3) + "|" + l.mogrt + "|" + String(l.text).replace(/[\r\n|]/g, " ");
     }).join("\n");
     var file = path.join(cfg.workDir, "mcues_" + Date.now() + "_" + (fileCounter++) + ".txt");
@@ -2458,6 +2553,9 @@
     var dn = $("chkDenoise");
     if (dn) { dn.checked = lsGet("denoise", "0") === "1"; dn.addEventListener("change", function () { lsSet("denoise", dn.checked ? "1" : "0"); acAnalizGecersiz(); }); }
     restoreSegs();
+    // Shorts kutusu restoreSegs'ten SONRA: mod geri yüklendikten sonra kısıtı uygulamalı
+    // (kayıtlı mod "speaker" ve Shorts açıksa Tek Stil'e geçirilir).
+    wireShorts();
     if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
   }
 

@@ -537,7 +537,7 @@ function assignSpeakers(words, intervals) {
 }
 
 // Kelimeleri 2-3 kelimelik cue nesnelerine böl {start,end,text,speaker}. censor=true ise küfür maskelenir.
-function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) | "hard" (sadece agir)
+function buildCues(words, maxWords, censor, maxChars) {   // censor: false | true (hepsi) | "hard" (sadece agir)
   var GAP = 0.7; maxWords = maxWords || 3;
   // soru eki birleştir
   var merged = [];
@@ -575,7 +575,12 @@ function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) 
      pv.word'ün İÇİNE yazıyor, yani burada tek kelime sayılıyorlar. Sadece kelime sayısına
      bakılırsa "gördün müydünüz" gibi birleşikler yüzünden cue MOGRT'ye sığmayacak kadar
      uzayabiliyor. MAX_CHARS aynı zamanda yetim birleştirmede de kullanılıyor. */
-  var MAX_CHARS = 38;
+  /* SHORTS: dikey videoda (1080 genişlik) satır çok daha dar. Panel Shorts kipinde
+     buraya küçük bir sınır geçiyor; böylece "kelime uzunluğuna göre 1, olsa olsa 2"
+     davranışı kelime sayısından DEĞİL karakterden çıkıyor — asıl belirleyici bu.
+     Değer verilmezse yatay video varsayılanı (38) sürer. */
+  var MAX_CHARS = parseInt(maxChars, 10);
+  if (!MAX_CHARS || isNaN(MAX_CHARS) || MAX_CHARS < 6) MAX_CHARS = 38;
   var groups = [], cur = [];
   function flush() { if (cur.length) { groups.push(cur); cur = []; } }
   for (var i = 0; i < merged.length; i++) {
@@ -584,6 +589,16 @@ function buildCues(words, maxWords, censor) {   // censor: false | true (hepsi) 
       var prev = cur[cur.length - 1];
       if (w.start - prev.end > GAP) flush();
       else if (w.speaker && prev.speaker && w.speaker !== prev.speaker) flush();
+    }
+    /* SINIRI AŞMADAN ÖNCE BÖL. Uzunluk kontrolü eskiden kelime EKLENDİKTEN sonra
+       yapılıyordu; yani bir grup sınırı son kelimenin boyu kadar aşabiliyordu.
+       Yatayda (38) bu görünmüyordu, ama Shorts'ta (16) "hazır mısınız" gibi soru eki
+       yapışmış tek bir token satırı 24 karaktere çıkarıyordu (ölçüldü).
+       Tek başına sınırdan uzun bir token varsa yine de eklenir — daha fazla bölünemez. */
+    if (cur.length) {
+      var simdiki = 0;
+      for (var hp = 0; hp < cur.length; hp++) simdiki += cur[hp].word.length + (hp ? 1 : 0);
+      if (simdiki + 1 + w.word.length > MAX_CHARS) flush();
     }
     cur.push(w);
     // "2." gibi SIRA SAYILARI cümle sonu değildir ("2. bölüm", "1. sıra") — rakam+nokta bölmez.
@@ -853,7 +868,7 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   }
   // DİKKAT: "!!" KULLANMA — censor üç değerli (false | "all" | "hard"); boolean'a çevirmek
   // "sadece ağır küfür" seçeneğini sessizce "hepsi" yapar.
-  const cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor);
+  const cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor, opts.maxChars);
   try { fs.unlinkSync(jsonPath); } catch (e) {}
   try { if (fs.existsSync(srtPath)) fs.unlinkSync(srtPath); } catch (e) {}
   if (onLog) onLog("[whisper] bitti (" + cues.length + " satır).\n");

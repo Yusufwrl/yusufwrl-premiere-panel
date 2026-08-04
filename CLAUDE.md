@@ -14,6 +14,10 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
   ve isim alanı var; ikisi de kanal numarasına göre localStorage'da hatırlanır.
   Çakışan konuşmalara greedy katman atanır — katman sayısı sekansın video kanalıyla sınırlanır
   (aşarsa host `lane`'i 0'a kelepçeleyip o kanaldaki klipleri siliyor).
+- **Shorts (dikey 1080x1920)** — Tek Stil kartındaki işaret kutusu. Yalnız Tek Stil'de çalışır; açıkken "Konuşmacıya Göre" düğmesi kapanır (dikey karede üst üste katman sığmaz ve Shorts konumlandırması yalnız `addMultiStyleSubtitles` yolunda uygulanır). İki şey değişir:
+  1. **Bölme:** `maxWords 2` + `maxChars 16`. Asıl belirleyici karakter sınırı — sadece kelime sayısını düşürmek yetmiyor, "hazır mısınız" gibi soru eki yapışmış iki token 24 karakter ediyor (ölçüldü). `buildCues` artık sınırı **aşmadan önce** bölüyor; yatay çıktı 804 kelimede birebir aynı kaldı.
+  2. **Konum:** panel cue dosyasının başına `#SHORTS|<yNorm>|<ölçek>` satırı yazar, host `_dikeyYerlestir` ile MOGRT'nin Y konumunu ve ölçeğini ayarlar. Satır yoksa konuma **hiç dokunulmaz** (yatay davranış aynen sürer). Konum Premiere'de normalize (0-1); piksel modunda dönen bir MOGRT'de dokunulmaz, kullanıcı elle yerleştirir.
+  Yükseklik ve boyut panelden kaydırıcıyla ayarlanır (varsayılan %58 / %100), localStorage'da hatırlanır. Sekans yatayken kutu işaretliyse panel uyarır ama engellemez.
 - **Diarizasyon (AI konuşmacı tahmini) panelden KALDIRILDI.** Ölçüldü: tek kişilik kayıtta pyannote_v3.1
   4 konuşmacı, reverb_v2 3 konuşmacı, ücretli AssemblyAI 4 konuşmacı buldu (doğrusu 1). Sorun modelde değil,
   karışık kanalda konuşmacıyı tahmin etmenin doğasında. `pipeline.transcribe`'ın `diarize` desteği kodda

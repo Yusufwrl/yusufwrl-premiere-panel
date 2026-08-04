@@ -105,6 +105,31 @@
                  NOT: aynı metin js/app.js fillStyleOptions içinde de üretiliyor, orası da güncellenmeli. -->
             <div class="select"><select id="selStyleSingle"><option value="">Renksiz düz altyazı (Premiere altyazı kanalı)</option></select></div>
           </div>
+
+          <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
+               modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
+          <label class="switch-row" style="margin-top:14px">
+            <span>Shorts <small>(dikey video — 1080x1920)</small></span>
+            <input type="checkbox" id="chkShorts">
+          </label>
+          <div id="shortsAyar" hidden>
+            <p class="note" style="margin-top:8px">Altyazı kısalır (uzunluğa göre 1, en fazla 2 kelime) ve dikey karede aşağıdaki yüksekliğe konur.</p>
+            <div class="field" style="margin-top:10px">
+              <label>Altyazının yüksekliği <small style="color:var(--faint)">(0 = en üst, 100 = en alt)</small></label>
+              <div class="range-row">
+                <input type="range" id="rngShortsY" min="20" max="90" step="1" value="58">
+                <span class="range-val" id="lblShortsY">%58</span>
+              </div>
+            </div>
+            <div class="field" style="margin-top:10px">
+              <label>Altyazı boyutu <small style="color:var(--faint)">(dikey karede yazı taşıyorsa küçült)</small></label>
+              <div class="range-row">
+                <input type="range" id="rngShortsScale" min="30" max="150" step="5" value="100">
+                <span class="range-val" id="lblShortsScale">%100</span>
+              </div>
+            </div>
+            <p class="note" id="shortsUyari" hidden style="color:var(--warn)"></p>
+          </div>
         </div>
 
         <div class="card" id="panelSpeaker" hidden>

@@ -89,9 +89,28 @@ function getSequenceInfoJSON() {
         try { n = seq.audioTracks[i].clips.numItems; } catch (e4) {}
         dolu.push(n);
     }
+    var olcu = _seqOlcu(seq);
     return '{"sequenceName":"' + _jsonEsc(seq.name) + '","audioTracks":' + av +
            ',"videoTracks":' + vv + ',"durationSec":' + sure.toFixed(3) +
+           ',"frameWidth":' + olcu.w + ',"frameHeight":' + olcu.h +
+           ',"dikey":' + (olcu.h > olcu.w ? "true" : "false") +
            ',"clipCounts":[' + dolu.join(",") + ']}';
+}
+
+/* Sekansin kare olcusu. Premiere surumune gore iki farkli yol var; ikisi de tutmazsa
+   0 doner ve panel "olcu okunamadi" diye davranir (tahmin ETMEZ - yanlis tahmin
+   altyaziyi ekran disina koyar). */
+function _seqOlcu(seq) {
+    var w = 0, h = 0;
+    try { w = parseInt(seq.frameSizeHorizontal, 10) || 0; h = parseInt(seq.frameSizeVertical, 10) || 0; } catch (e1) {}
+    if (!w || !h) {
+        try {
+            var s = seq.getSettings();
+            w = parseInt(s.videoFrameWidth, 10) || 0;
+            h = parseInt(s.videoFrameHeight, 10) || 0;
+        } catch (e2) {}
+    }
+    return { w: w || 0, h: h || 0 };
 }
 
 /* Klip "korunacak ad" ile eslesiyor mu? Once klibin ADINA, tutmazsa MEDYA DOSYASININ adina
@@ -922,7 +941,20 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
             }
         } catch (ec) {}
 
-        var placed = 0, failed = 0, firstErr = "";
+        /* SHORTS: cue dosyasinin basindaki "#SHORTS|<yNorm>|<olcek>" satiri. Panel dikey
+           sekans icin altyazinin yuksekligini ve olcegini buradan bildirir. Satir yoksa
+           (normal yatay video) konuma HIC dokunulmaz — eski davranis aynen surer. */
+        var shortsY = -1, shortsOlcek = 0;
+        for (var sh = 0; sh < lines.length; sh++) {
+            if (!lines[sh] || lines[sh].slice(0, 8) !== "#SHORTS|") continue;
+            var sp = lines[sh].slice(8).split("|");
+            shortsY = parseFloat(sp[0]);
+            shortsOlcek = parseFloat(sp[1]) || 0;
+            if (isNaN(shortsY) || shortsY < 0 || shortsY > 1) shortsY = -1;   // bozuk deger: dokunma
+            break;
+        }
+
+        var placed = 0, failed = 0, firstErr = "", yerlesen = 0;
         for (var c = 0; c < cues.length; c++) {
             var mf = new File(cues[c].mg);
             if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
@@ -932,10 +964,16 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
             if (!ti) { failed++; continue; }
             _setTextAllWays(ti, cues[c].t);
             _setEndSec(ti, cues[c].e, TICKS);
+            if (shortsY >= 0) { if (_dikeyYerlestir(ti, shortsY, shortsOlcek)) yerlesen++; }
             placed++;
         }
         if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
-        return "ok:" + placed + " eklendi" + (korunan0 ? (", " + korunan0 + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
+        var shortsNot = "";
+        if (shortsY >= 0) {
+            shortsNot = yerlesen ? (", " + yerlesen + " dikey konumlandı")
+                                 : ", DİKEY KONUMLANDIRILAMADI (MOGRT'de Konum özelliği bulunamadı)";
+        }
+        return "ok:" + placed + " eklendi" + shortsNot + (korunan0 ? (", " + korunan0 + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
     } catch (e) {
         return "err:" + e.toString();
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
@@ -958,26 +996,64 @@ function _seqHeight(seq) {
 // seqH: sekansin kare yuksekligi. MOGRT'lerde Position NORMALIZE (0-1) geldigi icin pikseli
 // bolerken gercek yukseklik sart: 1080 sabiti 4K'da kaymayi iki katina, 720p'de yariya
 // dusuruyordu (altyazilar ya karenin ortasina firliyor ya da ic ice giriyordu).
-function _shiftUp(ti, offsetPx, seqH) {
-    if (!offsetPx || offsetPx <= 0) return false;
-    seqH = parseInt(seqH, 10);
-    if (!seqH || isNaN(seqH) || seqH < 16) seqH = 1080;   // parametre gelmezse eski davranis
+/* Klibin efekt ozelliklerinden birini bulur (Position, Scale...).
+   1. tur: adi Motion/Vector Motion olan bilesen; 2. tur: eslesmeyi tasiyan HERHANGI bilesen.
+   (Once _shiftUp'in icindeydi; Shorts yerlesimi de ayni aramaya ihtiyac duydugu icin ayrildi.) */
+function _bulOzellik(ti, desen) {
     try {
-        var posProp = null;
-        // 1. tur: adı Motion/Vector Motion olan bileşen; 2. tur: Position'ı olan herhangi bileşen
-        for (var pass = 0; pass < 2 && !posProp; pass++) {
+        for (var pass = 0; pass < 2; pass++) {
             for (var j = 0; j < ti.components.numItems; j++) {
                 var comp = ti.components[j];
                 var cn = "" + (comp.displayName || "");
                 if (pass === 0 && !/motion/i.test(cn)) continue;
                 try {
                     for (var k = 0; k < comp.properties.numItems; k++) {
-                        if (/position/i.test("" + (comp.properties[k].displayName || ""))) { posProp = comp.properties[k]; break; }
+                        if (desen.test("" + (comp.properties[k].displayName || ""))) return comp.properties[k];
                     }
                 } catch (ep) {}
-                if (posProp) break;
             }
         }
+    } catch (e) {}
+    return null;
+}
+
+/* SHORTS (dikey 1080x1920) yerlesimi.
+   MOGRT'ler 1920x1080 icin tasarlandi; dikey sekansta kendi konumlarinda kalirlarsa
+   yanlis yerde (ve tasarim genisligi kare genisliginden buyuk oldugu icin tasmis)
+   duruyorlar. Burada altyazinin DIKEY konumu ve olcegi acikca ayarlanir.
+     yNorm : 0 = karenin en ustu, 1 = en alti (Premiere Position normalize calisir)
+     olcek : yuzde; 0 verilirse olcege HIC dokunulmaz
+   X'e dokunulmaz — yatayda ortalama MOGRT'nin kendi tasariminda. */
+function _dikeyYerlestir(ti, yNorm, olcek) {
+    var oldu = false;
+    var posProp = _bulOzellik(ti, /position/i);
+    if (posProp) {
+        try {
+            var pos = posProp.getValue();
+            if (pos && pos.length >= 2) {
+                /* Premiere bu ozelligi normalize (0-1) tutar. Piksel donen bir yapida
+                   normalize deger yazmak altyaziyi sol ust koseye atardi — o durumda
+                   dokunmuyoruz, kullanici MOGRT'yi elle konumlandirir. */
+                var normMi = (Math.abs(pos[0]) <= 2 && Math.abs(pos[1]) <= 2);
+                if (normMi) { posProp.setValue([pos[0], yNorm], true); oldu = true; }
+            }
+        } catch (e1) {}
+    }
+    if (olcek > 0) {
+        // "Scale Width"/"Scale Height" degil, tek ve uniform olani tercih et.
+        var scProp = _bulOzellik(ti, /^\s*scale\s*$/i);
+        if (!scProp) scProp = _bulOzellik(ti, /scale/i);
+        if (scProp) { try { scProp.setValue(olcek, true); oldu = true; } catch (e2) {} }
+    }
+    return oldu;
+}
+
+function _shiftUp(ti, offsetPx, seqH) {
+    if (!offsetPx || offsetPx <= 0) return false;
+    seqH = parseInt(seqH, 10);
+    if (!seqH || isNaN(seqH) || seqH < 16) seqH = 1080;   // parametre gelmezse eski davranis
+    try {
+        var posProp = _bulOzellik(ti, /position/i);
         if (!posProp) return false;
         var pos = posProp.getValue();
         if (!pos || pos.length < 2) return false;
