@@ -34,6 +34,13 @@ Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.
 - Manifest: `CSXS/manifest.xml` — BundleId `com.yusufwrl.premierepanel`, PPRO 14+, CSXS 9.
 - Motor harici: `%ENGINE%\Faster-Whisper-XXL` (varsayılan `C:\Users\yusuf\YusufwrlEngine`). Repoya dahil değil, gitignore'lu (~3GB).
 
+## AutoCut (sessizlik kesme)
+Konuşma olmayan boşlukları bulup timeline'dan ripple-delete eder. **Boşluk = işaretli kanalların HİÇBİRİNDE konuşma yok** demek.
+- **Kanallar sabit DEĞİL.** Panel klip içeren tüm ses kanallarını listeler; varsayılan seçim **A3 hariç hepsi** (A3 = oyun sesi). Seçim kanal numarasına göre localStorage'da hatırlanır (`yw.acCh<idx>`), AutoCut görünümü her açıldığında liste tazelenir.
+- Eskiden A1+A2 **sabitti**; Senkron kartı arkadaşları A4+'ya koyduğu için onların sesi analize hiç girmiyor, yalnız A4'te biri konuşurken o bölüm boşluk sayılıp **kesiliyordu**. Yeni kanal eklerken bu tuzağı hatırla.
+- Bir kanalın sesi hazırlanamazsa analiz düşmez ama **sessizce de geçilmez** — log'a "ATLANDI" düşer, çünkü o kanaldaki konuşma kesilir.
+- Kesim maliyeti boşluk SAYISIYLA büyür: "En kısa boşluk" 0.1 sn binlerce kesim üretip saatlerce sürebilir; 0.3 sn neredeyse aynı kazancı çok daha hızlı verir.
+
 ## Komutlar (PowerShell)
 - **Değişiklikleri panele gönder (her seferinde gerekir): `powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-dev.ps1`** — kurulu panel junction değil KOPYA olduğu için repo değişiklikleri kendiliğinden yansımaz. Kullanıcıya özel dosyaları korur.
 - İlk kurulum (PlayerDebugMode): `powershell -NoProfile -ExecutionPolicy Bypass -File .\install-dev.ps1` (veya `KUR.bat`). ⚠ Bu betik junction kurar — bu yolda CEF'i bozuyor, junction oluşursa kaldırıp `deploy-dev.ps1` kullan.

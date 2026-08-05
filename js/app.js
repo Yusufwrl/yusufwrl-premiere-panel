@@ -252,6 +252,12 @@
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
     // Süre aralığı menüleri aktif sekansın uzunluğuna göre — sekans değişmiş olabilir
     if (name === "altyazi") { try { refreshRangeOptions(); } catch (e) {} }
+    /* AutoCut kanal listesi de sekansa bağlı: görünüm her açıldığında tazelenir, yoksa
+       kullanıcı Senkron'la yeni kanallar ekledikten sonra eski listeyi görüyor.
+       async: hata FIRLATMAZ, promise'i reddeder — düz try/catch yakalayamaz. */
+    if (name === "autocut") {
+      try { var pAc = acKanallariTara(true); if (pAc && pAc["catch"]) pAc["catch"](function () {}); } catch (e) {}
+    }
   }
   var toolCards = document.querySelectorAll(".tool-card");
   for (var tcx = 0; tcx < toolCards.length; tcx++) toolCards[tcx].addEventListener("click", function () { goView(this.dataset.view); });
@@ -2318,6 +2324,80 @@
   function acLogLine(msg) { var el = $("acLog"); var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
   $("acLogToggle").addEventListener("click", function () { var l = $("acLog"); l.hidden = !l.hidden; this.textContent = l.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴"; });
 
+  /* ---------- AutoCut: hangi kanallar "konuşma"? ----------
+     ESKİDEN A1 + A2 SABİTTİ. Senkron kartı arkadaşları A4, A5, A6…'ya koyduğu için
+     onların sesi analize HİÇ girmiyordu: yalnızca A4'teki arkadaş konuşurken o bölüm
+     "kimse konuşmuyor" sayılıp kesiliyordu — yani arkadaşın konuşması siliniyordu.
+     Artık klip içeren bütün kanallar listelenir. Varsayılan seçim A3 HARİÇ hepsi
+     (A3 sabit kural gereği oyun sesi). Seçim kanal numarasına göre hatırlanır. */
+  var OYUN_KANALI = 2;             // 0-tabanlı: A3
+  var _acKanallar = [];            // [{idx, clips, chk}]
+
+  function acKanalSecili(idx) {
+    var v = lsGet("acCh" + idx, null);
+    return (v == null) ? (idx !== OYUN_KANALI) : (v === "1");
+  }
+  function acSeciliKanallar() {
+    var out = [];
+    for (var i = 0; i < _acKanallar.length; i++) if (_acKanallar[i].chk.checked) out.push(_acKanallar[i].idx);
+    return out;
+  }
+  function acKanalUyariGuncelle() {
+    var u = $("acKanalUyari"); if (!u) return;
+    var sec = acSeciliKanallar();
+    u.hidden = false;
+    if (!sec.length) {
+      u.style.color = "var(--warn)";
+      u.textContent = "Hiçbir kanal işaretli değil — analiz yapılamaz.";
+      return;
+    }
+    u.style.color = "";
+    u.textContent = "Analiz edilecek: " + sec.map(function (i) { return "A" + (i + 1); }).join(", ");
+  }
+  function acKanalCiz(list) {
+    var box = $("acKanalRows"); if (!box) return;
+    box.innerHTML = ""; _acKanallar = [];
+    var dolu = (list || []).filter(function (t) { return t.clips > 0; });
+    if (!dolu.length) {
+      box.innerHTML = '<p class="note" style="margin:0;color:var(--warn)">Sekansta ses klibi bulunamadı.</p>';
+      var u0 = $("acKanalUyari"); if (u0) u0.hidden = true;
+      return;
+    }
+    dolu.forEach(function (t) {
+      var row = document.createElement("label");
+      row.className = "switch-row"; row.style.margin = "0";
+      var sol = document.createElement("span");
+      sol.appendChild(document.createTextNode("A" + (t.idx + 1)));
+      var s = document.createElement("small");
+      s.textContent = " " + t.clips + " klip" +
+        (t.idx === 0 ? " · senin mikrofonun" : (t.idx === OYUN_KANALI ? " · oyun sesi (genelde işaretlenmez)" : ""));
+      sol.appendChild(s);
+      var chk = document.createElement("input");
+      chk.type = "checkbox"; chk.checked = acKanalSecili(t.idx);
+      (function (idx, kutu) {
+        kutu.addEventListener("change", function () {
+          lsSet("acCh" + idx, kutu.checked ? "1" : "0");
+          acAnalizGecersiz();          // seçim değişti: ekrandaki eski analiz artık geçersiz
+          acKanalUyariGuncelle();
+        });
+      })(t.idx, chk);
+      row.appendChild(sol); row.appendChild(chk);
+      box.appendChild(row);
+      _acKanallar.push({ idx: t.idx, clips: t.clips, chk: chk });
+    });
+    acKanalUyariGuncelle();
+  }
+  async function acKanallariTara(sessiz) {
+    if (!CEP) return;
+    var raw = await evalES("getAudioTracksJSON()");
+    var d = null; try { d = JSON.parse(raw); } catch (e) {}
+    if (!d || d.error) { if (!sessiz) uiAlert("Sekans okunamadı. Önce bir sekans aç.", "AutoCut"); return; }
+    acKanalCiz(d.tracks || []);
+  }
+  if ($("acKanalTara")) $("acKanalTara").addEventListener("click", function () {
+    var p = acKanallariTara(false); if (p && p["catch"]) p["catch"](function () {});
+  });
+
   $("acAnalyze").addEventListener("click", async function () {
     if (!CEP) {
       acCuts = [{ start: 1, end: 2 }, { start: 5, end: 8 }];
@@ -2338,25 +2418,50 @@
     try {
       pipeline.ensureDir(cfg.workDir);
       var stamp = Date.now();
-      // A1 (sen) timeline sesi — SEKANS zamanına hizalı
-      var a1 = await getClips(0);
-      var a1wav = path.join(cfg.workDir, "acv1_" + stamp + ".wav");
-      acSetProgress(20, "A1 sesi hazırlanıyor…");
-      await pipeline.buildTimelineAudio(a1.clips, cfg.ffmpegExe, a1wav, null, 0);
-      var wavs = [a1wav];
-      // A2 (arkadaşlar) — varsa
-      try {
-        var a2 = await getClips(1);
-        var a2wav = path.join(cfg.workDir, "acv2_" + stamp + ".wav");
-        acSetProgress(30, "A2 sesi hazırlanıyor…");
-        await pipeline.buildTimelineAudio(a2.clips, cfg.ffmpegExe, a2wav, null, 1);
-        wavs.push(a2wav);
-      } catch (e2) { acLogLine("A2 atlandı: " + (e2.message || e2)); }
+      /* SEÇİLİ TÜM KANALLAR — eskiden A1+A2 sabitti ve A4+'daki arkadaşlar hiç
+         analiz edilmediği için onların konuştuğu bölümler "boşluk" sayılıp kesiliyordu. */
+      var secKanal = acSeciliKanallar();
+      if (!secKanal.length) {
+        // Kart hiç çizilmemiş olabilir (görünüm açılmadan analiz denendi) — bir kez tara.
+        await acKanallariTara(true);
+        secKanal = acSeciliKanallar();
+      }
+      if (!secKanal.length) {
+        uiAlert("Analiz edilecek kanal seçili değil.\n\n“Konuşma kanalları” kartından " +
+                "arkadaşlarının seslerinin olduğu kanalları işaretle.", "AutoCut");
+        return;
+      }
+      var wavs = [], atlanan = [], basarili = [];
+      for (var ki = 0; ki < secKanal.length; ki++) {
+        if (state.acCancelled) throw new Error("İptal edildi");
+        var tIdx = secKanal[ki];
+        acSetProgress(12 + 28 * ki / secKanal.length, "A" + (tIdx + 1) + " sesi hazırlanıyor…");
+        try {
+          var kd = await getClips(tIdx);
+          var kw = path.join(cfg.workDir, "acv" + (tIdx + 1) + "_" + stamp + ".wav");
+          await pipeline.buildTimelineAudio(kd.clips, cfg.ffmpegExe, kw, null, tIdx);
+          wavs.push(kw); basarili.push(tIdx);
+        } catch (eK) {
+          /* Tek kanalın hazırlanamaması TÜM analizi düşürmesin — ama SESSİZ de geçme:
+             o kanaldaki konuşma boşluk sayılır ve kesilir, kullanıcı bunu bilmeli. */
+          atlanan.push("A" + (tIdx + 1) + " — " + (eK.message || eK));
+        }
+      }
+      atlanan.forEach(function (m) { acLogLine("ATLANDI: " + m); });
+      if (!wavs.length) {
+        throw new Error("Seçili kanalların hiçbirinden ses hazırlanamadı." +
+                        (atlanan.length ? (" " + atlanan[0]) : ""));
+      }
+      if (atlanan.length) {
+        acLogLine("UYARI: " + atlanan.length + " kanal analiz DIŞINDA kaldı; o kanallardaki " +
+                  "konuşmalar boşluk sayılıp kesilebilir.");
+      }
       // karıştır (sekans-hizalı konuşma sesi)
       var voice = path.join(cfg.workDir, "acvoice_" + stamp + ".wav");
       await pipeline.mixWavs(wavs, cfg.ffmpegExe, voice);
       for (var wi = 0; wi < wavs.length; wi++) { try { fs.unlinkSync(wavs[wi]); } catch (e) {} }
-      acLogLine("Timeline sesi hazır (" + wavs.length + " kanal).");
+      acLogLine("Timeline sesi hazır — " + basarili.length + " kanal: " +
+                basarili.map(function (i) { return "A" + (i + 1); }).join(", "));
       acSetProgress(45, "Boşluklar taranıyor…");
       var opts = { sensitivity: parseFloat($("acSens").value), minSilence: parseFloat($("acMin").value),
                    denoise: !!($("chkDenoise") && $("chkDenoise").checked) };

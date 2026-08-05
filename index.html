@@ -277,6 +277,17 @@
 
       <!-- ================= AUTOCUT ================= -->
       <div class="view" id="viewAutocut" hidden>
+        <!-- Konuşma kanalları: eskiden A1+A2 SABİTTİ. Craig/Senkron ile arkadaşlar artık
+             A4, A5, A6…'da olduğu için onlar analiz edilmiyordu; yalnız A4'te konuşan biri
+             varken o bölüm "boşluk" sayılıp KESİLİYORDU. -->
+        <div class="card">
+          <div class="card-title">Konuşma kanalları</div>
+          <p class="note" style="margin:0 0 10px">Boşluk = <b>işaretli kanalların hiçbirinde</b> konuşma yok demek. Oyun sesi ve müzik kanallarını işaretleme, yoksa hiç boşluk bulunamaz.</p>
+          <div id="acKanalRows"></div>
+          <button class="btn-ghost" id="acKanalTara" type="button" style="margin-top:10px">Kanalları Yenile</button>
+          <p class="note" id="acKanalUyari" hidden></p>
+        </div>
+
         <div class="card">
           <div class="card-title">Ayarlar</div>
           <div class="field-row">
@@ -306,7 +317,7 @@
             <span>Gürültü azaltma <small>(gürültülü kayıtta daha isabetli — analiz ~5 kat yavaşlar)</small></span>
             <input type="checkbox" id="chkDenoise">
           </label>
-          <p class="note">Konuşma kanalları (A1 + A2) analiz edilir; oyun sesi (A3) sayılmaz. Boşluk = kimse konuşmuyorsa. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.<br>
+          <p class="note">Hangi kanalların analiz edileceğini yukarıdaki <b>Konuşma kanalları</b> kartından seçersin. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.<br>
             <b style="color:var(--text)">Hız notu:</b> “En kısa boşluk” ne kadar küçükse o kadar çok kesim olur ve kesim o kadar uzun sürer. 0.1 sn seçmek binlerce kesim üretebilir; 0.3 sn neredeyse aynı süreyi kazandırıp çok daha hızlı biter.</p>
         </div>
 
