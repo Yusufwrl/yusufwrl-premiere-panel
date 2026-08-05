@@ -80,11 +80,8 @@
       <!-- ================= ALTYAZI ================= -->
       <div class="view" id="viewAltyazi" hidden>
 
-        <div class="seg seg-mode" id="segMode">
-          <button class="seg-btn active" data-mode="single">Tek Stil</button>
-          <button class="seg-btn" data-mode="speaker">Konuşmacıya Göre</button>
-          <button class="seg-btn" data-mode="recolor">Renk Değiştir</button>
-        </div>
+        <!-- Mod seçici KALDIRILDI: artık tek yol var — altyazı Premiere'in kendi altyazı
+             kanalına yazılıyor. MOGRT (renkli/animasyonlu) yolu tamamen kalktı. -->
 
         <div id="genArea">
         <div class="card" id="panelSingle">
@@ -95,16 +92,25 @@
             <button class="seg-btn" data-track="2" title="Sadece A3 kanalı yazıya dökülür">A3</button>
             <!-- Eski etiket "Mix" idi: ne yaptığı hiçbir yerde yazmıyordu. Etiket artık kendini anlatıyor. -->
             <button class="seg-btn" data-track="mix" title="A1 + A2 birlikte yazıya dökülür (A3 oyun sesi dahil edilmez)">A1+A2</button>
+            <!-- Her kanal AYRI yazıya dökülür (üst üste konuşmalar karışmaz), sonuc tek altyazı
+                 kanalında zaman sırasıyla birleştirilir. Eski "Konuşmacıya Göre" modunun yerini alır. -->
+            <button class="seg-btn" data-track="herkes" title="Konuşma olan her kanal ayrı ayrı yazıya dökülür, sonra birleştirilir — en doğru sonuç">Herkes</button>
           </div>
           <!-- Kanal numaraları tek başına bir şey anlatmıyordu; tek satırlık hatırlatma. -->
           <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord karışımı ya da Senkron sonrası tek kişi). Senkron yaptıysan oyun sesi <b>en alt</b> kanaldadır.</p>
-          <div class="field" style="margin-top:12px;">
-            <label>Stil</label>
-            <!-- "caption" yazılımcı olmayan kullanıcıya bir şey anlatmıyor: bu seçenek MOGRT yerine
-                 Premiere'in kendi altyazı kanalına döküyor, yani renk/animasyon olmuyor. Adı bunu söylesin.
-                 NOT: aynı metin js/app.js fillStyleOptions içinde de üretiliyor, orası da güncellenmeli. -->
-            <div class="select"><select id="selStyleSingle"><option value="">Renksiz düz altyazı (Premiere altyazı kanalı)</option></select></div>
+          <!-- "Herkes" seçiliyken: hangi kanallar yazıya dökülsün? Eski "Konuşmacıya Göre"
+               modunun kanal listesi buraya taşındı; mod kalktı, kaynak seçeneği oldu. -->
+          <div id="kanalBox" hidden style="margin-top:12px">
+            <div id="kanalRows"></div>
+            <button class="btn-ghost" id="btnKanalTara" type="button" style="margin-top:10px">Kanalları Tara</button>
+            <p class="note" id="kanalUyari" hidden></p>
           </div>
+
+          <!-- STİL SEÇİCİ KALDIRILDI: altyazı artık Premiere'in kendi altyazı kanalına
+               yazılıyor ve o kanalın tek bir stili olur. Yazı tipi, renk, kontur ve konum
+               Premiere'de bir kez ayarlanır (altyazıya tıkla → Essential Graphics →
+               Track Style → Create Style) ve tüm altyazılara birden uygulanır. -->
+          <p class="note" style="margin-top:10px">Görünümü (yazı tipi, renk, kontur, konum) Premiere'de <b>bir kez</b> ayarlarsın: altyazıya tıkla → Essential Graphics → <b>Track Style → Create Style</b>. Sonra hepsi birden değişir.</p>
 
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
@@ -115,50 +121,17 @@
           <div id="shortsAyar" hidden>
             <!-- Bu satır GÖRÜNÜR olmalı: eskiden yalnız düğme ipucunda (title) yazıyordu ve
                  kullanıcı "Konuşmacıya Göre neden kapalı?" diye sordu. -->
-            <p class="note" style="margin-top:8px">Altyazı kısalır (uzunluğa göre 1, en fazla 2 kelime) ve dikey karede aşağıdaki yüksekliğe konur.<br>
-              <b style="color:var(--text)">“Konuşmacıya Göre” bu sırada kapalıdır</b> — dikey karede iki kişinin altyazısı üst üste sığmıyor. Kutuyu kaldırınca geri gelir.</p>
-            <div class="field" style="margin-top:10px">
-              <label>Altyazının yüksekliği <small style="color:var(--faint)">(0 = en üst, 100 = en alt)</small></label>
-              <div class="range-row">
-                <input type="range" id="rngShortsY" min="20" max="90" step="1" value="58">
-                <span class="range-val" id="lblShortsY">%58</span>
-              </div>
-            </div>
-            <div class="field" style="margin-top:10px">
-              <label>Altyazı boyutu <small style="color:var(--faint)">(dikey karede yazı taşıyorsa küçült)</small></label>
-              <div class="range-row">
-                <input type="range" id="rngShortsScale" min="30" max="150" step="5" value="100">
-                <span class="range-val" id="lblShortsScale">%100</span>
-              </div>
-            </div>
+            <p class="note" style="margin-top:8px">Altyazı kısalır: uzunluğuna göre <b>1, en fazla 2 kelime</b>. Konum ve boyutu Premiere'de altyazı stilinden ayarlarsın (bir kez).</p>
+            <!-- Hangi yolda olduğumuzu söyleyen satır (app.js wireShorts dolduruyor).
+                 Altyazı kanalı = tek kanal, kasma yok, animasyon yok.
+                 MOGRT = animasyonlu ama altyazı başına bir klip. -->
+            <p class="note" id="shortsYolNot" hidden style="margin-top:8px"></p>
+            <!-- Konum/boyut kaydırıcıları YALNIZ MOGRT yolunda anlamlı: altyazı kanalında
+                 konumu Premiere'in kendi altyazı stili belirler, panel karışamaz. -->
             <p class="note" id="shortsUyari" hidden style="color:var(--warn)"></p>
           </div>
         </div>
 
-        <div class="card" id="panelSpeaker" hidden>
-          <div class="card-title">Konuşmacı Eşleme</div>
-          <div class="row-speaker">
-            <div class="rs-label"><i class="chip chip-you"></i>Sen <small>(A1)</small></div>
-            <div class="select sm"><select id="selStyleA1"></select></div>
-          </div>
-          <div class="field" style="margin-top:12px">
-            <label>Arkadaşın altyazısı yukarı kaysın mı? <small style="color:var(--faint)">(üst üste binmesin diye)</small></label>
-            <div class="select">
-              <select id="selIstif">
-                <option value="overlap">Sadece aynı anda konuşurken</option>
-                <option value="off">Hiç kaydırma</option>
-                <option value="always">Hep yukarıda dursun</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Her ses kanalı bir kişi (Craig / OBS kişi başı kayıt) -->
-          <div id="kanalBox">
-            <div id="kanalRows"></div>
-            <button class="btn-ghost" id="btnKanalTara" type="button" style="margin-top:10px">Kanalları Tara</button>
-            <p class="note" id="kanalUyari" hidden></p>
-          </div>
-        </div>
 
         <details class="card dict-card" id="dictCard">
           <summary class="dict-summary">
@@ -206,10 +179,6 @@
           <pre class="log" id="log" hidden></pre>
         </div>
 
-        <div class="card speakers" id="speakerMap" hidden>
-          <div class="card-title">A2'deki Konuşmacılar</div>
-          <div id="speakerRows"></div>
-        </div>
 
         <div class="result" id="result" hidden>
           <div class="result-head">
@@ -249,33 +218,6 @@
         </div><!-- /genArea -->
 
         <!-- ================= RENK DEĞİŞTİR (3. sekme) ================= -->
-        <div id="panelRecolor" hidden>
-          <div class="card">
-            <div class="card-title">Timeline'da Renk Değiştir</div>
-            <p class="note" style="margin-top:0;line-height:1.75">
-              <b style="color:var(--text)">1.</b> Timeline'da rengini değiştireceğin altyazı klip(ler)ini seç.<br>
-              <b style="color:var(--text)">2.</b> Aşağıdan yeni rengi seç — metin ve konum korunur.
-            </p>
-            <div class="color-grid" id="recolorBtns"></div>
-            <div class="recolor-status" id="recolorStatus" hidden></div>
-            <p class="note" id="recolorHint"></p>
-          </div>
-
-          <div class="card">
-            <div class="card-title">Timeline'da Yazıyı Düzelt</div>
-            <p class="note" style="margin-top:0;line-height:1.75">
-              Altyazıyı timeline'a ekledikten sonra yazı hatası görürsen: klibi seç, <b style="color:var(--text)">Oku</b>'ya bas,
-              yazıyı düzelt, <b style="color:var(--text)">Uygula</b>'ya bas. Klip silinip yeniden eklenmez —
-              konumu, süresi ve elle yaptığın ayarlar korunur.
-            </p>
-            <input type="text" class="input" id="fixText" placeholder="Seçili altyazının yazısı" style="cursor:text">
-            <div class="dict-actions">
-              <button class="btn-ghost" id="btnFixRead" type="button">Oku</button>
-              <button class="btn-ghost" id="btnFixApply" type="button">Uygula</button>
-              <span class="dict-status" id="fixStatus"></span>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- ================= AUTOCUT ================= -->

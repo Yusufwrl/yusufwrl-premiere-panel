@@ -448,43 +448,7 @@ function _dumpTrackItem(ti) {
 }
 
 // TrackItem'in metnini olası her yoldan ayarlamayı dener; hangi yolun tuttuğunu döndürür.
-function _setTextAllWays(ti, text) {
-    try { ti.setSelected(1, 1); } catch (esel) {}
-    // 1) getMGTComponent
-    try {
-        var mc = ti.getMGTComponent();
-        if (mc && mc.properties) {
-            for (var m = 0; m < mc.properties.numItems; m++) {
-                var mp = mc.properties[m];
-                var mdn = "" + (mp.displayName || "");
-                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test(mdn)) {
-                    try { mp.setValue(text, true); return "mgt:" + mdn; } catch (e1) {}
-                }
-            }
-            if (mc.properties.numItems === 1) {
-                try { mc.properties[0].setValue(text, true); return "mgt:tek"; } catch (e2) {}
-            }
-        }
-    } catch (e) {}
-    // 2) components üzerinden
-    try {
-        for (var i = 0; i < ti.components.numItems; i++) {
-            var comp = ti.components[i];
-            for (var j = 0; j < comp.properties.numItems; j++) {
-                var p = comp.properties[j];
-                var dn = "" + (p.displayName || "");
-                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test(dn)) {
-                    try { p.setValue(text, true); return "comp[" + i + "]:" + dn; } catch (e3) {}
-                }
-            }
-        }
-    } catch (e) {}
-    return "notfound";
-}
 
-function _setEndSec(ti, endSec, TICKS) {
-    try { var t = new Time(); t.ticks = String(Math.round(endSec * TICKS)); ti.end = t; } catch (e) {}
-}
 
 /* BIR SES KANALINDAKI TUM KLIPLERI BASKA KANALA TASIR.
    Premiere'de "klibi baska kanala tasi" API'si YOKTUR; tek yol ayni projectItem'i hedef
@@ -502,6 +466,20 @@ function _setEndSec(ti, endSec, TICKS) {
 
    Klibe uygulanmis efektler ve ses seviyesi anahtar kareleri KOPYALANMAZ — panel bunu
    kullaniciya onay ekraninda soyler. */
+/* Bir kanalda baslangici startSec'e EN YAKIN klibi bulur. kanalTasi yeni yerlestirdigi
+   klibi boyle buluyor (overwriteClip yerlestirdigi klibi dondurmuyor). */
+function _findClipNear(vTrack, startSec, TICKS) {
+    var target = Math.round(startSec * TICKS);
+    var best = null, bd = 1e18;
+    for (var k = 0; k < vTrack.clips.numItems; k++) {
+        var cl = vTrack.clips[k];
+        var st = parseFloat(cl.start.ticks);
+        var d = Math.abs(st - target);
+        if (d < bd) { bd = d; best = cl; }
+    }
+    return best;
+}
+
 function kanalTasi(kaynakIdx, hedefIdx) {
     var _ug = false; try { app.beginUndoGroup("Yusufwrl Kanal Tasi"); _ug = true; } catch (eug) {}
     try {
@@ -612,109 +590,17 @@ function kanalTasi(kaynakIdx, hedefIdx) {
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
-// vTrack'te başlangıcı startSec'e en yakın klibi bulur (yeni yerleştirilen).
-function _findClipNear(vTrack, startSec, TICKS) {
-    var target = Math.round(startSec * TICKS);
-    var best = null, bd = 1e18;
-    for (var k = 0; k < vTrack.clips.numItems; k++) {
-        var cl = vTrack.clips[k];
-        var st = parseFloat(cl.start.ticks);
-        var d = Math.abs(st - target);
-        if (d < bd) { bd = d; best = cl; }
-    }
-    return best;
-}
-
-// MOGRT değerinden düz metni çıkarır (string ya da {text:...} JSON olabilir).
-function _extractText(v) {
-    if (typeof v === "string") {
-        if (v.charAt(0) === "{") {
-            /* ExtendScript ES3'tur ve JSON YERLESIGI GARANTI DEGILDIR. Eskiden burada yalniz
-               JSON.parse vardi; JSON tanimsizsa ReferenceError catch'e dusuyor ve fonksiyon
-               ham JSON metnini altyazi sanip ekrana basiyordu ("{"text":"selam"}" gibi).
-               Once yerlesik denenir, yoksa "text" alani elle ayiklanir. */
-            try {
-                if (typeof JSON !== "undefined" && JSON && typeof JSON.parse === "function") {
-                    var o = JSON.parse(v);
-                    if (o && typeof o.text === "string") return o.text;
-                }
-            } catch (e) {}
-            var m = v.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-            if (m) {
-                return m[1].replace(/\\n/g, "\n").replace(/\\t/g, "\t")
-                           .replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-            }
-        }
-        return v;
-    }
-    if (v && typeof v.text === "string") return v.text;
-    return (v == null) ? "" : ("" + v);
-}
 // Yerleştirilmiş MOGRT klibinden metni OKUR (renk değiştirirken korumak için).
-function _getMGTText(ti) {
-    try {
-        var mc = ti.getMGTComponent();
-        if (mc && mc.properties) {
-            for (var m = 0; m < mc.properties.numItems; m++) {
-                var mp = mc.properties[m];
-                if (/source text|text|kaynak|yaz|başlık|title|altyaz/i.test("" + (mp.displayName || ""))) {
-                    try { return _extractText(mp.getValue()); } catch (e1) {}
-                }
-            }
-            if (mc.properties.numItems === 1) { try { return _extractText(mc.properties[0].getValue()); } catch (e2) {} }
-        }
-    } catch (e) {}
-    return null;
-}
 
 // Timeline'da SEÇİLİ altyazı (MOGRT) kliplerinin başlangıç saniyelerini JSON dizi döndürür.
 // Panel bunları kendi cue listesiyle eşleyip TEMİZ yeniden yerleştirme yapar (importMGT'nin
 // komşu klipleri ezme sorununa girmeden).
-function getSelectedSubTimes() {
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "[]";
-        var TICKS = 254016000000, out = [];
-        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
-            var tr = seq.videoTracks[v];
-            for (var i = 0; i < tr.clips.numItems; i++) {
-                var cl = tr.clips[i];
-                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
-                if (!sel) continue;
-                var mc = null; try { mc = cl.getMGTComponent(); } catch (e) {}
-                if (!mc) continue; // sadece MOGRT altyazı klipleri
-                out.push(parseFloat(cl.start.ticks) / TICKS);
-            }
-        }
-        return "[" + out.join(",") + "]";
-    } catch (e) { return "[]"; }
-}
 
 /*
  * Timeline'da SEÇİLİ altyazı kliplerinin METNİNİ döndürür (JSON dizi).
  * Panelde "seçili klibin yazısını düzelt" akışı için: önce mevcut metin okunur, kullanıcı
  * düzeltir, sonra setSelectedSubText ile yerine yazılır.
  */
-function getSelectedSubText() {
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "[]";
-        var out = [];
-        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
-            var tr = seq.videoTracks[v];
-            for (var i = 0; i < tr.clips.numItems; i++) {
-                var cl = tr.clips[i];
-                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
-                if (!sel) continue;
-                var mc = null; try { mc = cl.getMGTComponent(); } catch (e2) {}
-                if (!mc) continue;
-                var t = _getMGTText(cl);
-                out.push('"' + _jsonEsc(t == null ? "" : t) + '"');
-            }
-        }
-        return "[" + out.join(",") + "]";
-    } catch (e) { return "[]"; }
-}
 
 /*
  * Seçili altyazı kliplerinin metnini YERİNDE değiştirir.
@@ -726,45 +612,7 @@ function getSelectedSubText() {
  * Metni DOSYADAN okuyup uygular. Metni evalScript'in string literaline gömmek Türkçe karakter,
  * tırnak ve ters bölü açısından kırılgan; altyazı yerleştirme de aynı sebeple dosya kullanıyor.
  */
-function setSelectedSubTextFile(txtPath) {
-    var t = "";
-    try { t = _readFileUTF8(txtPath); } catch (e) { return "err:Metin dosyası okunamadı"; }
-    t = String(t).replace(/[\r\n]+$/, "");
-    if (!t) return "err:Metin boş";
-    return setSelectedSubText(t);
-}
 
-function setSelectedSubText(newText) {
-    var _ug = false; try { app.beginUndoGroup("Yusufwrl Metin Düzelt"); _ug = true; } catch (eug) {}
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-        // ÖNCE seçili klipleri topla: _setTextAllWays içindeki setSelected çağrısı seçimi
-        // değiştirdiği için, tararken değiştirmek sonraki klipleri kaçırır.
-        var hedef = [];
-        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
-            var tr = seq.videoTracks[v];
-            for (var i = 0; i < tr.clips.numItems; i++) {
-                var cl = tr.clips[i];
-                var sel = false; try { sel = cl.isSelected(); } catch (e) {}
-                if (!sel) continue;
-                var mc = null; try { mc = cl.getMGTComponent(); } catch (e2) {}
-                if (mc) hedef.push(cl);
-            }
-        }
-        if (!hedef.length) return "err:Seçili altyazı klibi yok";
-        var degisen = 0, atlanan = 0;
-        for (var h = 0; h < hedef.length; h++) {
-            var yol = _setTextAllWays(hedef[h], newText);
-            if (yol && yol !== "notfound") degisen++; else atlanan++;
-        }
-        // Hiçbiri değişmediyse BAŞARI dönme — panel yeşil tik gösterip kullanıcıyı yanıltıyordu.
-        if (!degisen) return "err:Yazı alanı bulunamadı (" + atlanan + " klip). Bu MOGRT'de metin katmanı farklı olabilir.";
-        return "ok:" + degisen + " altyazının yazısı değişti" + (atlanan ? (", " + atlanan + " atlandı") : "");
-    } catch (e) {
-        return "err:" + e.toString();
-    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
-}
 
 /*
  * (ARTIK KULLANILMIYOR — importMGT komşu klipleri ezdiği için panel-taraflı temiz
@@ -773,210 +621,16 @@ function setSelectedSubText(newText) {
  * Aynı zaman + aynı metin korunur; klip silinip yeni stil aynı yere konur.
  * Yanlış renk/konuşmacı atanan altyazıları yerleştirdikten SONRA düzeltmek için.
  */
-function recolorSelected(mogrtPath) {
-    var _ug = false; try { app.beginUndoGroup("Yusufwrl Renk Değiştir"); _ug = true; } catch (eug) {}
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-        var mf = new File(mogrtPath);
-        if (!mf.exists) return "err:Stil dosyası yok: " + mogrtPath;
-        var TICKS = 254016000000;
-        // PASS 1: SADECE seçili MOGRT kliplerinin bilgisini DEĞER olarak topla (referans TUTMA —
-        // timeline değişince eski TrackItem referansı kayıp YANLIŞ klibi siliyordu, bug buydu).
-        var jobs = [];
-        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
-            var tr = seq.videoTracks[v];
-            for (var i = 0; i < tr.clips.numItems; i++) {
-                var cl = tr.clips[i];
-                var sel = false; try { sel = cl.isSelected(); } catch (es) {}
-                if (!sel) continue;
-                var mc = null; try { mc = cl.getMGTComponent(); } catch (em) {}
-                if (!mc) continue; // MOGRT değil (video/ses/gameplay) -> ASLA dokunma
-                var txt = _getMGTText(cl);
-                jobs.push({ startTicks: "" + cl.start.ticks, endSec: parseFloat(cl.end.ticks) / TICKS, text: (txt != null ? txt : ""), vIdx: v });
-            }
-        }
-        if (!jobs.length) return "err:Timeline'da altyazı klibi seçili değil (klibe tıkla, sonra bas)";
-        // PASS 2: SADECE seçili MOGRT klipleri kaldır — TERS iterasyon (indeks kaymaz), ripple YOK
-        // (false = gap bırak, sonraki klipleri kaydırma/silme). Sadece seçili+MOGRT olanlara dokunur.
-        for (var v2 = 0; v2 < seq.videoTracks.numTracks; v2++) {
-            var tr2 = seq.videoTracks[v2];
-            for (var k = tr2.clips.numItems - 1; k >= 0; k--) {
-                var c2 = tr2.clips[k];
-                var s2 = false; try { s2 = c2.isSelected(); } catch (e) {}
-                if (!s2) continue;
-                var m2 = null; try { m2 = c2.getMGTComponent(); } catch (e) {}
-                if (!m2) continue;
-                try { c2.remove(false, false); } catch (er) {}
-            }
-        }
-        // PASS 3: yeni stili aynı zamana/track'e koy, metni ve süreyi geri yaz.
-        var done = 0, failed = 0, firstErr = "";
-        for (var j = 0; j < jobs.length; j++) {
-            var job = jobs[j];
-            var ni = null;
-            try { ni = seq.importMGT(mogrtPath, job.startTicks, job.vIdx, -1); }
-            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
-            if (!ni) ni = _findClipNear(seq.videoTracks[job.vIdx], parseFloat(job.startTicks) / TICKS, TICKS);
-            if (!ni) { failed++; continue; }
-            if (job.text) _setTextAllWays(ni, job.text);
-            _setEndSec(ni, job.endSec, TICKS);
-            done++;
-        }
-        return "ok:" + done + " altyazının rengi değişti" + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
-    } catch (e) {
-        return "err:" + e.toString();
-    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
-}
 
 /*
  * Her altyazı satırını MOGRT stiliyle timeline'a koyar (importMGT ile).
  * İlk klipte MOGRT'nin tüm iç yapısını dosyaya döker (teşhis).
  */
-function addStyledSubtitles(cuesFilePath, mogrtPath, vTrackIndex) {
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-        var mf = new File(mogrtPath);
-        if (!mf.exists) return "err:MOGRT yok: " + mogrtPath;
-
-        var raw = _readFileUTF8(cuesFilePath);
-        var lines = raw.split(/\r?\n/);
-        var cues = [];
-        for (var i = 0; i < lines.length; i++) {
-            var ln = lines[i]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 3) continue;
-            var s = parseFloat(p[0]), e = parseFloat(p[1]);
-            if (isNaN(s)) continue;
-            cues.push({ s: s, e: e, t: p.slice(2).join("|") });
-        }
-        if (!cues.length) return "err:cue yok";
-
-        var TICKS = 254016000000;
-        var vIdx = vTrackIndex;
-        if (vIdx === undefined || vIdx === null || vIdx < 0) vIdx = seq.videoTracks.numTracks - 1;
-
-        // 1) ÖNCE TEK KLİPLE DOĞRULA: metin ayarlanabiliyor mu?
-        var t0 = null;
-        try { t0 = seq.importMGT(mogrtPath, String(Math.round(cues[0].s * TICKS)), vIdx, -1); }
-        catch (e) { return "err:importMGT: " + e.toString(); }
-        if (!t0) return "err:importMGT null";
-        try {
-            var diagDir = new File(cuesFilePath).parent;
-            _writeFileUTF8(diagDir.fsName + "/mogrt_props.txt", _dumpTrackItem(t0));
-        } catch (ed) {}
-        var setInfo = _setTextAllWays(t0, cues[0].t);
-        var ok0 = (setInfo.indexOf("mgt:") === 0 || setInfo.indexOf("comp") === 0);
-        if (!ok0) {
-            try { t0.remove(false, false); } catch (er0) {}
-            return "err:Bu MOGRT'de DUZENLENEBILIR METIN YOK (setText=" + setInfo +
-                   "). Yaziyi duzenlenebilir alan olacak sekilde yeniden export etmen gerek.";
-        }
-
-        // 2) Doğrulandı → hedef kanalı temizle, hepsini yerleştir
-        try {
-            var vt0 = seq.videoTracks[vIdx];
-            for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
-                try { vt0.clips[k].remove(false, false); } catch (er) {}
-            }
-        } catch (ec) {}
-
-        var placed = 0, failed = 0;
-        for (var c = 0; c < cues.length; c++) {
-            var ti = null;
-            try { ti = seq.importMGT(mogrtPath, String(Math.round(cues[c].s * TICKS)), vIdx, -1); }
-            catch (e2) { failed++; continue; }
-            if (!ti) { failed++; continue; }
-            _setTextAllWays(ti, cues[c].t);
-            _setEndSec(ti, cues[c].e, TICKS);
-            placed++;
-        }
-
-        return "ok:" + placed + " eklendi" + (failed ? (", " + failed + " hata") : "") + " | metin: " + setInfo;
-    } catch (e) {
-        return "err:" + e.toString();
-    }
-}
 
 /*
  * Seçili yazı grafiğini şablon alıp her altyazı satırı için çoğaltır (MOGRT'siz).
  * Kullanıcı orijinal "Tofi Text Deneme" grafiğine tıklar (seçer), sonra bu çalışır.
  */
-function addStyledFromSelected(cuesFilePath, vTrackIndex) {
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-
-        // seçili klibi bul
-        var tmpl = null;
-        try {
-            if (typeof seq.getSelection === "function") {
-                var sa = seq.getSelection();
-                if (sa && sa.length) tmpl = sa[0];
-            }
-        } catch (e) {}
-        if (!tmpl) {
-            for (var v = seq.videoTracks.numTracks - 1; v >= 0 && !tmpl; v--) {
-                var tr = seq.videoTracks[v];
-                for (var i = 0; i < tr.clips.numItems; i++) {
-                    var s = false;
-                    try { s = tr.clips[i].isSelected(); } catch (e2) {}
-                    if (s) { tmpl = tr.clips[i]; break; }
-                }
-            }
-        }
-        if (!tmpl) return "err:Once 'Tofi Text Deneme' yazina TIKLA (sec), sonra bas";
-
-        // teşhis: seçili klibin yapısını dök
-        var projItem = null;
-        try { projItem = tmpl.projectItem; } catch (e) {}
-        try {
-            var diagDir = new File(cuesFilePath).parent;
-            _writeFileUTF8(diagDir.fsName + "/selected_props.txt",
-                "SECILI KLIP:\n" + _dumpTrackItem(tmpl) +
-                "\nprojItem: " + (projItem ? (projItem.name || "var") : "null"));
-        } catch (ed) {}
-
-        if (!projItem) return "err:Grafik cogaltilamiyor (projectItem yok) | selected_props yazildi";
-
-        // cue oku
-        var raw = _readFileUTF8(cuesFilePath);
-        var lines = raw.split(/\r?\n/);
-        var cues = [];
-        for (var k = 0; k < lines.length; k++) {
-            var ln = lines[k]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 3) continue;
-            var ss = parseFloat(p[0]), ee = parseFloat(p[1]);
-            if (isNaN(ss)) continue;
-            cues.push({ s: ss, e: ee, t: p.slice(2).join("|") });
-        }
-        if (!cues.length) return "err:cue yok";
-
-        var TICKS = 254016000000;
-        var vIdx = (vTrackIndex === undefined || vTrackIndex === null || vTrackIndex < 0)
-                     ? seq.videoTracks.numTracks - 1 : vTrackIndex;
-        var vTrack = seq.videoTracks[vIdx];
-
-        // hedef kanalı temizle
-        try { for (var q = vTrack.clips.numItems - 1; q >= 0; q--) { try { vTrack.clips[q].remove(false, false); } catch (er) {} } } catch (ec) {}
-
-        var placed = 0, failed = 0, setInfo = "";
-        for (var c = 0; c < cues.length; c++) {
-            var okc = false;
-            try { okc = vTrack.overwriteClip(projItem, cues[c].s); }
-            catch (eo) { if (!setInfo) setInfo = "overwrite:" + eo.toString(); }
-            var ti = okc ? _findClipNear(vTrack, cues[c].s, TICKS) : null;
-            if (!ti) { failed++; continue; }
-            var r = _setTextAllWays(ti, cues[c].t);
-            if (c === 0) setInfo = "text:" + r;
-            _setEndSec(ti, cues[c].e, TICKS);
-            placed++;
-        }
-        return "ok:" + placed + " eklendi, " + failed + " hata | " + setInfo;
-    } catch (e) {
-        return "err:" + e.toString();
-    }
-}
 
 /*
  * Çoklu-stil yerleştirme: her cue satırı "startSec|endSec|mogrtPath|metin".
@@ -989,157 +643,12 @@ function addStyledFromSelected(cuesFilePath, vTrackIndex) {
         yalnizca bu calistirmadaki stile bakarsak onlar silinmez ve ekranda CIFT altyazi olur.
      2) bu calistirmada kullanilan MOGRT dosya adlari (baslik satiri gelmese de calissin diye).
    Listede OLMAYAN hicbir klibe dokunulmaz — kullanicinin kendi grafikleri ve goruntusu guvende. */
-function _stilBeyazListe(lines, cues) {
-    /* Anahtarlar "#" onekiyle tutulur. Duz nesnede "constructor"/"toString"/"valueOf" gibi
-       adlar Object.prototype uzerinden HER ZAMAN dogru donerdi; adi tam olarak boyle olan
-       bir klip beyaz listede sayilip SILINIRDI. Onek bu tuzagi tamamen kapatir. */
-    var ad = {}, i, j, p, b;
-    for (i = 0; i < lines.length; i++) {
-        if (!lines[i] || lines[i].slice(0, 9) !== "#STILLER|") continue;
-        p = lines[i].slice(9).split("|");
-        for (j = 0; j < p.length; j++) {
-            b = String(p[j]).replace(/^\s+|\s+$/g, "").replace(/\.[^.]+$/, "");
-            if (b) ad["#" + b.toLowerCase()] = true;
-        }
-    }
-    for (i = 0; i < cues.length; i++) {
-        b = String(cues[i].mg).replace(/\\/g, "/");
-        b = b.slice(b.lastIndexOf("/") + 1).replace(/\.[^.]+$/, "");
-        if (b) ad["#" + b.toLowerCase()] = true;
-    }
-    return ad;
-}
 
 // Beyaz liste sorgusu — anahtar oneki tek yerde bilinsin.
-function _bizimAltyazimizMi(liste, klipAdi) {
-    var n = String(klipAdi == null ? "" : klipAdi).replace(/\.[^.]+$/, "").toLowerCase();
-    return n ? (liste["#" + n] === true) : false;
-}
 
-function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
-    var _ug = false; try { app.beginUndoGroup("Yusufwrl Altyazı"); _ug = true; } catch (eug) {}
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-        var raw = _readFileUTF8(cuesFilePath);
-        var lines = raw.split(/\r?\n/);
-        var cues = [];
-        for (var i = 0; i < lines.length; i++) {
-            var ln = lines[i]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 4) continue;
-            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], txt = p.slice(3).join("|");
-            if (isNaN(s) || !mg) continue;
-            cues.push({ s: s, e: e, mg: mg, t: txt });
-        }
-        if (!cues.length) return "err:cue yok";
-
-        var TICKS = 254016000000;
-        // vTrackIndex: -1 = en üst kanal, -2 = bir altı, 0+ = doğrudan indeks
-        var vIdx;
-        if (vTrackIndex === undefined || vTrackIndex === null) vIdx = seq.videoTracks.numTracks - 1;
-        else if (vTrackIndex < 0) vIdx = seq.videoTracks.numTracks + vTrackIndex;
-        else vIdx = vTrackIndex;
-        /* vIdx 0 = en alttaki video kanali = kullanicinin GORUNTUSU. Oraya altyazi basmak
-           hem goruntuyu ezer hem de asagidaki temizlik onu siler. 0'a kelepceleme, DUR. */
-        if (vIdx < 1) return "err:Altyazı için boş bir video kanalı gerekiyor. Premiere'de " +
-                             "görüntünün üstüne bir video kanalı ekleyip tekrar dene.";
-
-        // SADECE basılacak zaman aralığındaki klipleri temizle — parça parça (süre aralığı)
-        // yerleştirmede önceki bölümleri silmesin. Aralık = ilk cue başı .. son cue sonu.
-        var spanS = cues[0].s, spanE = cues[0].e;
-        for (var si = 1; si < cues.length; si++) { if (cues[si].s < spanS) spanS = cues[si].s; if (cues[si].e > spanE) spanE = cues[si].e; }
-        /* Yalnizca KENDI altyazilarimizi sil (bu calistirmadaki MOGRT adlari). Eskiden
-           aralikta kalan her klip siliniyordu; hedef kanalda kullanicinin bir goruntusu
-           varsa o da gidiyordu. */
-        var mgAd0 = _stilBeyazListe(lines, cues);
-        var korunan0 = 0, yabanci0 = [];
-        try {
-            var vt0 = seq.videoTracks[vIdx];
-            for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
-                try {
-                    var cl0 = vt0.clips[k], cs0 = cl0.start.seconds, ce0 = cl0.end.seconds;
-                    if (!(ce0 > spanS + 0.05 && cs0 < spanE - 0.05)) continue;
-                    var nm0 = "";
-                    try { nm0 = String(cl0.name); } catch (en0) { nm0 = ""; }
-                    if (!_bizimAltyazimizMi(mgAd0, nm0)) {
-                        /* Bizim altyazimiz DEGIL: silmiyoruz. Ama aralikini not almazsak
-                           asagidaki importMGT ayni kanala altyazi basip onu YINE ezerdi
-                           (bir kanalda iki klip duramaz) ve panel "dokunulmadi" derdi.
-                           Bu aralikla cakisan cue'lar ATLANIR. */
-                        korunan0++;
-                        yabanci0.push({ s: cs0, e: ce0, ad: nm0 });
-                        continue;
-                    }
-                    cl0.remove(false, false);
-                } catch (er) {}
-            }
-        } catch (ec) {}
-
-        /* SHORTS: cue dosyasinin basindaki "#SHORTS|<yNorm>|<olcek>" satiri. Panel dikey
-           sekans icin altyazinin yuksekligini ve olcegini buradan bildirir. Satir yoksa
-           (normal yatay video) konuma HIC dokunulmaz — eski davranis aynen surer. */
-        var shortsY = -1, shortsOlcek = 0;
-        for (var sh = 0; sh < lines.length; sh++) {
-            if (!lines[sh] || lines[sh].slice(0, 8) !== "#SHORTS|") continue;
-            var sp = lines[sh].slice(8).split("|");
-            shortsY = parseFloat(sp[0]);
-            shortsOlcek = parseFloat(sp[1]) || 0;
-            if (isNaN(shortsY) || shortsY < 0 || shortsY > 1) shortsY = -1;   // bozuk deger: dokunma
-            break;
-        }
-
-        var placed = 0, failed = 0, firstErr = "", yerlesen = 0, korumaAtlandi = 0, korumaAd = "";
-        for (var c = 0; c < cues.length; c++) {
-            /* Kullanicinin KENDI klibiyle cakisan cue'yu basma: bir video kanalinda iki klip
-               duramaz, importMGT onu ezerdi. Yukarida "dokunulmadi" dedigimiz klip gercekten
-               dokunulmamis olsun. */
-            var cakisti = false;
-            for (var yb = 0; yb < yabanci0.length; yb++) {
-                if (cues[c].e > yabanci0[yb].s + 0.05 && cues[c].s < yabanci0[yb].e - 0.05) {
-                    cakisti = true; if (!korumaAd) korumaAd = yabanci0[yb].ad; break;
-                }
-            }
-            if (cakisti) { korumaAtlandi++; continue; }
-            var mf = new File(cues[c].mg);
-            if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
-            var ti = null;
-            try { ti = seq.importMGT(cues[c].mg, String(Math.round(cues[c].s * TICKS)), vIdx, -1); }
-            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
-            if (!ti) { failed++; continue; }
-            _setTextAllWays(ti, cues[c].t);
-            _setEndSec(ti, cues[c].e, TICKS);
-            if (shortsY >= 0) { if (_dikeyYerlestir(ti, shortsY, shortsOlcek)) yerlesen++; }
-            placed++;
-        }
-        if (korumaAtlandi) {
-            firstErr = korumaAtlandi + " altyazı eklenemedi: hedef video kanalında senin klibin var (" +
-                       korumaAd + "). Onu başka kanala taşı ya da altyazıya boş bir video kanalı aç." +
-                       (firstErr ? (" | " + firstErr) : "");
-            failed += korumaAtlandi;
-        }
-        if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
-        var shortsNot = "";
-        if (shortsY >= 0) {
-            shortsNot = yerlesen ? (", " + yerlesen + " dikey konumlandı")
-                                 : ", DİKEY KONUMLANDIRILAMADI (MOGRT'de Konum özelliği bulunamadı)";
-        }
-        return "ok:" + placed + " eklendi" + shortsNot + (korunan0 ? (", " + korunan0 + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
-    } catch (e) {
-        return "err:" + e.toString();
-    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
-}
 
 /* Sekansin gercek kare yuksekligini okur (1080 varsayilan). Iki farkli API denenir; ikisi de
    yoksa 1080'e duser (eski davranis). */
-function _seqHeight(seq) {
-    var h = 0;
-    try { h = parseInt(seq.frameSizeVertical, 10); } catch (e1) { h = 0; }
-    if (!h || isNaN(h) || h < 16) {
-        try { h = parseInt(seq.getSettings().videoFrameHeight, 10); } catch (e2) { h = 0; }
-    }
-    if (!h || isNaN(h) || h < 16) h = 1080;
-    return h;
-}
 
 // Klibi ekranda yukarı kaydırır (üst üste konuşmada istifleme). Başarılıysa true döner.
 // Position özelliğini önce Motion/Vector Motion'da, bulamazsa herhangi bir bileşende arar (S8).
@@ -1149,23 +658,6 @@ function _seqHeight(seq) {
 /* Klibin efekt ozelliklerinden birini bulur (Position, Scale...).
    1. tur: adi Motion/Vector Motion olan bilesen; 2. tur: eslesmeyi tasiyan HERHANGI bilesen.
    (Once _shiftUp'in icindeydi; Shorts yerlesimi de ayni aramaya ihtiyac duydugu icin ayrildi.) */
-function _bulOzellik(ti, desen) {
-    try {
-        for (var pass = 0; pass < 2; pass++) {
-            for (var j = 0; j < ti.components.numItems; j++) {
-                var comp = ti.components[j];
-                var cn = "" + (comp.displayName || "");
-                if (pass === 0 && !/motion/i.test(cn)) continue;
-                try {
-                    for (var k = 0; k < comp.properties.numItems; k++) {
-                        if (desen.test("" + (comp.properties[k].displayName || ""))) return comp.properties[k];
-                    }
-                } catch (ep) {}
-            }
-        }
-    } catch (e) {}
-    return null;
-}
 
 /* SHORTS (dikey 1080x1920) yerlesimi.
    MOGRT'ler 1920x1080 icin tasarlandi; dikey sekansta kendi konumlarinda kalirlarsa
@@ -1174,127 +666,13 @@ function _bulOzellik(ti, desen) {
      yNorm : 0 = karenin en ustu, 1 = en alti (Premiere Position normalize calisir)
      olcek : yuzde; 0 verilirse olcege HIC dokunulmaz
    X'e dokunulmaz — yatayda ortalama MOGRT'nin kendi tasariminda. */
-function _dikeyYerlestir(ti, yNorm, olcek) {
-    var oldu = false;
-    var posProp = _bulOzellik(ti, /position/i);
-    if (posProp) {
-        try {
-            var pos = posProp.getValue();
-            if (pos && pos.length >= 2) {
-                /* Premiere bu ozelligi normalize (0-1) tutar. Piksel donen bir yapida
-                   normalize deger yazmak altyaziyi sol ust koseye atardi — o durumda
-                   dokunmuyoruz, kullanici MOGRT'yi elle konumlandirir. */
-                var normMi = (Math.abs(pos[0]) <= 2 && Math.abs(pos[1]) <= 2);
-                if (normMi) { posProp.setValue([pos[0], yNorm], true); oldu = true; }
-            }
-        } catch (e1) {}
-    }
-    if (olcek > 0) {
-        // "Scale Width"/"Scale Height" degil, tek ve uniform olani tercih et.
-        var scProp = _bulOzellik(ti, /^\s*scale\s*$/i);
-        if (!scProp) scProp = _bulOzellik(ti, /scale/i);
-        if (scProp) { try { scProp.setValue(olcek, true); oldu = true; } catch (e2) {} }
-    }
-    return oldu;
-}
 
-function _shiftUp(ti, offsetPx, seqH) {
-    if (!offsetPx || offsetPx <= 0) return false;
-    seqH = parseInt(seqH, 10);
-    if (!seqH || isNaN(seqH) || seqH < 16) seqH = 1080;   // parametre gelmezse eski davranis
-    try {
-        var posProp = _bulOzellik(ti, /position/i);
-        if (!posProp) return false;
-        var pos = posProp.getValue();
-        if (!pos || pos.length < 2) return false;
-        var x = pos[0], y = pos[1];
-        // normalize (0-1) mi yoksa piksel mi: küçük değerler normalize kabul edilir
-        var norm = (Math.abs(x) <= 2 && Math.abs(y) <= 2);
-        var dy = norm ? (offsetPx / (seqH * 1.0)) : offsetPx;
-        posProp.setValue([x, y - dy], true);
-        return true;
-    } catch (e) { return false; }
-}
 
 /*
  * İstifli yerleştirme: her cue "start|end|mogrt|lane|metin".
  * lane 0 = en üst kanal (taban konum), lane 1 = bir alt kanal + ekranda yukarı, ...
  * Böylece üst üste konuşmalar çakışmaz ve renkleriyle üst üste dizilir.
  */
-function addLanedSubtitles(cuesFilePath, yOffsetPx) {
-    var _ug = false; try { app.beginUndoGroup("Yusufwrl Altyazı"); _ug = true; } catch (eug) {}
-    try {
-        var seq = app.project.activeSequence;
-        if (!seq) return "err:Aktif sekans yok";
-        yOffsetPx = parseFloat(yOffsetPx); if (isNaN(yOffsetPx)) yOffsetPx = 130; // 0 = kayma yok (|| 130 hatasi duzeltildi)
-        var raw = _readFileUTF8(cuesFilePath);
-        var lines = raw.split(/\r?\n/);
-        var cues = [], maxLane = 0;
-        for (var i = 0; i < lines.length; i++) {
-            var ln = lines[i]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 6) continue;
-            var s = parseFloat(p[0]), e = parseFloat(p[1]), mg = p[2], lane = parseInt(p[3], 10) || 0, shift = parseFloat(p[4]) || 0, txt = p.slice(5).join("|");
-            if (isNaN(s) || !mg) continue;
-            if (lane > maxLane) maxLane = lane;
-            cues.push({ s: s, e: e, mg: mg, lane: lane, shift: shift, t: txt });
-        }
-        if (!cues.length) return "err:cue yok";
-
-        var TICKS = 254016000000;
-        var top = seq.videoTracks.numTracks - 1;
-        var seqH = _seqHeight(seq);   // istifleme kaymasi bu yukseklige gore normalize edilir
-        // SADECE basılacak zaman aralığındaki klipleri temizle (parça parça yerleştirme korunur)
-        var spanS = cues[0].s, spanE = cues[0].e;
-        for (var s8 = 1; s8 < cues.length; s8++) { if (cues[s8].s < spanS) spanS = cues[s8].s; if (cues[s8].e > spanE) spanE = cues[s8].e; }
-        /* TEMIZLIK YALNIZ KENDI ALTYAZILARIMIZA: eskiden bu dongu zaman araligindaki HER
-           klibi siliyordu. Lane hesabi kullanicinin goruntu kanalina denk geldiginde
-           (az video kanali varsa oluyor) 30 dakikalik oyun goruntusu siliniyordu.
-           Artik sadece bu calistirmada kullanilan MOGRT adlarina sahip klipler silinir. */
-        var mgAdlari = _stilBeyazListe(lines, cues);
-        var korunanKlip = 0;
-        for (var L = 0; L <= maxLane; L++) {
-            var idx = top - L;
-            /* idx 0 = en alttaki video kanali = kullanicinin GORUNTUSU. Oraya asla dokunma.
-               Panel tarafi zaten yeterli kanal yoksa yerlestirmeyi durduruyor; bu son savunma. */
-            if (idx < 1) continue;
-            try {
-                var vt = seq.videoTracks[idx];
-                for (var k = vt.clips.numItems - 1; k >= 0; k--) {
-                    try {
-                        var clx = vt.clips[k], csx = clx.start.seconds, cex = clx.end.seconds;
-                        if (!(cex > spanS + 0.05 && csx < spanE - 0.05)) continue;
-                        var nmx = "";
-                        try { nmx = String(clx.name); } catch (enx) { nmx = ""; }
-                        if (!_bizimAltyazimizMi(mgAdlari, nmx)) { korunanKlip++; continue; }   // bizim altyazimiz degil
-                        clx.remove(false, false);
-                    } catch (er) {}
-                }
-            } catch (ec) {}
-        }
-
-        var placed = 0, failed = 0, firstErr = "", needShift = 0, shifted = 0;
-        for (var c = 0; c < cues.length; c++) {
-            /* idx2'yi 0'a KELEPCELEME: 0 = kullanicinin goruntu kanali ve importMGT oraya
-               altyazi koyunca goruntuyu ezer. Yeterli kanal yoksa o altyaziyi ATLA. */
-            var idx2 = top - cues[c].lane;
-            if (idx2 < 1) { failed++; if (!firstErr) firstErr = "yeterli video kanalı yok (en az " + (cues[c].lane + 2) + " gerekiyor)"; continue; }
-            var mf = new File(cues[c].mg);
-            if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
-            var ti = null;
-            try { ti = seq.importMGT(cues[c].mg, String(Math.round(cues[c].s * TICKS)), idx2, -1); }
-            catch (e2) { failed++; if (!firstErr) firstErr = "importMGT: " + e2.toString(); continue; }
-            if (!ti) { failed++; continue; }
-            _setTextAllWays(ti, cues[c].t);
-            _setEndSec(ti, cues[c].e, TICKS);
-            if (cues[c].shift > 0) { needShift++; if (_shiftUp(ti, cues[c].shift, seqH)) shifted++; }
-            placed++;
-        }
-        if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
-        return "ok:" + placed + " eklendi" + (needShift ? (", " + shifted + "/" + needShift + " kaydırıldı") : "") + (korunanKlip ? (", " + korunanKlip + " klibe dokunulmadı") : "") + (failed ? (", " + failed + " hata") : "") + (firstErr ? (" | " + firstErr) : "");
-    } catch (e) {
-        return "err:" + e.toString();
-    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
-}
 
 /*
  * AutoCut: verilen sessiz aralıkları timeline'dan ripple-delete eder (boşluğu kapatır).

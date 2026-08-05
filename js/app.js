@@ -192,52 +192,34 @@
     return -1;
   }
 
-  // ---------- mod ve track ----------
-  var modeBtns = document.querySelectorAll("#segMode .seg-btn");
-  for (var i = 0; i < modeBtns.length; i++) modeBtns[i].addEventListener("click", function (ev) {
-    document.querySelector("#segMode .seg-btn.active").classList.remove("active");
-    this.classList.add("active"); state.mode = this.dataset.mode; lsSet("mode", state.mode);
+  /* ---------- kaynak ses ----------
+     MOD SEÇİCİ KALDIRILDI. Artık tek yol var: altyazı Premiere'in kendi altyazı kanalına
+     yazılıyor. MOGRT (renkli/animasyonlu) yolu, "Konuşmacıya Göre" ve "Renk Değiştir"
+     tamamen kalktı — bir altyazı kanalının tek stili olduğu için renk ayrımı zaten
+     mümkün değil. Kanal başına yazıya dökme değeri KAYBOLMADI: "Herkes" kaynağı olarak
+     duruyor (her kanal ayrı dökülür, sonuç tek listede birleşir). */
+  function modGorunumUygula() {
+    // Kanal listesi yalnız "Herkes" kaynağında anlamlı.
+    var kb = $("kanalBox"); if (kb) kb.hidden = (state.track !== "herkes");
+    $("result").hidden = !allCues().length;
+  }
+  var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
+  for (var j = 0; j < trackBtns.length; j++) trackBtns[j].addEventListener("click", function (ev) {
+    document.querySelector("#segTrack .seg-btn.active").classList.remove("active");
+    this.classList.add("active"); state.track = this.dataset.track; lsSet("track", state.track);
     modGorunumUygula();
-    /* "Konuşmacıya Göre"ye İLK KEZ geçildiğinde kanalları kendiliğinden tara — kullanıcı
-       "Kanalları Tara" adımını atlayıp doğrudan "Altyazı Oluştur"a basınca hata alıyordu.
-       Yalnız GERÇEK tıklamada (ev.isTrusted): restoreSegs() açılışta bu düğmeyi programla
-       tıklıyor ve o sırada başlayan tarama, geri yüklenen oturumla yarışıyordu. */
-    if (ev && ev.isTrusted && state.mode === "speaker" && CEP && !state.running && !state.kanalTarandi) {
-      // scanChannels async: hata FIRLATMAZ, promise'i reddeder — düz try/catch onu yakalayamaz.
+    /* "Herkes"e İLK KEZ geçildiğinde kanalları kendiliğinden tara — kullanıcı "Kanalları
+       Tara" adımını atlayıp doğrudan "Altyazı Oluştur"a basınca hata alıyordu.
+       Yalnız GERÇEK tıklamada: restoreSegs() açılışta bu düğmeyi programla tıklıyor ve
+       o sırada başlayan tarama, geri yüklenen oturumla yarışıyordu. */
+    if (ev && ev.isTrusted && state.track === "herkes" && CEP && !state.running && !state.kanalTarandi) {
+      // scanChannels async: hata FIRLATMAZ, promise'i reddeder — düz try/catch yakalayamaz.
       try { var pTara = scanChannels(); if (pTara && pTara["catch"]) pTara["catch"](function () {}); } catch (eTara) {}
     }
   });
-  // Sekmelerin görünürlüğü tek yerden: üretim bitince (btnRun finally) de yeniden uygulanır.
-  function modGorunumUygula() {
-    var isRecolor = (state.mode === "recolor");
-    /* İlerleme çubuğu ve "✕ İptal" butonu #genArea'nın İÇİNDE. Renk Değiştir sekmesine
-       geçince tamamen kayboluyordu; kullanıcı iş durdu sanıp Premiere'i kapatıyor ve
-       20 dakikalık üretimi öldürüyordu. İş sürerken üretim alanı görünür kalır. */
-    $("genArea").hidden = isRecolor && !state.running;
-    $("panelRecolor").hidden = !isRecolor;
-    $("panelSingle").hidden = (state.mode !== "single");
-    $("panelSpeaker").hidden = (state.mode !== "speaker");
-    if (isRecolor) refreshRecolorBtns();
-    if (!isRecolor || state.running) {
-      // Cue'ları üreten moda dönerken transkript/sonuç kartını koru (ör. renk sekmesine gidip
-      // gelince kaybolmasın); farklı üretim moduna geçişte gizle.
-      // "channels" genMode'u "Konuşmacıya Göre" sekmesinde üretiliyor; sekme adıyla birebir
-      // eşleşmediği için sonuç kartı ve "Timeline'a Ekle" butonu haksız yere gizleniyordu.
-      var uretimSekmesi = (state.genMode === "channels") ? "speaker" : state.genMode;
-      var hasCur = allCues().length;
-      var keep = (uretimSekmesi === state.mode) && hasCur;
-      $("result").hidden = !keep;
-      $("speakerMap").hidden = !(keep && state.mode === "speaker" && state.speakers.length);
-    }
-  }
-  var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
-  for (var j = 0; j < trackBtns.length; j++) trackBtns[j].addEventListener("click", function () {
-    document.querySelector("#segTrack .seg-btn.active").classList.remove("active");
-    this.classList.add("active"); state.track = this.dataset.track; lsSet("track", state.track);
-  });
   // Kaydedilmiş mod/track'i geri yükle (buton tıklaması ile — panelleri de senkronlar)
   function restoreSegs() {
-    var sm = lsGet("mode", null); if (sm) { var bm = document.querySelector('#segMode .seg-btn[data-mode="' + sm + '"]'); if (bm) bm.click(); }
+    // mod seçici kaldırıldı; yalnız kaynak ses hatırlanır
     var st = lsGet("track", null); if (st) { var bt = document.querySelector('#segTrack .seg-btn[data-track="' + st + '"]'); if (bt) bt.click(); }
   }
 
@@ -264,13 +246,6 @@
   $("backBtn").addEventListener("click", function () { goView("home"); });
 
   // ---------- stiller ----------
-  function fillStyleOptions(sel, includeCaption) {
-    sel.innerHTML = "";
-    // "caption" kelimesi kullanıcıya hiçbir şey anlatmıyordu; bu seçenek MOGRT/renk KULLANMAZ,
-    // altyazıyı Premiere'in kendi altyazı (caption) kanalına döker. Etiket bunu yazsın.
-    if (includeCaption) { var o = document.createElement("option"); o.value = ""; o.textContent = "Renksiz düz altyazı (Premiere altyazı kanalı)"; sel.appendChild(o); }
-    state.styles.forEach(function (s) { var op = document.createElement("option"); op.value = s.path; op.textContent = s.name; sel.appendChild(op); });
-  }
   function preselect(sel, nameLike) {
     for (var i = 0; i < sel.options.length; i++) if (trLower(sel.options[i].textContent).indexOf(trLower(nameLike)) >= 0) { sel.selectedIndex = i; return true; }
     return false;
@@ -442,22 +417,8 @@
   var SHORTS_MAX_KARAKTER = 16;
 
   function shortsAcik() { var c = $("chkShorts"); return !!(c && c.checked); }
-  function shortsY() {
-    var r = $("rngShortsY"); var v = parseInt(r && r.value, 10);
-    if (isNaN(v) || v < 0 || v > 100) v = 58;
-    return v / 100;
-  }
-  function shortsOlcek() {
-    var r = $("rngShortsScale"); var v = parseInt(r && r.value, 10);
-    if (isNaN(v) || v < 10 || v > 300) v = 100;
-    return v;
-  }
   /* Cue dosyasının başına giden satır. Shorts kapalıysa BOŞ döner ve host konuma
      hiç dokunmaz — yatay videolarda eski davranış birebir sürer. */
-  function shortsBaslikSatiri() {
-    if (!shortsAcik()) return "";
-    return "#SHORTS|" + shortsY().toFixed(4) + "|" + shortsOlcek() + "\n";
-  }
 
   /* Sekans gerçekten dikey mi? Kutu işaretli ama sekans yataysa (ya da tersi) altyazı
      yanlış yere gider. Engellemiyoruz — kullanıcı bilerek yapıyor olabilir — ama söylüyoruz. */
@@ -481,46 +442,25 @@
   /* Shorts açıkken "Konuşmacıya Göre" kapatılır: dikey karede üst üste katmanlar sığmıyor
      ve Shorts konumlandırması yalnız Tek Stil yolunda (addMultiStyleSubtitles) uygulanıyor.
      Kullanıcı o moddayken kutuyu işaretlerse Tek Stil'e geçirilir. */
-  function shortsModUygula() {
-    var acik = shortsAcik();
-    var spBtn = document.querySelector('#segMode .seg-btn[data-mode="speaker"]');
-    if (spBtn) {
-      spBtn.disabled = acik;
-      spBtn.style.opacity = acik ? ".45" : "";
-      spBtn.style.cursor = acik ? "not-allowed" : "";
-      spBtn.title = acik ? "Shorts açıkken kullanılamaz — dikey videoda Tek Stil kullanılır." : "";
-    }
-    if (acik && state.mode === "speaker") {
-      var tek = document.querySelector('#segMode .seg-btn[data-mode="single"]');
-      if (tek) tek.click();
-    }
-  }
 
   function wireShorts() {
     var c = $("chkShorts"); if (!c) return;
-    var ay = $("shortsAyar"), ry = $("rngShortsY"), ly = $("lblShortsY"),
-        rs = $("rngShortsScale"), ls = $("lblShortsScale");
-    function gorunum() {
-      if (ay) ay.hidden = !c.checked;
-      if (ly && ry) ly.textContent = "%" + ry.value;
-      if (ls && rs) ls.textContent = "%" + rs.value;
-    }
+    var ay = $("shortsAyar");
+    /* Shorts artık YALNIZCA kelime bölmesini değiştiriyor (uzunluğuna göre 1, en fazla 2).
+       Konum/boyut kaydırıcıları KALDIRILDI: altyazı Premiere'in kendi altyazı kanalına
+       gidiyor ve konumu o kanalın stili belirliyor — panel oraya karışamaz. */
+    function gorunum() { if (ay) ay.hidden = !c.checked; }
     function sekansKontrolSessiz() {
       // async: hata FIRLATMAZ, promise'i reddeder — düz try/catch yakalayamaz.
-      try { var p = shortsSekansKontrol(); if (p && p["catch"]) p["catch"](function () {}); } catch (e) {}
+      try { var pk = shortsSekansKontrol(); if (pk && pk["catch"]) pk["catch"](function () {}); } catch (e) {}
     }
     c.checked = lsGet("shorts", "0") === "1";
-    if (ry) ry.value = lsGet("shortsY", "58");
-    if (rs) rs.value = lsGet("shortsScale", "100");
-    gorunum(); shortsModUygula();
+    gorunum();
     if (c.checked && CEP) sekansKontrolSessiz();
-
     c.addEventListener("change", function () {
       lsSet("shorts", c.checked ? "1" : "0");
-      gorunum(); shortsModUygula(); sekansKontrolSessiz();
+      gorunum(); sekansKontrolSessiz();
     });
-    if (ry) ry.addEventListener("input", function () { lsSet("shortsY", ry.value); gorunum(); });
-    if (rs) rs.addEventListener("input", function () { lsSet("shortsScale", rs.value); gorunum(); });
   }
 
   function trOpts(extra) {
@@ -536,30 +476,6 @@
     return o;
   }
 
-  function renderSpeakerMap() {
-    var box = $("speakerRows"); box.innerHTML = "";
-    state.speakers.forEach(function (sp, i) {
-      var row = document.createElement("div"); row.className = "sp-row";
-      var dot = document.createElement("div"); dot.className = "sp-dot"; dot.style.background = speakerColor(i); row.appendChild(dot);
-      var info = document.createElement("div"); info.className = "sp-info";
-      var nm = document.createElement("div"); nm.className = "sp-name"; nm.textContent = "Konuşmacı " + (i + 1);
-      if (sp.start != null) {
-        var jt = document.createElement("span"); jt.className = "sp-jump";
-        jt.textContent = " ▶ " + fmtShort(sp.start);
-        jt.title = "İlk konuştuğu ana git (Premiere)";
-        (function (sec) { jt.addEventListener("click", function () { evalES("seekTo(" + sec + ")"); }); })(sp.start);
-        nm.appendChild(jt);
-      }
-      var sm = document.createElement("div"); sm.className = "sp-sample"; sm.textContent = "\"" + (sp.sample || "") + "\"";
-      info.appendChild(nm); info.appendChild(sm); row.appendChild(info);
-      var wrap = document.createElement("div"); wrap.className = "select sm";
-      var sel = document.createElement("select"); fillStyleOptions(sel, false);
-      if (!preselect(sel, "moni")) preselect(sel, "");
-      sp.styleSel = sel; wrap.appendChild(sel); row.appendChild(wrap);
-      box.appendChild(row);
-    });
-    $("speakerMap").hidden = state.speakers.length === 0;
-  }
 
   // ---------- klip okuma ----------
   async function getClips(trackIdx) {
@@ -722,7 +638,7 @@
     var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); }, trOpts());
     offsetCues(cues, prep.offset);
     cleanupFiles(prep.cleanup);
-    state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
+    state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = [];
     renderTranscript(cues, null);
     progressDone("Bitti — " + cues.length + " altyazı hazır");
     await saveSessionAuto();
@@ -815,15 +731,11 @@
         (onceki && onceki.cues.length ? (" · " + onceki.cues.length + " altyazı hazır") : "");
       info.appendChild(adInp); info.appendChild(sm); row.appendChild(info);
 
-      var wrap = document.createElement("div"); wrap.className = "select sm";
-      var sel = document.createElement("select"); fillStyleOptions(sel, false);
-      if (sel.options.length) sel.selectedIndex = Math.min(i + 1, sel.options.length - 1);   // farklı renk öner
-      var secilecek = t.style || (onceki && onceki.style) || "";
-      if (secilecek) { for (var q = 0; q < sel.options.length; q++) if (sel.options[q].value === secilecek) { sel.value = secilecek; break; } }
-      wrap.appendChild(sel); row.appendChild(wrap);
+      // Stil seçici KALDIRILDI: altyazı Premiere'in kendi altyazı kanalına gidiyor ve
+      // o kanalın tek stili var — kanal başına renk vermek mümkün değil.
       box.appendChild(row);
-      state.channels.push({ idx: t.idx, clips: t.clips, styleSel: sel, aktifChk: chk, adInput: adInp,
-                            renk: renk, cues: t.cues || (onceki ? onceki.cues : []) });
+      state.channels.push({ idx: t.idx, clips: t.clips, aktifChk: chk, adInput: adInp,
+                            cues: t.cues || (onceki ? onceki.cues : []) });
     });
     /* Video kanalı bütçesi: en alt kanal senin görüntün, üstündeki bir kanal A1 altyazısı,
        bir kanal da arkadaşlar için gerekli → en az 3. Üst üste konuşma varsa her ek katman
@@ -864,7 +776,7 @@
     if (!islenecek.length) throw new Error("Hiç kanal seçilmedi. Arkadaşların bulunduğu kanalları işaretle.");
 
     state.genMode = "channels";
-    state.singleCues = []; state.a2Cues = []; state.speakers = []; $("speakerMap").hidden = true;
+    state.singleCues = []; state.a2Cues = []; state.speakers = [];
     // Önceki üretimin cue'larını temizle — döngü ortasında hata olursa yeni A1 ile eski
     // kanal altyazıları karışık kalıyordu. Yalnız İŞLENECEK kanallar temizlenir: işareti
     // kaldırılmış kanalın eski altyazısı boşuna silinmesin.
@@ -987,18 +899,18 @@
     if (state.genMode === "channels" && (o.channels || []).length) {
       renderChannelMap(o.channels, 0);   // 0 = bilinmiyor; sahte değer uyarıyı kalıcı bastırıyordu
       state.kanalTarandi = true;         // liste dolu geldi; "önce tara" demeye gerek yok
-    } else if (state.genMode === "speaker" && (o.speakers || []).length) {
-      state.speakers = o.speakers.map(function (s) { return { id: s.id, sample: s.sample, start: s.start }; });
-      renderSpeakerMap();
-      for (var i = 0; i < state.speakers.length; i++) {
-        var st = o.speakers[i] && o.speakers[i].style, sel = state.speakers[i].styleSel;
-        if (st && sel) { for (var q = 0; q < sel.options.length; q++) if (sel.options[q].value === st) { sel.value = st; break; } }
-      }
+    } else if (state.genMode === "speaker") {
+      /* ESKİ "Konuşmacıya Göre" (diarizasyon) oturumu. O mod kaldırıldı; cue'lar A1+A2
+         olarak tek listede birleştirilir — metin ve zamanlar korunur, yalnız konuşmacı
+         ayrımı (renk) düşer. Bu oturumu tamamen reddetmek 30 dakikalık işi çöpe atardı. */
+      state.singleCues = (o.a1Cues || []).concat(o.a2Cues || []);
+      state.singleCues.sort(function (a, b) { return a.start - b.start; });
+      state.a1Cues = []; state.a2Cues = []; state.speakers = [];
+      state.genMode = "single";
+      logLine("Eski konuşmacı ayrımlı oturum tek listeye birleştirildi (" + state.singleCues.length + " altyazı).");
     }
     redrawTranscript();
-    var hedef = (state.genMode === "single") ? "single" : "speaker";
-    var btn = document.querySelector('#segMode .seg-btn[data-mode="' + hedef + '"]');
-    if (btn && state.mode !== hedef) btn.click();
+    modGorunumUygula();
     progressDone("Kaydedilmiş oturum geri yüklendi — " + allCues().length + " altyazı");
   }
   /* Oturum dosyasını okur; ana dosya bozuksa .bak yedeğine düşer.
@@ -1055,23 +967,7 @@
      kliplerin adı farklıdır, beyaz listeye girmez ve silinmez — ekranda ÇİFT altyazı olur.
      Bu yüzden panelin tanıdığı BÜTÜN stil adları gönderilir. Kullanıcının kendi
      grafikleri (stil klasöründe olmayan) listede olmadığı için asla silinmez. */
-  function stilAdlariSatiri() {
-    var adlar = [], gorulen = {};
-    (state.styles || []).forEach(function (s) {
-      var n = String(s.name || "").trim();
-      if (n && !gorulen[n.toLowerCase()]) { gorulen[n.toLowerCase()] = 1; adlar.push(n.replace(/\|/g, " ")); }
-    });
-    return adlar.length ? ("#STILLER|" + adlar.join("|") + "\n") : "";
-  }
 
-  function writeCuesMulti(lines) {
-    var body = stilAdlariSatiri() + shortsBaslikSatiri() + lines.map(function (l) {
-      return l.start.toFixed(3) + "|" + l.end.toFixed(3) + "|" + l.mogrt + "|" + String(l.text).replace(/[\r\n|]/g, " ");
-    }).join("\n");
-    var file = path.join(cfg.workDir, "mcues_" + Date.now() + "_" + (fileCounter++) + ".txt");
-    fs.writeFileSync(file, body, "utf8");
-    return file;
-  }
   function showResult(r) {
     var ham = String(r);
     logLine("Premiere sonucu: " + ham);           // ham metin her zaman Ayrıntılar'da kalsın
@@ -1100,202 +996,32 @@
         (vt - 1) - enUstLane >= 1   =>   vt >= enUstLane + 2
      Sayı okunamazsa yerleştirme YAPILMAZ: yanlış tahminin bedeli, silinen görüntü.
      Dönüş: kanal sayısı (yeterliyse) ya da 0 (yetersiz — kullanıcı zaten uyarıldı). */
-  async function videoKanaliYeterMi(enUstLane, modAdi) {
-    var vt = 0;
-    try { vt = (JSON.parse(await evalES("getAudioTracksJSON()")) || {}).videoTracks || 0; } catch (e) { vt = 0; }
-    if (!vt) {
-      uiAlert("Sekansın video kanalı sayısı okunamadı; güvenli olsun diye hiçbir şey eklenmedi.\n\n" +
-              "Premiere'de sekansın açık olduğundan emin olup tekrar dene.", "Altyazı");
-      return 0;
-    }
-    var gereken = enUstLane + 2;
-    if (vt < gereken) {
-      uiAlert(modAdi + " için en az " + gereken + " video kanalı gerekiyor, sekansta " + vt + " tane var.\n\n" +
-              "Premiere'de zaman çizelgesinde bir video kanalının başlığına sağ tıkla → “Tek Kanal Ekle” " +
-              "ile " + (gereken - vt) + " tane ekle, sonra tekrar dene.\n\n" +
-              "(En alttaki kanal senin görüntün — altyazı oraya konursa görüntü silinir, o yüzden durduruldu.)",
-              "Video kanalı yetersiz");
-      return 0;
-    }
-    return vt;
-  }
 
-  async function placeSingle(range) {
-    var stylePath = $("selStyleSingle").value;
-    if (stylePath) state.singleStyle = stylePath;   // son gerçek stili hatırla (renk değiştirmede komşu cue'lar için yedek)
-    var cues = range ? state.singleCues.filter(function (c) { return c.end > range.start && c.start < range.end; }) : state.singleCues;
+  /* ---------- TEK YERLEŞTİRME YOLU: Premiere altyazı kanalı ----------
+     Eskiden üç yol vardı (placeSingle MOGRT dalı, placeSpeaker, placeChannels) ve her
+     altyazı ayrı bir MOGRT klibi oluyordu: 20 dakikalık videoda ~1000 klip, Premiere
+     kasıyordu. Artık hepsi TEK altyazı kanalına yazılıyor — video kanalı da tüketmiyor,
+     bu yüzden katman bütçesi / görüntü silme sınıfı hataların tamamı ortadan kalktı.
+     Görünüm (yazı tipi, renk, kontur, konum) Premiere'de altyazı stilinden ayarlanır. */
+  async function placeCaptions(range) {
+    var cues = allCues();
+    if (range) cues = cues.filter(function (c) { return c.end > range.start && c.start < range.end; });
     if (!cues.length) { uiAlert("Önce altyazı oluştur."); return null; }
-    // Herhangi bir cue renk override taşıyorsa (renk değiştirme), "Düz altyazı" seçili olsa bile
-    // MOGRT yolunu kullan — override yok sayılıp caption track dökülmesin.
-    var hasOv = false; for (var oi = 0; oi < cues.length; oi++) { if (cues[oi]._ovMogrt) { hasOv = true; break; } }
-    if (stylePath || hasOv) {
-      // MOGRT altyazı bir video kanalı tüketir (lane 0) — en az 2 kanal gerekir.
-      if (!(await videoKanaliYeterMi(0, "Altyazı"))) return null;
-      var fb = stylePath || state.singleStyle || (state.styles[0] && state.styles[0].path) || "";   // override'sız komşulara stil
-      var file = writeCuesMulti(cues.map(function (c) { return { start: c.start, end: c.end, mogrt: (c._ovMogrt || fb), text: c.text }; }));
-      return await evalES('addMultiStyleSubtitles("' + esPath(file) + '",-1)');
-    }
+    // Zaman sırası ŞART: "Herkes" kaynağında kanallar ayrı ayrı dökülüyor, cue'lar karışık gelir.
+    cues = cues.slice().sort(function (a, b) { return a.start - b.start; });
     var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
     fs.writeFileSync(srtFile, pipeline.cuesToSrt(cues), "utf8");
     return await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")');
   }
-  async function placeSpeaker(range) {
-    var a1Style = $("selStyleA1").value;
-    var spStyle = {}; state.speakers.forEach(function (sp) { spStyle[sp.id] = sp.styleSel.value; });
-    var _gap = 130;   // istifleme sabit: A1 ile çakışan A2 altyazısı 130px yukarı kayar
+  function placeCurrent(range) { return placeCaptions(range); }
 
-    // A1 lane 0 + A2 lane 1 => en üst lane 1 => en az 3 video kanalı gerekir.
-    if (!(await videoKanaliYeterMi(1, "Konuşmacıya göre altyazı"))) return null;
-
-    // Yerleştirilecek A1 aralıkları — A2'nin A1 ile üst üste GELİP GELMEDİĞİNİ bulmak için.
-    var a1Iv = [];
-    state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
-    function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
-
-    // A1 = üst track (lane 0), kayma 0. A2 = alt track (lane 1), istifleme moduna göre kayar.
-    var kayma = stackShifter(overlapsA1, _gap);
-    var combined = [];
-    state.a1Cues.forEach(function (c) { var mg = c._ovMogrt || a1Style; if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 }); });
-    // İkinci koruma katmanı: stili bulunamayan A2 satırı sessizce DÜŞMESİN — ilk atanmış stile düşer.
-    var yedekSp = "";
-    for (var sk in spStyle) { if (spStyle.hasOwnProperty(sk) && spStyle[sk]) { yedekSp = spStyle[sk]; break; } }
-    if (!yedekSp) yedekSp = a1Style || state.singleStyle || (state.styles[0] && state.styles[0].path) || "";
-    var yedekli = 0;
-    state.a2Cues.forEach(function (c) {
-      var mg = c._ovMogrt || spStyle[c.speaker];
-      if (!mg && yedekSp) { mg = yedekSp; yedekli++; }
-      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 1, shift: kayma(c.start, c.end) });
-    });
-    if (yedekli) logLine("UYARI: " + yedekli + " A2 satırına stil atanmamıştı, yedek stille eklendi.");
-    if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
-    if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
-
-    combined.sort(function (a, b) { return a.start - b.start; });
-    var body = stilAdlariSatiri() + combined.map(function (c) {
-      return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + c.shift + "|" + String(c.text).replace(/[\r\n|]/g, " ");
-    }).join("\n");
-    var file = path.join(cfg.workDir, "laned_" + Date.now() + ".txt");
-    fs.writeFileSync(file, body, "utf8");
-    logLine(combined.length + " altyazı · A1 üst / A2 alt (çakışanlar istiflenir)");
-    return await evalES('addLanedSubtitles("' + esPath(file) + '")');
-  }
-
-  /* Ayrı kanal modunda yerleştirme. A1 = katman 0 (taban). Arkadaşlar katman 1'den başlar;
-     AYNI ANDA konuşan arkadaşlar birbirinin üstüne binmesin diye çakışanlara ayrı katman
-     verilir (greedy). Çakışma yoksa hepsi tek katmanda kalır — gereksiz video kanalı tüketilmez. */
-  async function placeChannels(range) {
-    var a1Style = $("selStyleA1").value, _gap = 130;
-    var a1Iv = [];
-    state.a1Cues.forEach(function (c) { if (c._ovMogrt || a1Style) a1Iv.push([c.start, c.end]); });
-    function overlapsA1(s, e) { for (var i = 0; i < a1Iv.length; i++) { if (a1Iv[i][0] < e && a1Iv[i][1] > s) return true; } return false; }
-
-    var arkadas = [];
-    aktifKanallar().forEach(function (ch) {
-      var st = ch.styleSel ? ch.styleSel.value : "";
-      ch.cues.forEach(function (c) {
-        var mg = c._ovMogrt || st;
-        if (mg) arkadas.push({ start: c.start, end: c.end, mogrt: mg, text: c.text });
-      });
-    });
-    arkadas.sort(function (a, b) { return a.start - b.start; });
-
-    // Çakışanlara ayrı katman (greedy interval coloring)
-    var katmanSon = [];
-    arkadas.forEach(function (it) {
-      var L = 0;
-      while (L < katmanSon.length && katmanSon[L] > it.start + 0.001) L++;
-      katmanSon[L] = it.end; it.kat = L;
-    });
-
-    /* KATMAN BÜTÇESİ — her katman bir video kanalı tüketir. host tarafı taşan lane'i 0'a
-       kelepçeliyor (addLanedSubtitles: idx2 = top - lane, idx2<0 ise 0) ve o kanaldaki
-       zaman aralığına denk gelen TÜM klipleri siliyor — yani senin GÖRÜNTÜN silinebilir.
-       Bu yüzden katman sayısı sekanstaki video kanalıyla sınırlanır: fazla çakışanlar aynı
-       katmanda kalır (ekranda üst üste binebilir ama hiçbir şey silinmez). */
-    var maxKat = 0;
-    for (var mk = 0; mk < arkadas.length; mk++) if (arkadas[mk].kat > maxKat) maxKat = arkadas[mk].kat;
-    /* En az lane 1 kullanılacak (arkadaş lane = 1 + kat) => en az 3 video kanalı şart.
-       Yetmezse ya da sayı okunamazsa HİÇ yerleştirme yapma: eskiden bu durumda kelepçe
-       hesabı (vt-3) negatife düşüp 0 oluyor, arkadaşlar yine lane 1'e gidiyor ve host
-       idx 0'a — yani kullanıcının görüntü kanalına — basıp oradaki klipleri siliyordu. */
-    var vt = await videoKanaliYeterMi(1, "Konuşmacıya Göre modu");
-    if (!vt) return null;
-    var oncekiMaxKat = maxKat;   // kaç kanal gerektiğini kullanıcıya söylemek için
-    /* KELEPÇELEME YERİNE ATLAMA.
-       Eskiden sığmayan altyazının katmanı `izin`e ÇEKİLİYORDU. Ama aynı katman = aynı video
-       kanalı, ve bir video kanalında aynı anda iki klip duramaz: importMGT komşu klibi
-       EZİYOR. Yani "üst üste gelebilir" diyen uyarı yanlıştı — altyazılar üst üste gelmiyor,
-       BİRBİRİNİ SİLİYORDU. Ölçüldü: 4 video kanallı sekansta 60 sn'lik üç kişilik sohbette
-       135 altyazının 76'sı kırpıldı, 1'i tamamen kayboldu; host yine "ok:135 eklendi, 0 hata"
-       dedi ve panel yeşil ✓ gösterdi.
-       Artık sığmayan cue YERLEŞTİRİLMİYOR ve kullanıcıya AÇIKÇA söyleniyor (log değil uiAlert:
-       #log varsayılan olarak kapalı, kimse görmüyordu). */
-    var izin = vt - 3;   // arkadaş lane = 1+kat, idx = (vt-1)-(1+kat) >= 1  =>  kat <= vt-3
-    if (maxKat > izin) {
-      var oncekiSayi = arkadas.length;
-      arkadas = arkadas.filter(function (it) { return it.kat <= izin; });
-      var dusen = oncekiSayi - arkadas.length;
-      maxKat = izin;
-      var mesaj = dusen + " altyazı eklenemedi: sekansta " + vt + " video kanalı var, " +
-        (3 + oncekiMaxKat) + " gerekiyor.\n\n" +
-        "Bu altyazılar başkalarıyla aynı anda konuşulan yerlerde; her biri ayrı bir video " +
-        "kanalı istiyor. Premiere'de " + ((3 + oncekiMaxKat) - vt) + " video kanalı ekleyip " +
-        "tekrar “Timeline'a Ekle” dersen hepsi gelir.";
-      logLine("UYARI: " + mesaj.replace(/\n+/g, " "));
-      uiAlert(mesaj, "Video kanalı yetersiz");
-    }
-    var kayma = stackShifter(overlapsA1, _gap);
-    var combined = [];
-    state.a1Cues.forEach(function (c) {
-      var mg = c._ovMogrt || a1Style;
-      if (mg) combined.push({ start: c.start, end: c.end, mogrt: mg, text: c.text, lane: 0, shift: 0 });
-    });
-    arkadas.forEach(function (it) {
-      combined.push({ start: it.start, end: it.end, mogrt: it.mogrt, text: it.text,
-        lane: 1 + it.kat, shift: kayma(it.start, it.end) + it.kat * _gap });
-    });
-    if (range) combined = combined.filter(function (c) { return c.end > range.start && c.start < range.end; });
-    if (!combined.length) { uiAlert("Stil atanmadı."); return null; }
-    combined.sort(function (a, b) { return a.start - b.start; });
-
-    var body = stilAdlariSatiri() + combined.map(function (c) {
-      return c.start.toFixed(3) + "|" + c.end.toFixed(3) + "|" + c.mogrt + "|" + c.lane + "|" + c.shift + "|" + String(c.text).replace(/[\r\n|]/g, " ");
-    }).join("\n");
-    var file = path.join(cfg.workDir, "chan_" + Date.now() + ".txt");
-    fs.writeFileSync(file, body, "utf8");
-    logLine(combined.length + " altyazı · " + (arkadas.length ? (2 + maxKat) : 1) + " katman (üst üste konuşma: " + (maxKat ? "var" : "yok") + ")");
-    return await evalES('addLanedSubtitles("' + esPath(file) + '")');
-  }
-
-  /* İSTİFLEME — arkadaşın altyazısı ne zaman yukarı kaysın?
-     Bir denemede kayma kararı "konuşma serisi" başına verilmişti (zıplamayı azaltmak için);
-     ama seride TEK bir çakışma tüm seriyi yukarıda tutuyordu ve sen konuşmadığın hâlde altyazı
-     gereksiz yere yukarıda kalıyordu. Ölçüm: 0.6 sn'lik yayılma bile 600 satırda 104 gereksiz
-     kayma üretiyor. Bu yüzden varsayılan davranış GERÇEK çakışma — yayılma yok.
-       "overlap" : sadece ikiniz aynı anda konuşurken kayar (varsayılan)
-       "off"     : hiç kaymaz (çakışırsa üst üste binebilir)
-       "always"  : arkadaşlar hep yukarıda (tutarlı konum, hiç zıplama yok) */
-  function stackShifter(overlapFn, gap) {
-    var mod = String(($("selIstif") && $("selIstif").value) || "overlap");
-    if (mod === "off") return function () { return 0; };
-    if (mod === "always") return function () { return gap; };
-    return function (s, e) { return overlapFn(s, e) ? gap : 0; };
-  }
-
-  // Aktif üretim moduna göre doğru yerleştiriciyi seçer
-  function placeCurrent(range) {
-    if (state.genMode === "channels") return placeChannels(range);
-    if (state.genMode === "speaker") return placeSpeaker(range);
-    return placeSingle(range);
-  }
-  // Aktif moddaki tüm cue'lar (renk değiştirme ve dışa aktarma için tek liste)
+  // Ekrandaki tüm cue'lar tek liste (yerleştirme ve dışa aktarma için).
   function allCues() {
     if (state.genMode === "channels") {
       var out = state.a1Cues.slice();
       aktifKanallar().forEach(function (ch) { out = out.concat(ch.cues); });
       return out;
     }
-    if (state.genMode === "speaker") return state.a1Cues.concat(state.a2Cues);
     return state.singleCues;
   }
 
@@ -1308,14 +1034,16 @@
     if (state.acRunning) { uiAlert("AutoCut analizi sürüyor. Bitmesini bekle ya da onu iptal et.", "Altyazı"); return; }
     if (snk.calisiyor) { uiAlert("Senkron işlemi sürüyor. Bitmesini bekle ya da onu iptal et.", "Altyazı"); return; }
     state.running = true; state.cancelled = false;
-    var btn = this; btn.disabled = true; $("result").hidden = true; $("speakerMap").hidden = true;
+    var btn = this; btn.disabled = true; $("result").hidden = true;
     // Üretim sürerken kanal listesi yenilenemez (biten kanalların altyazıları kaybolur)
     var kt = $("btnKanalTara"); if (kt) kt.disabled = true;
     $("log").textContent = ""; progressReset("Başlıyor…");
     $("btnCancel").hidden = false;
     try {
       if (!CEP) await runMock();
-      else if (state.mode === "speaker") await runChannels();
+      // Kaynak "Herkes" ise her kanal ayrı yazıya dökülür (üst üste konuşmalar karışmaz),
+      // sonuç tek altyazı kanalında birleşir. Diğer kaynaklarda tek geçiş.
+      else if (state.track === "herkes") await runChannels();
       else await runSingle();
     }
     catch (e) {
@@ -1325,15 +1053,10 @@
     finally {
       state.running = false; btn.disabled = false; $("btnCancel").hidden = true;
       if (kt) kt.disabled = false;
-      var sonEtiket = $("progressLabel").textContent, sonRenk = $("progressLabel").style.color;
       modGorunumUygula();
       /* Renk Değiştir sekmesindeyken iş bittiyse üretim alanı yeniden gizleniyor; son durumu
          bu sekmenin kendi durum satırına taşı — yoksa "Bitti" mesajı hiç görünmeden yok olur.
          (modGorunumUygula -> refreshRecolorBtns bu satırı gizlediği için SONRA yazılmalı.) */
-      if (state.mode === "recolor") {
-        var rs = $("recolorStatus");
-        if (rs) { rs.hidden = false; rs.textContent = sonEtiket; rs.style.color = sonRenk || ""; }
-      }
     }
   });
   // ---------- RENK DEĞİŞTİR (3. sekme) ----------
@@ -1349,174 +1072,13 @@
     "sarı": "#f9ca24", "sari": "#f9ca24", "yeşil": "#35c26a", "yesil": "#35c26a", "mor": "#b06dfc",
     "pembe": "#ff7ac2", "turuncu": "#ff8c42", "lacivert": "#3b5bdb", "gri": "#9aa0b5", "altın": "#e0a63a",
     "altin": "#e0a63a", "turkuaz": "#3fc6c6", "yeşilimsi": "#9ac44b" };
-  function styleColor(name, i) {
-    var n = trLower(name);
-    for (var s in _STYLE_COLORS) { if (_STYLE_COLORS.hasOwnProperty(s) && n.indexOf(s) >= 0) return _STYLE_COLORS[s]; }
-    for (var k in _COLORWORDS) { if (_COLORWORDS.hasOwnProperty(k) && n.indexOf(k) >= 0) return _COLORWORDS[k]; }
-    return speakerColor(i);
-  }
-  function setRecolorStatus(r) {
-    var el = $("recolorStatus"); if (!el) return; el.hidden = false;
-    var s = String(r);
-    logLine("Premiere sonucu: " + s);              // ham metin Ayrıntılar'da kalsın
-    var msg = hostMesaj(s);                        // ham ExtendScript hatası kullanıcıya çıkmasın
-    var hm = s.match(/(\d+)\s*hata/);              // kısmi başarı da "ok:" ile başlıyor
-    if (s.indexOf("ok:") === 0 && !(hm && parseInt(hm[1], 10))) {
-      el.textContent = "✓ " + s.replace(/^ok:/, ""); el.style.color = "var(--good)";
-    } else if (s.indexOf("ok:") === 0) {
-      el.textContent = "⚠ " + s.replace(/^ok:/, ""); el.style.color = "var(--warn)";
-    } else { el.textContent = "⚠ " + msg; el.style.color = "var(--warn)"; }
-  }
   /* "Kaydedilmiş listeyi yükle" butonu JS ile eklenir (HTML'de yok). Liste boşken diskteki
      oturumu tek tıkla geri getirir — kullanıcı geri yükleme teklifini kaçırdıysa 30 dakikalık
      üretimi boşuna tekrarlamasın. */
-  async function recolorOturumYukle() {
-    if (!CEP || !cfg) return;
-    var o = null;
-    try { if (!_oturum.name) { var d = await getClips(0); _oturum.name = d.sequenceName; _oturum.end = clipsEnd(d.clips); } } catch (e) {}
-    o = _oturum.name ? oturumOku(_oturum.name) : null;
-    if (!o) { uiAlert("Bu sekans için kaydedilmiş liste bulunamadı.", "Renk değiştir"); updateRecolorHint(); return; }
-    var oncekiMod = state.mode;
-    restoreSession(o);
-    // restoreSession üretim sekmesine geçiyor; kullanıcı Renk Değiştir'deyse orada kalsın
-    if (oncekiMod === "recolor") {
-      var b = document.querySelector('#segMode .seg-btn[data-mode="recolor"]');
-      if (b) b.click();
-      /* Geri bildirim BURADA verilmeli: restoreSession'ın yazdığı "geri yüklendi" mesajı
-         #progressLabel'a gidiyor, o da Renk Değiştir sekmesinde gizli olan #genArea'nın içinde —
-         kullanıcı düğmeye basıp hiçbir şey olmamış gibi görüyordu. */
-      var rst = $("recolorStatus");
-      if (rst) {
-        rst.hidden = false; rst.style.color = "var(--good)";
-        rst.textContent = "✓ Kaydedilmiş liste yüklendi — " + allCues().length + " altyazı. Şimdi timeline'da klip seçip renge bas.";
-      }
-    }
-    updateRecolorHint();
-  }
-  function recolorYukleButonu(goster) {
-    var h = $("recolorHint"); if (!h || !h.parentNode) return;
-    var b = $("recolorLoadSession");
-    if (!b) {
-      if (!goster) return;
-      b = document.createElement("button");
-      b.id = "recolorLoadSession"; b.type = "button"; b.className = "btn-ghost";
-      b.style.marginTop = "8px";
-      b.textContent = "Kaydedilmiş listeyi yükle";
-      b.addEventListener("click", function () { recolorOturumYukle(); });
-      h.parentNode.insertBefore(b, h.nextSibling);
-    }
-    /* `hidden` YETMEZ: css/style.css'te .btn-ghost için display:inline-flex tanımlı ve tarayıcının
-       [hidden]{display:none} kuralını EZİYOR (aynı tuzak .prog-badge ve .recolor-status için CSS'te
-       ayrıca çözülmüş). Liste yüklendikten sonra buton ekranda kalıp tekrar tıklanabiliyordu. */
-    b.style.display = goster ? "" : "none";
-  }
-  function updateRecolorHint() {
-    var h = $("recolorHint"); if (!h) return;
-    var has = allCues().length;
-    if (has) {
-      h.style.color = ""; h.textContent = "İpucu: birden çok klip seçip tek renge çevirebilirsin. Değişiklik geri alınabilir (Ctrl+Z).";
-      recolorYukleButonu(false);
-      return;
-    }
-    /* Metin güncellendi: artık oturum kaydetme var, liste panel kapanınca SIFIRLANMIYOR.
-       Eski metin ("panel kapanınca liste sıfırlanır, videoyu tekrar oluştur") kullanıcıya
-       30 dakikalık üretimi boşuna tekrarlatıyordu. */
-    var yedek = kayitliOturumVarMi();
-    h.style.color = "var(--warn)";
-    h.textContent = yedek
-      ? "⚠ Panelde liste boş — ama bu sekans için KAYDEDİLMİŞ bir altyazı listesi var. Aşağıdaki düğmeyle geri yükle."
-      : "⚠ Önce “Tek Stil” veya “Konuşmacıya Göre” ile altyazı oluşturup timeline'a ekle — renk değiştirme o listeyi kullanır.";
-    recolorYukleButonu(yedek);
-  }
-  function refreshRecolorBtns() {
-    var box = $("recolorBtns"); if (!box) return; box.innerHTML = "";
-    var st = $("recolorStatus"); if (st) st.hidden = true;
-    if (!state.styles.length) { box.innerHTML = '<p class="note" style="margin:0">Stil bulunamadı. Stil (.mogrt) klasörünü kontrol et.</p>'; updateRecolorHint(); return; }
-    state.styles.forEach(function (s, i) {
-      var btn = document.createElement("button"); btn.className = "color-btn"; btn.type = "button"; btn.title = s.name;
-      var sw = document.createElement("span"); sw.className = "color-swatch"; sw.style.background = styleColor(s.name, i);
-      var nm = document.createElement("span"); nm.className = "color-name"; nm.textContent = s.name;
-      btn.appendChild(sw); btn.appendChild(nm);
-      (function (mgPath, button) { button.addEventListener("click", function () { doRecolor(mgPath, button); }); })(s.path, btn);
-      box.appendChild(btn);
-    });
-    updateRecolorHint();
-  }
-  async function doRecolor(mogrt, btn) {
-    if (!CEP) { uiAlert("Önizleme modu. Premiere'de renk değişir."); return; }
-    /* Üretim sürerken renk değiştirme YOK: bu fonksiyon sonunda saveSession() çağırıyor ve
-       yarım kalmış (kanalları henüz dolmamış) listeyi diskteki iyi oturumun üstüne yazabiliyor. */
-    if (state.running) { uiAlert("Altyazı üretimi sürerken renk değiştirilemez. Üretim bitince tekrar dene.", "Renk değiştir"); return; }
-    if (_recoloring) return; _recoloring = true;
-    if (btn) btn.classList.add("busy");
-    var st = $("recolorStatus");
-    try {
-      var raw = await evalES("getSelectedSubTimes()");
-      var times = []; try { times = JSON.parse(raw) || []; } catch (e) {}
-      if (!times.length) { uiAlert("Timeline'da altyazı klibi seçili değil. Önce klip(ler)e tıkla, sonra bir renk seç.", "Renk değiştir"); return; }
-      var cues = allCues();
-      if (!cues.length) {
-        // Liste boş: diskte kaydedilmiş oturum olabilir (ipucu ve yükle butonu onu gösterir).
-        uiAlert(kayitliOturumVarMi()
-          ? "Panelde altyazı listesi boş. Bu sekans için KAYDEDİLMİŞ bir liste var — aşağıdaki “Kaydedilmiş listeyi yükle” düğmesine bas, sonra tekrar dene."
-          : "Panelde altyazı listesi boş. Önce “Tek Stil” ya da “Konuşmacıya Göre” ile bu videonun altyazısını oluştur.", "Renk değiştir");
-        updateRecolorHint(); return;
-      }
-      var matched = [];
-      for (var t = 0; t < times.length; t++) {
-        var best = null, bd = 0.3;
-        for (var i = 0; i < cues.length; i++) { var d = Math.abs(cues[i].start - times[t]); if (d < bd) { bd = d; best = cues[i]; } }
-        if (best) { best._ovMogrt = mogrt; matched.push(best); }
-      }
-      if (!matched.length) { uiAlert("Seçili klipler panel listesindeki altyazılarla eşleşmedi (aynı sekans ve aynı oluşturma mı?).", "Renk değiştir"); return; }
-      // importMGT komşu ezmesin diye seçili en erken noktadan SONA kadar temiz yerleştir.
-      var spanStart = matched[0].start;
-      for (var mI = 1; mI < matched.length; mI++) if (matched[mI].start < spanStart) spanStart = matched[mI].start;
-      var range = { start: spanStart - 0.05, end: Infinity };
-      if (st) { st.hidden = false; st.style.color = "var(--muted)"; st.textContent = "⏳ " + matched.length + " altyazının rengi değiştiriliyor…"; }
-      logLine("Kaydet: " + (await evalES('saveProject()')));   // renk değişimi öncesi kaydet (Geri Al için) — sonuç log'lansın
-      var r = await placeCurrent(range);
-      if (r != null) { setRecolorStatus(r); saveSession(); } else if (st) st.hidden = true;
-    } catch (e) { if (st) { st.hidden = false; st.style.color = "var(--bad)"; st.textContent = "✕ " + (e.message || e); } }
-    finally { _recoloring = false; if (btn) btn.classList.remove("busy"); }
-  }
   /* Timeline'daki altyazının YAZISINI yerinde düzelt. Eskiden metin hatası görünce ya Premiere'de
      tek tek elle düzeltmek ya da panelde düzeltip yeniden basmak gerekiyordu; ikincisi tüm zaman
      aralığını silip yeniden bastığı için timeline'da elle yapılan konum/süre ayarları uçuyordu. */
-  function fixStatus(msg, renk) {
-    var el = $("fixStatus"); if (!el) return;
-    el.textContent = msg || ""; el.style.color = renk || "var(--muted)";
-  }
-  if ($("btnFixRead")) $("btnFixRead").addEventListener("click", async function () {
-    if (!CEP) { fixStatus("Önizleme modu.", "var(--warn)"); return; }
-    var raw = await evalES("getSelectedSubText()");
-    var list = []; try { list = JSON.parse(raw) || []; } catch (e) {}
-    if (!list.length) { fixStatus("Timeline'da altyazı klibi seçili değil.", "var(--warn)"); return; }
-    $("fixText").value = list[0] || "";
-    fixStatus(list.length > 1 ? (list.length + " klip seçili — Uygula hepsini aynı yapar") : "Okundu.",
-      list.length > 1 ? "var(--warn)" : "var(--good)");
-  });
-  if ($("btnFixApply")) $("btnFixApply").addEventListener("click", async function () {
-    if (!CEP) { fixStatus("Önizleme modu.", "var(--warn)"); return; }
-    var t = String($("fixText").value || "").replace(/\s+/g, " ").trim();
-    if (!t) { fixStatus("Önce yazıyı gir.", "var(--warn)"); return; }
-    var btn = this; if (btn.disabled) return; btn.disabled = true;
-    try {
-      await evalES("saveProject()");   // Geri Al için
-      // Metin DOSYA üzerinden geçirilir: evalScript string literaline gömmek Türkçe karakter,
-      // tırnak ve ters bölü açısından kırılgan (altyazı yerleştirme de aynı sebeple dosya kullanıyor).
-      pipeline.ensureDir(cfg.workDir);
-      var tf = path.join(cfg.workDir, "fixtext_" + Date.now() + ".txt");
-      fs.writeFileSync(tf, t, "utf8");
-      var r = await evalES('setSelectedSubTextFile("' + esPath(tf) + '")');
-      try { fs.unlinkSync(tf); } catch (eDel) {}
-      var msg = String(r).replace(/^[a-z_]+:/, "");
-      fixStatus((String(r).indexOf("ok:") === 0 ? "✓ " : "⚠ ") + msg,
-        String(r).indexOf("ok:") === 0 ? "var(--good)" : "var(--warn)");
-    } catch (eFix) { fixStatus("✕ " + friendlyError(eFix), "var(--bad)"); }
-    finally { btn.disabled = false; }
-  });
-
+    
   $("btnAddTimeline").addEventListener("click", async function () {
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de timeline'a eklenir."); return; }
     var btn = this; if (btn.disabled) return; btn.disabled = true;   // çift-tık koruması (mükerrer yerleştirmeyi önler)
@@ -2707,35 +2269,18 @@
   // ---------- MOCK (tarayıcı önizleme) ----------
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   async function runMock() {
-    state.genMode = (state.mode === "speaker") ? "speaker" : "single";
-    var steps = state.mode === "speaker"
-      ? [[15, "A1 yazıya dökülüyor…"], [45, "A2 okunuyor…"], [70, "Konuşmacılar ayrılıyor (AI)…"], [95, "Bitiriliyor…"]]
-      : [[20, "Ses hazırlanıyor…"], [55, "Yazıya dökülüyor (GPU)…"], [90, "Bitiriliyor…"]];
+    state.genMode = "single";
+    var steps = [[20, "Ses hazırlanıyor…"], [55, "Yazıya dökülüyor (GPU)…"], [90, "Bitiriliyor…"]];
     _pg.transT0 = Date.now();
     for (var k = 0; k < steps.length; k++) { _pg.base = steps[k][1]; transProgress(steps[k][0], 0, 100); logLine(steps[k][1]); await sleep(500); }
-    if (state.mode === "speaker") {
-      state.singleCues = [];
-      state.speakers = [{ id: "SPEAKER_00", sample: "Ya nasıl sahte ya" }, { id: "SPEAKER_01", sample: "Gelme sen gelme" }];
-      renderSpeakerMap();
-      var color = { SPEAKER_00: speakerColor(0), SPEAKER_01: speakerColor(1), __A1__: "#e5544b" };
-      state.a1Cues = [{ start: 0, end: 2, text: "Hepinize merhaba", speaker: "__A1__" }];
-      state.a2Cues = [
-        { start: 3, end: 4.5, text: "Gelme sen gelme", speaker: "SPEAKER_01" },
-        { start: 5, end: 7, text: "Ya nasıl sahte ya", speaker: "SPEAKER_00" },
-        { start: 8, end: 9.5, text: "İnceleyin işte", speaker: "SPEAKER_00" }
-      ];
-      var all = state.a1Cues.concat(state.a2Cues);
-      renderTranscript(all, color);
-      progressDone("Bitti (önizleme) — 2 konuşmacı, 4 satır");
-    } else {
-      state.a1Cues = []; state.a2Cues = [];
-      state.singleCues = [
-        { start: 0, end: 1.8, text: "Hepinize merhaba" }, { start: 2, end: 2.9, text: "arkadaşlar" },
-        { start: 3, end: 4.8, text: "Bugün var ya" }, { start: 5, end: 6.8, text: "harika bir şey" }
-      ];
-      renderTranscript(state.singleCues, null);
-      progressDone("Bitti (önizleme) — 4 altyazı hazır");
-    }
+    state.a1Cues = []; state.a2Cues = []; state.speakers = [];
+    state.singleCues = [
+      { start: 0, end: 2, text: "Hepinize merhaba" },
+      { start: 3, end: 4.5, text: "Gelme sen gelme" },
+      { start: 5, end: 7, text: "Ya nasıl sahte ya" }
+    ];
+    renderTranscript(state.singleCues, null);
+    progressDone("Bitti — " + state.singleCues.length + " altyazı hazır");
   }
 
   // ---------- başlangıç ----------
@@ -2779,9 +2324,7 @@
     dictFill();
     if (state.dict.length) logLine("Sözlük: " + SZ.hotwords(state.dict));
     loadStyles();
-    fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
-    fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
-    refreshRecolorBtns();   // Renk Değiştir sekmesi buton grid'i
+    // stil seçici kaldırıldı — altyazı Premiere altyazı kanalına gidiyor
     if (state.styles.length) logLine(state.styles.length + " stil: " + state.styles.map(function (s) { return s.name; }).join(", "));
     try { cleanupOldTemp(); } catch (eTmp) {}            // eski geçici WAV'lar birikmesin
     try { refreshRangeOptions(); } catch (eRng) {}       // süre aralığı menüleri sekans uzunluğuna göre
@@ -2814,9 +2357,7 @@
     var db = $("dictBadge"); if (db) db.textContent = "5";
     state.styles = [{ name: "Tofi Text", path: "tofi" }, { name: "Moni Text", path: "moni" },
       { name: "Kırmızı", path: "kirmizi" }, { name: "Mavi", path: "mavi" }, { name: "Sarı", path: "sari" }, { name: "Yeşil", path: "yesil" }];
-    fillStyleOptions($("selStyleSingle"), true); preselect($("selStyleSingle"), "tofi");
-    fillStyleOptions($("selStyleA1"), false); preselect($("selStyleA1"), "tofi");
-    refreshRecolorBtns();
+    // stil seçici kaldırıldı — altyazı Premiere altyazı kanalına gidiyor
   }
 
   // Select'leri kalıcılaştır + kaydedilmişi geri yükle (init sonrası — seçenekler dolmuş olur)

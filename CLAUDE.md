@@ -7,22 +7,15 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 - Karakter sözlüğü: `js/sozluk.js` — özel isimleri düzeltir (Tofi/Moni/Dora/Mimi/Niko). İki katman: motora `--hotwords` ipucu + transkript sonrası kesin kelime düzeltmesi (zincirlenmiş Türkçe ekler dahil: "Tofilerden"). Liste `sozluk.json`'da (gitignore'lu), panelden düzenlenir.
 - Senkron kartı: `js/kisiler.js` (Discord adı → karakter; **liste sırası = ses kanalı sırası**) + `js/hizala.js` (ses hizalama). Liste `kisiler.json`'da (gitignore'lu), panelden düzenlenir.
 
-## Üretim modları (js/app.js)
-- **Tek Stil** (`runSingle`) — tek kanal ya da **A1+A2** (birleşik; panel düğmesinin etiketi budur, eski adı "Mix"ti).
-- **Konuşmacıya Göre** (`runChannels`) — A2/A3/A4… **her kanal bir kişi** (Craig bot ya da OBS ile kişi başı kayıt).
-  Ayrım %100 doğru, üst üste konuşmalar da çıkar. Kanal satırlarında işaret kutusu (oyun sesi/karışık kanal atlanır)
-  ve isim alanı var; ikisi de kanal numarasına göre localStorage'da hatırlanır.
-  Çakışan konuşmalara greedy katman atanır — katman sayısı sekansın video kanalıyla sınırlanır
-  (aşarsa host `lane`'i 0'a kelepçeleyip o kanaldaki klipleri siliyor).
-- **Shorts (dikey 1080x1920)** — Tek Stil kartındaki işaret kutusu. Yalnız Tek Stil'de çalışır; açıkken "Konuşmacıya Göre" düğmesi kapanır (dikey karede üst üste katman sığmaz ve Shorts konumlandırması yalnız `addMultiStyleSubtitles` yolunda uygulanır). İki şey değişir:
-  1. **Bölme:** `maxWords 2` + `maxChars 16`. Asıl belirleyici karakter sınırı — sadece kelime sayısını düşürmek yetmiyor, "hazır mısınız" gibi soru eki yapışmış iki token 24 karakter ediyor (ölçüldü). `buildCues` artık sınırı **aşmadan önce** bölüyor; yatay çıktı 804 kelimede birebir aynı kaldı.
-  2. **Konum:** panel cue dosyasının başına `#SHORTS|<yNorm>|<ölçek>` satırı yazar, host `_dikeyYerlestir` ile MOGRT'nin Y konumunu ve ölçeğini ayarlar. Satır yoksa konuma **hiç dokunulmaz** (yatay davranış aynen sürer). Konum Premiere'de normalize (0-1); piksel modunda dönen bir MOGRT'de dokunulmaz, kullanıcı elle yerleştirir.
-  Yükseklik ve boyut panelden kaydırıcıyla ayarlanır (varsayılan %58 / %100), localStorage'da hatırlanır. Sekans yatayken kutu işaretliyse panel uyarır ama engellemez.
-- **Diarizasyon (AI konuşmacı tahmini) panelden KALDIRILDI.** Ölçüldü: tek kişilik kayıtta pyannote_v3.1
-  4 konuşmacı, reverb_v2 3 konuşmacı, ücretli AssemblyAI 4 konuşmacı buldu (doğrusu 1). Sorun modelde değil,
-  karışık kanalda konuşmacıyı tahmin etmenin doğasında. `pipeline.transcribe`'ın `diarize` desteği kodda
-  duruyor (eski oturumların geri yüklenmesi ve olası ihtiyaç için), UI'dan erişilmiyor.
-- **Altyazı sese hizalanır** (`sesleHizala`, pipeline.js). Motorun kelime damgası konuşma DUYULMADAN önceye düşebiliyor — altyazı beliriyor, sonra kişi konuşuyor. Kullanıcının gerçek kaydında ölçüldü: 664 altyazının 185'i ses yokken başlıyordu (ortanca 0.31 sn, en fazla 1.18 sn). Suçlu panel değil — cue'ların 656/664'ü kendi ilk kelimesiyle birebir aynı anda başlıyor; kaynak motorun damgası. `transcribe` cue'ları kurduktan sonra kanalın WAV'ından enerji zarfı çıkarıp cue başında ses yoksa cue'yu **ileri** kaydırır. Ölçülen etki: erken altyazı **185 → 36**. Kurallar: asla geriye kaydırmaz · en fazla 0.60 sn (daha büyük boşluk muhtemelen yanlış hizalama) · cue'ya 0.35 sn okuma süresi kalmıyorsa dokunmaz. `opts.sesHizala === false` ile kapatılır.
+## Altyazı üretimi (js/app.js)
+**TEK YOL: Premiere'in kendi altyazı kanalı.** Panel cue'ları SRT'ye yazar, `addCaptionsToTimeline` onu içe alıp caption track oluşturur. MOGRT yolu (renkli/animasyonlu, altyazı başına bir klip) **v1.8.0'da tamamen kaldırıldı** — 20 dakikalık videoda ~1000 klip üretip Premiere'i kilitliyordu. Görünüm (yazı tipi, renk, kontur, konum) Premiere'de bir kez ayarlanır: altyazıya tıkla → Essential Graphics → **Track Style → Create Style**.
+- Bunun bedeli: **animasyon yok** ve **tek stil** (karaktere göre renk imkânsız — bir caption track'in tek stili olur). Kullanıcı bunu bilerek seçti.
+- Kaldırılanlar: stil seçici, "Konuşmacıya Göre" ve "Renk Değiştir" modları, katman/lane mantığı, `videoKanaliYeterMi`, `stackShifter`, Shorts konum kaydırıcıları, host'taki `addMultiStyleSubtitles`/`addLanedSubtitles`/`addStyledSubtitles`/`recolorSelected` ve MOGRT yardımcıları (~900 satır).
+- **Altyazı artık video kanalı TÜKETMİYOR** — "en alt video kanalı silinir" sınıfı hataların tamamı ortadan kalktı.
+- **Kaynak Ses** seçenekleri: A1 · A2 · A3 · A1+A2 · **Herkes**. "Herkes" eski "Konuşmacıya Göre"nin yerini alır: klip içeren her kanal AYRI yazıya dökülür (üst üste konuşmalar karışmaz, doğruluk yüksek), sonuç `placeCaptions` içinde zaman sırasına dizilip tek caption track'e yazılır.
+- **Shorts** kutusu duruyor ama artık yalnız **kelime bölmesini** değiştiriyor: `maxWords 2` + `maxChars 16` (uzunluğa göre 1, en fazla 2 kelime). Konum/boyut Premiere'in altyazı stilinden ayarlanır.
+- **Altyazı sese hizalanır** (`sesleHizala`, pipeline.js). Motorun kelime damgası konuşma DUYULMADAN önceye düşebiliyor. Kullanıcının gerçek kaydında ölçüldü: 664 altyazının 185'i ses yokken başlıyordu (ortanca 0.31 sn, en fazla 1.18 sn); suçlu panel değil (656/664 cue kendi ilk kelimesiyle birebir aynı anda başlıyor), kaynak motorun damgası. Cue başında ses yoksa cue **ileri** kaydırılır. Ölçülen etki: **185 → 36**. Kurallar: asla geriye kaydırmaz · en fazla 0.60 sn · cue'ya 0.35 sn okuma süresi kalmıyorsa dokunmaz. `opts.sesHizala === false` ile kapatılır.
+- **Diarizasyon (AI konuşmacı tahmini) KALDIRILDI.** Ölçüldü: tek kişilik kayıtta pyannote_v3.1 4, reverb_v2 3, ücretli AssemblyAI 4 konuşmacı buldu (doğrusu 1). Eski diarizasyonlu oturumlar geri yüklenirken A1+A2 tek listeye birleştirilir.
 - Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
 
 ## Senkron kartı (Craig kayıtları)
@@ -53,7 +46,7 @@ Konuşma olmayan boşlukları bulup timeline'dan ripple-delete eder. **Boşluk =
 - Kurulum .exe'si (Inno Setup gerekir): `& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" .\installer\installer.iss` (ISCC PATH'te değildir).
 
 ## Tuzaklar
-- **Altyazı boş video kanalı ister.** host'ta hedef kanal `idx = (videoKanalSayısı - 1) - lane`; en alttaki kanal (idx 0) kullanıcının görüntüsüdür ve **asla kullanılmaz** → `vt >= enÜstLane + 2`. Tek Stil 2, Konuşmacıya Göre 3 video kanalı ister; `videoKanaliYeterMi()` yetmezse yerleştirmeyi durdurup kaç kanal ekleneceğini söyler. Temizlik de yalnız **kendi MOGRT'lerimize** dokunur (`_stilBeyazListe`, cue dosyasındaki `#STILLER|` satırı) — kullanıcının grafikleri ve görüntüsü silinmez.
+- **Altyazı artık video kanalı KULLANMIYOR.** v1.8.0 öncesinde her altyazı bir MOGRT klibiydi ve `idx = (videoKanalSayısı - 1) - lane` hesabı yanlış kanala denk gelince kullanıcının görüntüsünü siliyordu; katman bütçesi, `_stilBeyazListe` beyaz listesi ve `#STILLER|` başlığı bu yüzden vardı. Caption track'e geçişle bu mekanizmaların **tamamı kaldırıldı**. Yeni kod video kanalına hiç dokunmuyor — buraya bir daha lane/katman mantığı eklemeden önce bu tarihi hatırla.
 - **Derleme yok** — HTML/JS/JSX düz dosyalar. Dosya değişince paneli kapat-aç (ya da Premiere'i yeniden başlat) → yeniden yüklenir.
 - Panel JS'i CEP'in **kendi eski Node'unda** çalışır, sistem Node v24'te değil. ES5 tarzı kal; sadece `require()` ile built-in modüller.
 - Sürüm çıkarken `version.json` **ve** `CSXS/manifest.xml` (ExtensionBundleVersion) birlikte artır. `installer.iss` AppVersion ayrı ve ayrıca güncellenir.
