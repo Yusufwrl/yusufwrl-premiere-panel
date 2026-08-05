@@ -22,6 +22,7 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
   4 konuşmacı, reverb_v2 3 konuşmacı, ücretli AssemblyAI 4 konuşmacı buldu (doğrusu 1). Sorun modelde değil,
   karışık kanalda konuşmacıyı tahmin etmenin doğasında. `pipeline.transcribe`'ın `diarize` desteği kodda
   duruyor (eski oturumların geri yüklenmesi ve olası ihtiyaç için), UI'dan erişilmiyor.
+- **Altyazı sese hizalanır** (`sesleHizala`, pipeline.js). Motorun kelime damgası konuşma DUYULMADAN önceye düşebiliyor — altyazı beliriyor, sonra kişi konuşuyor. Kullanıcının gerçek kaydında ölçüldü: 664 altyazının 185'i ses yokken başlıyordu (ortanca 0.31 sn, en fazla 1.18 sn). Suçlu panel değil — cue'ların 656/664'ü kendi ilk kelimesiyle birebir aynı anda başlıyor; kaynak motorun damgası. `transcribe` cue'ları kurduktan sonra kanalın WAV'ından enerji zarfı çıkarıp cue başında ses yoksa cue'yu **ileri** kaydırır. Ölçülen etki: erken altyazı **185 → 36**. Kurallar: asla geriye kaydırmaz · en fazla 0.60 sn (daha büyük boşluk muhtemelen yanlış hizalama) · cue'ya 0.35 sn okuma süresi kalmıyorsa dokunmaz. `opts.sesHizala === false` ile kapatılır.
 - Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
 
 ## Senkron kartı (Craig kayıtları)

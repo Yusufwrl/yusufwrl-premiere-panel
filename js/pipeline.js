@@ -763,6 +763,83 @@ function _hotwordsTaninmadi(e) {
  * hotwords: motora verilecek özel isim ipucu ("Tofi, Moni, ...").
  * dictMap:  sozluk.buildMap() tablosu — transkript sonrası isim düzeltmesi için.
  */
+/* ================= ALTYAZIYI SESE HİZALA =================
+   Motorun kelime zaman damgası, konuşma DUYULMADAN önceye düşebiliyor: altyazı ekranda
+   beliriyor, sonra kişi konuşmaya başlıyor. Kullanıcının gerçek kaydında ölçüldü
+   (1847 kelime / 664 altyazı): 216 altyazı (%33) ses henüz yokken başlıyordu —
+   ortanca 0.26 sn, %90'ı 0.58 sn, en fazlası 1.18 sn erken.
+   Bunu üreten panel DEĞİL: cue'ların 656/664'ü kendi ilk kelimesiyle birebir aynı anda
+   başlıyor. Kaynak motorun damgası, o yüzden düzeltme burada, cue kurulduktan sonra.
+
+   Kural: SADECE İLERİ kaydırılır, asla geriye. Cue'nun başında ses zaten varsa dokunulmaz.
+   Kaydırma en fazla MAX_KAYDIR; daha büyük boşluk muhtemelen yanlış hizalama demektir ve
+   körlemesine kaydırmak altyazıyı yanlış yere taşır. Cue'ya okunacak süre kalmıyorsa da
+   dokunulmaz — erken altyazı, kaybolan altyazıdan iyidir. */
+function _wavZarf(wavPath, pencereSn) {
+  var buf = fs.readFileSync(wavPath);
+  var hz = 16000, bit = 16, kanal = 1, dataOff = -1, dataLen = 0;
+  for (var o = 12; o + 8 <= buf.length; ) {
+    var id = buf.toString("ascii", o, o + 4), sz = buf.readUInt32LE(o + 4);
+    if (id === "fmt ") {
+      kanal = buf.readUInt16LE(o + 10); hz = buf.readUInt32LE(o + 12); bit = buf.readUInt16LE(o + 22);
+    } else if (id === "data") { dataOff = o + 8; dataLen = sz; break; }
+    o += 8 + sz + (sz & 1);
+  }
+  // buildTimelineAudio 16 kHz mono 16-bit üretir; başka bir şey gelirse hizalama atlanır.
+  if (dataOff < 0 || bit !== 16 || !hz) return null;
+  var adim = Math.max(1, Math.round(hz * pencereSn)) * kanal;
+  var toplamOrnek = Math.floor(Math.min(dataLen, buf.length - dataOff) / 2);
+  var n = Math.floor(toplamOrnek / adim);
+  if (n < 10) return null;
+  var zarf = new Float64Array(n);
+  for (var i = 0; i < n; i++) {
+    var s = 0, taban = dataOff + i * adim * 2;
+    for (var j = 0; j < adim; j++) { var v = buf.readInt16LE(taban + j * 2) / 32768; s += v * v; }
+    zarf[i] = Math.sqrt(s / adim);
+  }
+  return { zarf: zarf, pencere: pencereSn };
+}
+
+function sesleHizala(cues, wavPath, onLog) {
+  var PEN = 0.010, MAX_KAYDIR = 0.60, EN_AZ_KALAN = 0.35, ONEMSIZ = 0.06;
+  var z = null;
+  try { z = _wavZarf(wavPath, PEN); } catch (e) { z = null; }
+  if (!z) { if (onLog) onLog("[hizala] ses okunamadı, altyazı zamanlarına dokunulmadı.\n"); return cues; }
+  var zarf = z.zarf, N = zarf.length;
+
+  /* Konuşma eşiği: gürültü tabanının katı. Taban, sıfır olmayan değerlerin %35'lik
+     dilimi (sessizlik payı bol tutuldu ki nefes/tık sesi konuşma sayılmasın). */
+  var sirali = [];
+  for (var i = 0; i < N; i++) if (zarf[i] > 0) sirali.push(zarf[i]);
+  if (sirali.length < 10) return cues;
+  sirali.sort(function (a, b) { return a - b; });
+  var esik = sirali[Math.floor(sirali.length * 0.35)] * 3;
+  if (!(esik > 0)) return cues;
+
+  var kaydirilan = 0, toplamKayma = 0;
+  for (var c = 0; c < cues.length; c++) {
+    var cue = cues[c];
+    var bas = Math.floor(cue.start / PEN);
+    if (bas < 0 || bas >= N) continue;
+    if (zarf[bas] >= esik) continue;                       // başında ses VAR, dokunma
+    var sinir = Math.min(N, bas + Math.ceil(MAX_KAYDIR / PEN));
+    var onset = -1;
+    for (var k = bas; k < sinir; k++) if (zarf[k] >= esik) { onset = k; break; }
+    if (onset < 0) continue;                               // sınır içinde konuşma yok
+    var yeni = onset * PEN;
+    var kayma = yeni - cue.start;
+    if (kayma <= ONEMSIZ) continue;                        // zaten neredeyse aynı
+    if (yeni > cue.end - EN_AZ_KALAN) continue;            // okunacak süre kalmıyor
+    cue.start = +yeni.toFixed(3);
+    kaydirilan++; toplamKayma += kayma;
+  }
+  if (onLog && kaydirilan) {
+    onLog("[hizala] " + kaydirilan + " altyazı sese hizalandı (ortalama " +
+          (toplamKayma / kaydirilan).toFixed(2) + " sn ileri).\n");
+  }
+  return cues;
+}
+
 async function transcribe(cfg, wavPath, onLog, opts) {
   opts = opts || {};
   const outDir = path.dirname(wavPath);
@@ -868,7 +945,13 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   }
   // DİKKAT: "!!" KULLANMA — censor üç değerli (false | "all" | "hard"); boolean'a çevirmek
   // "sadece ağır küfür" seçeneğini sessizce "hepsi" yapar.
-  const cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor, opts.maxChars);
+  var cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor, opts.maxChars);
+  /* Altyaziyi sese hizala: motorun damgasi konusmadan once basliyor olabilir (bkz. sesleHizala).
+     opts.sesHizala === false ile kapatilabilir; varsayilan ACIK. */
+  if (opts.sesHizala !== false) {
+    try { cues = sesleHizala(cues, wavPath, onLog); }
+    catch (eSH) { if (onLog) onLog("[hizala] atlandı: " + (eSH.message || eSH) + "\n"); }
+  }
   try { fs.unlinkSync(jsonPath); } catch (e) {}
   try { if (fs.existsSync(srtPath)) fs.unlinkSync(srtPath); } catch (e) {}
   if (onLog) onLog("[whisper] bitti (" + cues.length + " satır).\n");
@@ -993,7 +1076,7 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
-  buildCues, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
+  buildCues, sesleHizala, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
   // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında
   // "kullanıcı iptal etti mi?" diye sorabilsin diye dışa açıldı.
