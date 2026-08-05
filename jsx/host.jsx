@@ -567,15 +567,30 @@ function kanalTasi(kaynakIdx, hedefIdx) {
             konan++;
         }
 
-        // --- DOGRULA: sayi ve medya yollari tutuyor mu? ---
+        /* --- DOGRULA ---
+           Sayi ve medya yolu YETMEZ: oyun sesinin butun parcalari zaten AYNI dosyadan
+           geliyor, yani yol kontrolu her zaman gecer. Klip yanlis saniyeye konsa ya da
+           kirpma korunmasa bile "dogrulandi" der ve kaynak silinirdi.
+           Bu yuzden her klibin BASLANGIC, BITIS ve IN noktasi teker teker karsilastirilir.
+           Tolerans 1 kare (~1/24 sn) degil, tam esitlik yerine kucuk bir tick payi:
+           Premiere zaman degerlerini kareye yuvarlayabiliyor. */
+        var TOL = TICKS / 100;   // 0.01 sn
         var saglam = (konan === bilgi.length && hed.clips.numItems === bilgi.length);
         if (saglam) {
-            for (i = 0; i < hed.clips.numItems; i++) {
-                var y3 = "";
-                try { y3 = String(hed.clips[i].projectItem.getMediaPath()); } catch (e6) { y3 = ""; }
-                var bulundu = false;
-                for (j = 0; j < bilgi.length; j++) if (bilgi[j].yol === y3) { bulundu = true; break; }
-                if (!bulundu) { saglam = false; break; }
+            for (i = 0; i < bilgi.length; i++) {
+                var bek = bilgi[i], esles = null;
+                for (j = 0; j < hed.clips.numItems; j++) {
+                    var hc = hed.clips[j], y3 = "";
+                    try { y3 = String(hc.projectItem.getMediaPath()); } catch (e6) { y3 = ""; }
+                    if (y3 !== bek.yol) continue;
+                    if (Math.abs(parseFloat(hc.start.ticks) - bek.bas) > TOL) continue;
+                    esles = hc; break;
+                }
+                if (!esles) { saglam = false; break; }
+                if (Math.abs(parseFloat(esles.end.ticks) - bek.son) > TOL) { saglam = false; break; }
+                var ihn = 0;
+                try { ihn = parseFloat(esles.inPoint.ticks); } catch (e9) { ihn = bek.inT; }
+                if (Math.abs(ihn - bek.inT) > TOL) { saglam = false; break; }
             }
         }
         if (!saglam) {
@@ -1037,7 +1052,7 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
            aralikta kalan her klip siliniyordu; hedef kanalda kullanicinin bir goruntusu
            varsa o da gidiyordu. */
         var mgAd0 = _stilBeyazListe(lines, cues);
-        var korunan0 = 0;
+        var korunan0 = 0, yabanci0 = [];
         try {
             var vt0 = seq.videoTracks[vIdx];
             for (var k = vt0.clips.numItems - 1; k >= 0; k--) {
@@ -1046,7 +1061,15 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
                     if (!(ce0 > spanS + 0.05 && cs0 < spanE - 0.05)) continue;
                     var nm0 = "";
                     try { nm0 = String(cl0.name); } catch (en0) { nm0 = ""; }
-                    if (!_bizimAltyazimizMi(mgAd0, nm0)) { korunan0++; continue; }   // bizim altyazimiz degil
+                    if (!_bizimAltyazimizMi(mgAd0, nm0)) {
+                        /* Bizim altyazimiz DEGIL: silmiyoruz. Ama aralikini not almazsak
+                           asagidaki importMGT ayni kanala altyazi basip onu YINE ezerdi
+                           (bir kanalda iki klip duramaz) ve panel "dokunulmadi" derdi.
+                           Bu aralikla cakisan cue'lar ATLANIR. */
+                        korunan0++;
+                        yabanci0.push({ s: cs0, e: ce0, ad: nm0 });
+                        continue;
+                    }
                     cl0.remove(false, false);
                 } catch (er) {}
             }
@@ -1065,8 +1088,18 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
             break;
         }
 
-        var placed = 0, failed = 0, firstErr = "", yerlesen = 0;
+        var placed = 0, failed = 0, firstErr = "", yerlesen = 0, korumaAtlandi = 0, korumaAd = "";
         for (var c = 0; c < cues.length; c++) {
+            /* Kullanicinin KENDI klibiyle cakisan cue'yu basma: bir video kanalinda iki klip
+               duramaz, importMGT onu ezerdi. Yukarida "dokunulmadi" dedigimiz klip gercekten
+               dokunulmamis olsun. */
+            var cakisti = false;
+            for (var yb = 0; yb < yabanci0.length; yb++) {
+                if (cues[c].e > yabanci0[yb].s + 0.05 && cues[c].s < yabanci0[yb].e - 0.05) {
+                    cakisti = true; if (!korumaAd) korumaAd = yabanci0[yb].ad; break;
+                }
+            }
+            if (cakisti) { korumaAtlandi++; continue; }
             var mf = new File(cues[c].mg);
             if (!mf.exists) { failed++; if (!firstErr) firstErr = "MOGRT yok: " + cues[c].mg; continue; }
             var ti = null;
@@ -1077,6 +1110,12 @@ function addMultiStyleSubtitles(cuesFilePath, vTrackIndex) {
             _setEndSec(ti, cues[c].e, TICKS);
             if (shortsY >= 0) { if (_dikeyYerlestir(ti, shortsY, shortsOlcek)) yerlesen++; }
             placed++;
+        }
+        if (korumaAtlandi) {
+            firstErr = korumaAtlandi + " altyazı eklenemedi: hedef video kanalında senin klibin var (" +
+                       korumaAd + "). Onu başka kanala taşı ya da altyazıya boş bir video kanalı aç." +
+                       (firstErr ? (" | " + firstErr) : "");
+            failed += korumaAtlandi;
         }
         if (!placed) return "err:Hiçbir altyazı eklenemedi" + (firstErr ? (" | " + firstErr) : "");
         var shortsNot = "";

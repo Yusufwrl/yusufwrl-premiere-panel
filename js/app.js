@@ -786,10 +786,14 @@
          Seçim kanal numarasına göre hatırlanır — bir kere ayarla, sonraki videolarda hazır gelsin. */
       var chk = document.createElement("input");
       chk.type = "checkbox"; chk.className = "kanal-chk"; chk.title = "Bu kanalı yazıya dök";
-      chk.checked = (t.aktif != null) ? !!t.aktif : (lsGet("kanalAktif." + t.idx, "1") === "1");
+      /* İŞARET KUTUSU HATIRLANMIYOR — AutoCut'takiyle aynı sebep: kanal numarasının ANLAMI
+         kadroya göre değişiyor (oyun sesi 3 arkadaşla A5, 4 arkadaşla A6). Kayıtlı "A5'i
+         atla" tercihi sonraki videoda bir ARKADAŞI atlar ve o kişi hiç yazıya dökülmez.
+         Oturumdan gelen değer (t.aktif) korunur; yoksa işaretli başlar. */
+      chk.checked = (t.aktif != null) ? !!t.aktif : true;
       (function (ix, c, r) {
         function yansit() { if (c.checked) r.classList.remove("kanal-pasif"); else r.classList.add("kanal-pasif"); }
-        c.addEventListener("change", function () { lsSet("kanalAktif." + ix, c.checked ? "1" : "0"); yansit(); });
+        c.addEventListener("change", function () { yansit(); });   // kaydedilmiyor, bkz. yukarıdaki not
         yansit();
       })(t.idx, chk, row);
       row.appendChild(chk);
@@ -1216,15 +1220,29 @@
        idx 0'a — yani kullanıcının görüntü kanalına — basıp oradaki klipleri siliyordu. */
     var vt = await videoKanaliYeterMi(1, "Konuşmacıya Göre modu");
     if (!vt) return null;
-    {
-      var izin = vt - 3;   // arkadaş lane = 1+kat, idx = (vt-1)-(1+kat) >= 1  =>  kat <= vt-3
-      if (maxKat > izin) {
-        var kirpilan = 0;
-        for (var k3 = 0; k3 < arkadas.length; k3++) if (arkadas[k3].kat > izin) { arkadas[k3].kat = izin; kirpilan++; }
-        logLine("UYARI: sekansta " + vt + " video kanalı var, " + (3 + maxKat) + " gerekiyordu. " +
-                kirpilan + " altyazı aynı katmana alındı (üst üste gelebilir). Video kanalı eklersen düzelir.");
-        maxKat = izin;
-      }
+    var oncekiMaxKat = maxKat;   // kaç kanal gerektiğini kullanıcıya söylemek için
+    /* KELEPÇELEME YERİNE ATLAMA.
+       Eskiden sığmayan altyazının katmanı `izin`e ÇEKİLİYORDU. Ama aynı katman = aynı video
+       kanalı, ve bir video kanalında aynı anda iki klip duramaz: importMGT komşu klibi
+       EZİYOR. Yani "üst üste gelebilir" diyen uyarı yanlıştı — altyazılar üst üste gelmiyor,
+       BİRBİRİNİ SİLİYORDU. Ölçüldü: 4 video kanallı sekansta 60 sn'lik üç kişilik sohbette
+       135 altyazının 76'sı kırpıldı, 1'i tamamen kayboldu; host yine "ok:135 eklendi, 0 hata"
+       dedi ve panel yeşil ✓ gösterdi.
+       Artık sığmayan cue YERLEŞTİRİLMİYOR ve kullanıcıya AÇIKÇA söyleniyor (log değil uiAlert:
+       #log varsayılan olarak kapalı, kimse görmüyordu). */
+    var izin = vt - 3;   // arkadaş lane = 1+kat, idx = (vt-1)-(1+kat) >= 1  =>  kat <= vt-3
+    if (maxKat > izin) {
+      var oncekiSayi = arkadas.length;
+      arkadas = arkadas.filter(function (it) { return it.kat <= izin; });
+      var dusen = oncekiSayi - arkadas.length;
+      maxKat = izin;
+      var mesaj = dusen + " altyazı eklenemedi: sekansta " + vt + " video kanalı var, " +
+        (3 + oncekiMaxKat) + " gerekiyor.\n\n" +
+        "Bu altyazılar başkalarıyla aynı anda konuşulan yerlerde; her biri ayrı bir video " +
+        "kanalı istiyor. Premiere'de " + ((3 + oncekiMaxKat) - vt) + " video kanalı ekleyip " +
+        "tekrar “Timeline'a Ekle” dersen hepsi gelir.";
+      logLine("UYARI: " + mesaj.replace(/\n+/g, " "));
+      uiAlert(mesaj, "Video kanalı yetersiz");
     }
     var kayma = stackShifter(overlapsA1, _gap);
     var combined = [];
@@ -1736,6 +1754,7 @@
        Karşılaştırma KISI._norm ile aynı kuralda olmalı: dosya eşleşmesi de öyle yapılıyor,
        yoksa "mimi" ile "Mimi" ayrı sanılır. */
     var siraListesi = [], gorulenKarakter = {};
+    // NOT: _kn bu fonksiyonun her yerinde ayni kurali uygulamali (dosyaOf anahtari dahil).
     var _kn = function (s) { return String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase(); };
     (state.kisiler || []).forEach(function (k) {
       if (!k || !k.karakter) return;
@@ -1744,21 +1763,25 @@
       gorulenKarakter[_kn(k.karakter)] = 1;
       siraListesi.push(k.karakter);
     });
+    /* Anahtar NORMALLEŞTİRİLMİŞ ad. Eskiden ham ad kullanılıyordu ama sıra listesi filtresi
+       _kn ile karşılaştırıyordu — iki farklı kural. Kullanıcı listede çekenin adını
+       "Tofı" (noktasız ı) ya da "tofi" yazsa filtre onu eliyor, dosyaOf ise eşleştiremiyor:
+       çekenin KENDİ kaydı bilinmeyenlere düşüp timeline'a konuyor ve ses çift çıkıyordu. */
     var dosyaOf = {};
-    eslesen.forEach(function (e) { dosyaOf[e.kisi.karakter] = e; });
+    eslesen.forEach(function (e) { dosyaOf[_kn(e.kisi.karakter)] = e; });
 
     var plan = [], sonrakiKanal = 0;
     plan.push({ kanal: sonrakiKanal++, karakter: ceken, kilit: true, not: "OBS mikrofonun — dokunulmaz" });
     // A2: Tofi/Moni'den diğeri. Yoksa kanal boş bırakılmaz, sıradaki kişi buraya kayar.
-    if (dosyaOf[karsi]) plan.push({ kanal: sonrakiKanal++, karakter: karsi, dosya: dosyaOf[karsi].dosya });
+    if (dosyaOf[_kn(karsi)]) plan.push({ kanal: sonrakiKanal++, karakter: karsi, dosya: dosyaOf[_kn(karsi)].dosya });
     else snkLog(karsi + " bu videoda yok — kanal harcanmadı, alttakiler yukarı kaydı.");
     siraListesi.forEach(function (ad) {
-      if (dosyaOf[ad]) plan.push({ kanal: sonrakiKanal++, karakter: ad, dosya: dosyaOf[ad].dosya });
+      if (dosyaOf[_kn(ad)]) plan.push({ kanal: sonrakiKanal++, karakter: ad, dosya: dosyaOf[_kn(ad)].dosya });
     });
     /* Aynı kişinin ek kayıtları. Çekenin ikinci kaydı YERLEŞTİRİLMEZ — sesi zaten A1'de,
        konursa çift çıkar. Diğerleri kendi kanalını alır ve etiketinden anlaşılır. */
     tekrar.forEach(function (e) {
-      if (e.kisi.karakter === ceken) {
+      if (_kn(e.kisi.karakter) === _kn(ceken)) {
         snkLog(e.dosya.dosya + " — " + ceken + " adına ikinci kayıt. Sesin zaten A1'de, yerleştirilmiyor.");
         return;
       }
@@ -1778,7 +1801,8 @@
                 not: "panel oyun sesini buraya taşıyacak" });
     // çekenin kendi Craig dosyası — hizalama referansı (timeline'a konmaz)
     snk.cekenDosya = null;
-    eslesen.forEach(function (e) { if (e.kisi.karakter === ceken) snk.cekenDosya = e.dosya; });
+    // _kn: cekenin kendi kaydini bulmak da ayni kurala uymali, yoksa kayit timeline'a konup ses cift cikar.
+    eslesen.forEach(function (e) { if (_kn(e.kisi.karakter) === _kn(ceken)) snk.cekenDosya = e.dosya; });
 
     /* Çekenin kendi kaydı eşleşmediyse bilinmeyenler arasında kalır ve A4+'ya yerleştirilir —
        sesi zaten A1'de olduğu için timeline'da ÇİFT çıkar. Bu uyarı eskiden yalnız gizli log'a
@@ -2246,6 +2270,17 @@
       var sv = String(await evalES("saveProject()"));
       snkLog("Kaydet: " + sv);
 
+      /* KAYDETME ONAYI EN BAŞTA SORULUR. Eskiden bu blok oyun sesi taşındıktan SONRA
+         geliyordu: kullanıcı "hayır, devam etme" dese bile oyun sesi çoktan A3'ten A5'e
+         taşınmış oluyordu ve panel "İptal edildi" diyordu — timeline değişmiş, kullanıcı
+         hiçbir şey olmadığını sanıyordu. Artık hiçbir şeye dokunmadan soruluyor. */
+      if (sv.indexOf("ok:") !== 0) {
+        var devamKayit = await uiConfirm("Proje kaydedilemedi: " + hostMesaj(sv) + "\n\n" +
+          "Devam edersem “Geri Al” bu ana DÖNEMEZ; daha eski bir sürüme döner ve aradaki " +
+          "çalışman kaybolabilir.\n\nYine de devam edeyim mi?", "Senkron");
+        if (!devamKayit) { snkFail("İptal edildi", "warn"); return; }
+      }
+
       /* OYUN SESİNİ TAŞI — kişiler yerleşmeden ÖNCE. Sıra kritik: sonra yapılsaydı hedef
          kanala zaten bir kişi konmuş olurdu ve taşıma "hedef boş değil" diye reddedilirdi;
          daha kötüsü, kaynak kanala (A3) kişi yazılıp oyun sesi çoktan ezilmiş olurdu. */
@@ -2264,12 +2299,6 @@
                   "“Oyun sesi şu an hangi kanalda?” seçimini “yok” yap.", "Senkron");
           return;
         }
-      }
-      if (sv.indexOf("ok:") !== 0) {
-        var devamKayit = await uiConfirm("Proje kaydedilemedi: " + hostMesaj(sv) + "\n\n" +
-          "Devam edersem “Geri Al” bu ana DÖNEMEZ; daha eski bir sürüme döner ve aradaki " +
-          "çalışman kaybolabilir.\n\nYine de devam edeyim mi?", "Senkron");
-        if (!devamKayit) { snkFail("İptal edildi", "warn"); return; }
       }
 
       /* NEGATİF KAYMA: Craig kaydı OBS'ten ÖNCE başlamışsa klip timeline'da 0'dan önceye
@@ -2341,9 +2370,10 @@
 
       /* A2 TEMİZLİĞİ AYRI ONAY: karışık Discord kanalı artık gereksiz ama kanalı boşaltmak
          kullanıcının medyasını siler; açıkça istemeden dokunulmaz.
-         (host.jsx clearAudioTrack artık beginUndoGroup/endUndoGroup kullanıyor: silinen onlarca
-         klip TEK Ctrl+Z ile geri gelir. Eskiden buradaki yorum "Premiere'de undo grubu yok"
-         diyordu — o bilgi artık YANLIŞ.) */
+         UNDO GRUBU: host beginUndoGroup/endUndoGroup ÇAĞIRIYOR ama app.beginUndoGroup
+         Premiere Pro'da YOKTUR (After Effects API'si). Çağrı try/catch'e düşüp sessizce
+         geçersiz kalıyor, yani silinen klipler TEK Ctrl+Z ile GERİ GELMEZ — her klip ayrı
+         bir geri alma adımı. Kullanıcıya bu yüzden "birden çok kez" deniyor. */
       var karsiPlan = null;
       snk.plan.forEach(function (p) { if (p.kanal === 1 && p.dosya) karsiPlan = p; });
       if (karsiPlan) {
@@ -2352,7 +2382,8 @@
           // Geri alınabilirliği yaz: host artık undo grubu kullanıyor, kullanıcı "geri dönüşü yok"
           // sanıp gerçekten gereken temizlikten kaçınmasın.
           "(Not: A2'ye yeni ses zaten yerleşti. Temizlik yaparsan A2'deki TÜM eski klipler silinir — " +
-          "yanlışlıkla yaparsan Premiere'de Ctrl+Z ile geri alabilirsin.)", "A2 temizliği");
+          "yanlışlıkla yaparsan Ctrl+Z ile geri alabilirsin ama her klip ayrı adım — " +
+          "üstteki “Geri Al” düğmesi daha kolay.)", "A2 temizliği");
         if (sil) {
           /* Yerleştirilen klibin adını KORUNACAK olarak geçiyoruz. Bu olmadan clearAudioTrack
              kanaldaki her şeyi siliyordu — az önce koyduğumuz Craig kaydı dahil.
@@ -2462,13 +2493,14 @@
        - bir kişi yanlışlıkla DIŞARIDA ise: konuşması sessizce silinir.
      Bu yüzden varsayılan güvenli tarafta: hepsi işaretli.
 
-     Anahtar adı "acCh" -> "acCh2_" oldu: kanal NUMARALARININ ANLAMI değişti (eski düzende
-     A3 oyun sesiydi, yenisinde bir kişi). Eski kayıtlı seçimler taşınsaydı, kullanıcının
-     "A3'ü analiz etme" tercihi artık bir ARKADAŞI dışarıda bırakırdı. Ad değişikliği eski
-     seçimleri bir kez unutturuyor. */
+     SEÇİM ARTIK HATIRLANMIYOR — bilerek. Kanal NUMARASINA göre hatırlamak yeni düzende
+     tuzak: oyun sesi kadroya göre yer değiştiriyor (3 arkadaşla A5, 4 arkadaşla A6).
+     Kullanıcı bir videoda A5'i (oyun sesi) işaretten çıkarınca, sonraki videoda A5'te
+     oturan ARKADAŞ sessizce analiz dışı kalıyor ve konuşması siliniyordu (ölçüldü).
+     Hatırlamanın kazancı bir tık; bedeli silinen konuşma. Her açılışta hepsi işaretli
+     başlıyor, kullanıcı oyun sesi kanalının kutusunu kaldırıyor. */
   function acKanalSecili(idx) {
-    var v = lsGet("acCh2_" + idx, null);
-    return (v == null) ? true : (v === "1");
+    return true;
   }
   function acSeciliKanallar() {
     var out = [];
@@ -2512,7 +2544,8 @@
       chk.type = "checkbox"; chk.checked = acKanalSecili(t.idx);
       (function (idx, kutu) {
         kutu.addEventListener("change", function () {
-          lsSet("acCh2_" + idx, kutu.checked ? "1" : "0");
+          // Seçim KAYDEDİLMİYOR (bkz. acKanalSecili): kanal numarasının anlamı videodan
+          // videoya değişiyor, kayıtlı seçim başka birini dışlıyordu.
           acAnalizGecersiz();          // seçim değişti: ekrandaki eski analiz artık geçersiz
           acKanalUyariGuncelle();
         });
@@ -2659,8 +2692,15 @@
       var r = await evalES('autoCut("' + esPath(file) + '")');
       acLogLine("Sonuç: " + r);
       var msg = String(r).replace(/^[a-z_]+:/, "");
-      if (String(r).indexOf("ok:") === 0) acDone("Bitti — " + msg);
-      else { acFail("⚠ " + msg, "warn"); uiAlert(msg, "Sonuç"); }
+      if (String(r).indexOf("ok:") === 0) {
+        acDone("Bitti — " + msg);
+        /* KESİLEN ARALIKLARI UNUT. Bunlar kesim ÖNCESİ zamanlara göre hesaplanmıştı;
+           kesimden sonra timeline kaydığı için artık geçersizler. Eskiden ekranda kalıyordu
+           ve "Boşlukları Kes"e ikinci kez basmak (ya da başka bir sekansa geçip basmak)
+           ESKİ aralıkları uyguluyordu — yani rastgele yerlerden kesiyordu. */
+        acCuts = []; acLast = null;
+        acAnalizGecersiz();
+      } else { acFail("⚠ " + msg, "warn"); uiAlert(msg, "Sonuç"); }
     } finally { btn.disabled = false; }
   });
 
