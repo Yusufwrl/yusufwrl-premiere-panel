@@ -1585,7 +1585,8 @@
            kullanıcı onaylayınca Premiere'e uygula (import + kanal + renk etiketi).
 
      KANAL KURALI: A1 = çeken (OBS mikrofonu, dokunulmaz), A2 = karşı taraf (Tofi<->Moni),
-                   A3 = oyun sesi (dokunulmaz), A4+ = diğer arkadaşlar.
+                   sonra Kişiler listesindeki sırayla kalanlar, EN SON oyun sesi.
+                   Videoda olmayan karakter kanal harcamaz (alttakiler yukarı kayar).
 
      REFERANS SEÇİMİ: arkadaşlar A2 (OBS'in Discord'dan aldığı karışık kanal) ile hizalanır —
      ikisi de aynı Discord ses zincirinden geçtiği için sistematik sapma olmaz. Çeken kişinin
@@ -1643,19 +1644,11 @@
       snkKisiStatus("✕ " + (e.message || e), "var(--bad)"); return;
     }
     snkKisiDoldur();
-    /* Tanınmayan renk etiketi SESSİZ kalmasın: tek geri bildirim, kutudaki "[Blu]" yazısının
-       kaydettikten sonra sessizce "[Blue]"ya dönmesiydi — kullanıcı yazdığı rengin
-       uygulanmadığını fark etmiyordu. */
-    var renkHatalilar = [];
-    for (var rh = 0; rh < state.kisiler.length; rh++) {
-      if (state.kisiler[rh] && state.kisiler[rh].renkHatasi) renkHatalilar.push(state.kisiler[rh].renkHatasi);
-    }
-    if (renkHatalilar.length) {
-      snkKisiStatus("⚠ Bilinmeyen renk: " + renkHatalilar.join(", ") + " — eski renk korundu. " +
-        "Geçerli renkler: " + KISI.LABELLER.join(", "), "var(--warn)");
-    } else {
-      snkKisiStatus("✓ Kaydedildi — " + state.kisiler.length + " kişi", "var(--good)");
-    }
+    /* Renk uyarısı KALDIRILDI: timeline etiketleme iptal edilince renk alanı da anlamsızlaştı.
+       parseText eski "[Mavi]" yazımını hâlâ tolere ediyor (kullanıcının mevcut listesi
+       bozulmasın), ama artık ne gösteriliyor ne de kullanılıyor.
+       SIRA bilgisi verilir: bu listenin sırası ses kanallarının sırasını belirliyor. */
+    snkKisiStatus("✓ Kaydedildi — " + state.kisiler.length + " kişi (sıra = kanal sırası)", "var(--good)");
     if (snk.dosyalar.length) snkEslestir();     // açık liste varsa yeniden eşle
   }
 
@@ -1730,20 +1723,37 @@
       return false;
     });
 
-    /* Kanal ataması: çeken A1'de zaten var (OBS), Craig'deki kendi dosyası SADECE hizalama
-       referansı olarak kullanılır, timeline'a konmaz. Karşı taraf A2'ye, A3 oyun sesi olduğu
-       için atlanır, kalanlar A4'ten itibaren sıralanır. */
-    var plan = [], sonrakiKanal = 3;   // 0-tabanlı: 3 = A4
-    plan.push({ kanal: 0, karakter: ceken, kilit: true, not: "OBS mikrofonun — dokunulmaz" });
-    var karsiKayit = null;
-    eslesen.forEach(function (e) { if (e.kisi.karakter === karsi) karsiKayit = e; });
-    if (karsiKayit) plan.push({ kanal: 1, karakter: karsi, dosya: karsiKayit.dosya, renk: karsiKayit.kisi.renk });
-    else plan.push({ kanal: 1, karakter: karsi, bos: true, not: "bu videoda yok — kanal boş kalacak" });
-    plan.push({ kanal: 2, karakter: "Oyun sesi", kilit: true, not: "dokunulmaz" });
+    /* ===== KANAL SIRASI =====
+         A1 = videoyu çeken (OBS mikrofonu — dokunulmaz; Craig'deki kendi dosyası yalnızca
+              hizalama referansıdır, timeline'a konmaz)
+         A2 = Tofi/Moni'den diğeri
+         sonra "Karakter İsimleri" listesindeki SIRAYLA kalan karakterler
+         en son = oyun sesi
+       VİDEODA OLMAYAN KARAKTER KANAL HARCAMAZ: alttakiler yukarı kayar. Sage ve Niko yoksa
+       oyun sesi A5 olur. Sıra listeden geldiği için kullanıcı panelden değiştirebilir. */
+    /* Aynı karakter adı listede iki kez yazılıysa (kullanıcı elle eklerken kolayca olur)
+       aynı dosya İKİ kanala konurdu — ses çift çıkar. Ada göre tekilleştir.
+       Karşılaştırma KISI._norm ile aynı kuralda olmalı: dosya eşleşmesi de öyle yapılıyor,
+       yoksa "mimi" ile "Mimi" ayrı sanılır. */
+    var siraListesi = [], gorulenKarakter = {};
+    var _kn = function (s) { return String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase(); };
+    (state.kisiler || []).forEach(function (k) {
+      if (!k || !k.karakter) return;
+      if (_kn(k.karakter) === _kn(ceken) || _kn(k.karakter) === _kn(karsi)) return;
+      if (gorulenKarakter[_kn(k.karakter)]) return;
+      gorulenKarakter[_kn(k.karakter)] = 1;
+      siraListesi.push(k.karakter);
+    });
+    var dosyaOf = {};
+    eslesen.forEach(function (e) { dosyaOf[e.kisi.karakter] = e; });
 
-    eslesen.forEach(function (e) {
-      if (e.kisi.karakter === ceken || e.kisi.karakter === karsi) return;   // A1/A2 zaten ayrıldı
-      plan.push({ kanal: sonrakiKanal++, karakter: e.kisi.karakter, dosya: e.dosya, renk: e.kisi.renk });
+    var plan = [], sonrakiKanal = 0;
+    plan.push({ kanal: sonrakiKanal++, karakter: ceken, kilit: true, not: "OBS mikrofonun — dokunulmaz" });
+    // A2: Tofi/Moni'den diğeri. Yoksa kanal boş bırakılmaz, sıradaki kişi buraya kayar.
+    if (dosyaOf[karsi]) plan.push({ kanal: sonrakiKanal++, karakter: karsi, dosya: dosyaOf[karsi].dosya });
+    else snkLog(karsi + " bu videoda yok — kanal harcanmadı, alttakiler yukarı kaydı.");
+    siraListesi.forEach(function (ad) {
+      if (dosyaOf[ad]) plan.push({ kanal: sonrakiKanal++, karakter: ad, dosya: dosyaOf[ad].dosya });
     });
     /* Aynı kişinin ek kayıtları. Çekenin ikinci kaydı YERLEŞTİRİLMEZ — sesi zaten A1'de,
        konursa çift çıkar. Diğerleri kendi kanalını alır ve etiketinden anlaşılır. */
@@ -1756,12 +1766,16 @@
              "bağlanmış olabilir). Ayrı kanala konuyor; gerekmiyorsa Premiere'de o kanalı sil.");
       plan.push({
         kanal: sonrakiKanal++, karakter: e.kisi.karakter + " (" + e.sira + ". kayıt)",
-        dosya: e.dosya, renk: e.kisi.renk
+        dosya: e.dosya
       });
     });
     bilinmeyen.forEach(function (d) {
-      plan.push({ kanal: sonrakiKanal++, karakter: "?", dosya: d, bilinmeyen: true, renk: 0 });
+      plan.push({ kanal: sonrakiKanal++, karakter: "?", dosya: d, bilinmeyen: true });
     });
+    /* OYUN SESİ EN SONDA. Panel onu taşıyamaz (Premiere'de klip taşıma API'si yok) —
+       satır yalnızca hangi kanalda olması gerektiğini söyler. */
+    plan.push({ kanal: sonrakiKanal++, karakter: "Oyun sesi", oyun: true,
+                not: "panel oyun sesini buraya taşıyacak" });
     // çekenin kendi Craig dosyası — hizalama referansı (timeline'a konmaz)
     snk.cekenDosya = null;
     eslesen.forEach(function (e) { if (e.kisi.karakter === ceken) snk.cekenDosya = e.dosya; });
@@ -1790,8 +1804,44 @@
     if (!CEP) return;
     try {
       var b = JSON.parse(await evalES("getSequenceInfoJSON()"));
-      if (b && !b.error && b.audioTracks) { snk.sesKanalSayisi = b.audioTracks; snkPlanCiz(); }
-    } catch (e) {}
+      if (b && !b.error && b.audioTracks) {
+        snk.sesKanalSayisi = b.audioTracks;
+        /* Kanal başına klip sayısı: hedef kanalda zaten klip varsa yerleştirme onu EZER
+           (overwriteClip). Kanal sırası değiştiği için bu gerçek bir risk — tabloda ve
+           onay metninde gösterilir. */
+        snk.kanalKlip = b.clipCounts || [];
+        snkOyunKanalDoldur();
+        snkPlanCiz();
+      }
+    } catch (e) {
+      /* Okunamadıysa ESKİ veriyle devam etme: üzerine yazma uyarısı bayat veriye bakıp
+         yanlış (ya da hiç) uyarır. null = "bilinmiyor", plan bunu ayrıca söyler. */
+      snk.kanalKlip = null;
+    }
+  }
+
+  /* Oyun sesinin ŞU ANDA bulunduğu kanal. Panel onu en alta taşıyacak; hangisi olduğunu
+     bilmesi gerek. Varsayılan A3 (kullanıcının OBS düzeni), klip içermiyorsa "yok". */
+  function snkOyunKanalDoldur() {
+    var sel = $("snkOyunKanal"); if (!sel) return;
+    var onceki = sel.value;
+    sel.innerHTML = "";
+    var o0 = document.createElement("option");
+    o0.value = ""; o0.textContent = "yok / zaten en altta";
+    sel.appendChild(o0);
+    var n = snk.sesKanalSayisi || 0, kl = snk.kanalKlip || [];
+    for (var i = 0; i < n; i++) {
+      if (i === 0) continue;                       // A1 = OBS mikrofonu, oyun sesi olamaz
+      var o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = "A" + (i + 1) + (kl[i] ? (" — " + kl[i] + " klip") : " — boş");
+      sel.appendChild(o);
+    }
+    var kayitli = lsGet("snkOyunKanal", null);
+    if (onceki) sel.value = onceki;
+    else if (kayitli != null && kayitli !== "") sel.value = kayitli;
+    else if (n > 2 && kl[2]) sel.value = "2";      // varsayılan: A3
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
   }
 
   // ---------- 3) yerleşim tablosu ----------
@@ -1810,15 +1860,23 @@
 
       var orta = document.createElement("div"); orta.className = "snk-orta";
       var isim = document.createElement("div"); isim.className = "snk-kisi";
-      if (!p.kilit && p.renk != null) {
-        var sw = document.createElement("span"); sw.className = "snk-etiket";
-        sw.style.background = _labelRenk(p.renk); sw.title = KISI.LABELLER[p.renk] || "";
-        isim.appendChild(sw);
-      }
+      // Renk noktası KALDIRILDI: timeline'da klip renklendirme iptal edildi (kafa karıştırıyordu).
       isim.appendChild(document.createTextNode(p.bilinmeyen ? "Bilinmeyen kişi" : p.karakter));
       orta.appendChild(isim);
       var alt = document.createElement("div"); alt.className = "snk-dosya";
       alt.textContent = p.dosya ? p.dosya.dosya : (p.not || "");
+      /* Oyun sesi satırı bir BİLGİ değil, panelin YAPACAĞI iş. Soluk 11px yazıda kaybolup
+         "kilitli, dokunulmayacak" gibi okunuyordu; normal renkte ve sarmalı göster. */
+      if (p.oyun) { alt.style.color = "var(--text)"; alt.style.whiteSpace = "normal"; }
+      /* ÜZERİNE YAZMA UYARISI: yerleştirme overwriteClip ile yapılıyor. Hedef kanalda
+         zaten klip varsa (tipik durum: oyun sesi hâlâ eski yerinde duruyor) o klip EZİLİR.
+         Kanal sırası değiştiği için bu artık gerçek bir risk — satırda görünsün. */
+      if (p.dosya && snk.kanalKlip && snk.kanalKlip[p.kanal] > 0) {
+        var uy = document.createElement("div");
+        uy.className = "snk-dosya"; uy.style.color = "var(--warn)";
+        uy.textContent = "⚠ A" + (p.kanal + 1) + "'de zaten " + snk.kanalKlip[p.kanal] + " klip var — üzerine yazılacak";
+        orta.appendChild(uy);
+      }
       orta.appendChild(alt);
       row.appendChild(orta);
 
@@ -1926,12 +1984,7 @@
       } else u.hidden = true;
     }
   }
-  // Premiere label indeksi -> yaklaşık ekran rengi (sadece tabloda göstermek için)
-  function _labelRenk(i) {
-    var r = ["#a78bfa", "#818cf8", "#22d3ee", "#c4b5fd", "#38bdf8", "#22c55e", "#fb7185", "#fbbf24",
-             "#a855f7", "#3b82f6", "#14b8a6", "#e879f9", "#d6bcab", "#4ade80", "#a16207", "#facc15"];
-    return r[i] || "#888";
-  }
+  // _labelRenk KALDIRILDI — timeline renk etiketleme iptal edildiği için kullanan kalmadı.
 
   // ---------- 4) hizalama + uygulama ----------
   // Timeline'daki bir ses kanalını hizalama referansı olarak WAV'a döker
@@ -1968,7 +2021,7 @@
            hem A1'de hem yeni kanalda çıkıyor (çift/yankılı ses) ve kullanıcı bunu ancak
            montajda fark ediyor. Uyarı artık burada da yazılı. */
         var devam = await uiConfirm(bilinmeyen + " dosyanın kime ait olduğu bilinmiyor; bunlar isimsiz " +
-          "yerleştirilecek ve renk almayacak." +
+          "yerleştirilecek." +
           (snk.cekenDosya ? "" :
             "\n\n⚠ DİKKAT: “" + snkCekenKim() + "” adına eşleşen dosya bulunamadı. Bilinmeyenlerden biri " +
             "SENİN kaydınsa yerleştirme — sesin zaten A1'de, videoda çift çıkar.") +
@@ -2006,6 +2059,11 @@
       catch (e) { throw new Error("Sekans bilgisi okunamadı."); }
       if (bilgi.error) throw new Error("Aktif sekans yok. Önce bir sekans aç.");
       snk.sesKanalSayisi = bilgi.audioTracks;
+      /* Klip sayılarını BURADA da tazele: üzerine yazma uyarısının tek veri kaynağı bu.
+         Eskiden yalnız klasör seçilirken okunuyordu; kullanıcı arada sekans değiştirir ya da
+         Premiere'de klip taşırsa uyarı BAYAT veriye bakıp sessizce yanlış (ya da hiç)
+         uyarıyordu — oyun sesi habersiz eziliyordu. */
+      snk.kanalKlip = bilgi.clipCounts || [];
       var gereken = 0;
       snk.plan.forEach(function (p) { if (p.kanal + 1 > gereken) gereken = p.kanal + 1; });
       if (gereken > bilgi.audioTracks) {
@@ -2140,7 +2198,38 @@
         hizalanamayan.forEach(function (h) { atlandiNot += "\n• " + h.karakter + " (" + h.dosya.dosya + ")"; });
         atlandiNot += "\nDosya bozuk ya da çok kısa olabilir.";
       }
-      var msg = yerlesecek.length + " ses dosyası yerleştirilecek:\n\n" + ozet.join("\n") + atlandiNot +
+      /* ÜZERİNE YAZMA: yerleştirme overwriteClip ile yapılıyor, hedef kanaldaki mevcut klip
+         EZİLİR. Kanal sırası değiştiğinden (oyun sesi artık en sonda) bu gerçek bir risk:
+         kullanıcının oyun sesi hâlâ A3'teyse ve oraya Mimi gidecekse önceden görmeli. */
+      var ezilecek = [];
+      yerlesecek.forEach(function (p) {
+        var say = (snk.kanalKlip && snk.kanalKlip[p.kanal]) || 0;
+        if (say > 0) ezilecek.push("A" + (p.kanal + 1) + " (" + say + " klip) → " + p.karakter);
+      });
+      /* OYUN SESİ TAŞIMA: kişiler yerleşmeden ÖNCE yapılmalı, yoksa oyun sesi zaten ezilmiş olur.
+         Hedef = plandaki "Oyun sesi" satırının kanalı (herkesin altı). */
+      var oyunSel = $("snkOyunKanal");
+      var oyunKaynak = oyunSel && oyunSel.value !== "" ? parseInt(oyunSel.value, 10) : -1;
+      var oyunSatir = null;
+      snk.plan.forEach(function (p) { if (p.oyun) oyunSatir = p; });
+      var oyunHedef = oyunSatir ? oyunSatir.kanal : -1;
+      var oyunTasinacak = (oyunKaynak >= 0 && oyunHedef >= 0 && oyunKaynak !== oyunHedef);
+      var oyunNot = oyunTasinacak
+        ? ("\n\nOyun sesi A" + (oyunKaynak + 1) + " → A" + (oyunHedef + 1) + " taşınacak " +
+           "(kişiler yerleşmeden önce).\nNOT: taşıma kopyalama yoluyla yapılıyor — o klibe " +
+           "uyguladığın efektler ve ses seviyesi anahtar kareleri KORUNMAZ.")
+        : "";
+      // Taşınacak kanalı ezme listesinden düş: orası taşımadan sonra boşalmış olacak.
+      if (oyunTasinacak) {
+        ezilecek = ezilecek.filter(function (s) { return s.indexOf("A" + (oyunKaynak + 1) + " (") !== 0; });
+      }
+      var ezmeNot = ezilecek.length
+        ? ("\n\n⚠ ŞU KANALLARDA ZATEN KLİP VAR, ÜZERİNE YAZILACAK:\n• " + ezilecek.join("\n• "))
+        : "";
+      if (snk.kanalKlip === null) {
+        ezmeNot += "\n\n⚠ Kanalların içeriği okunamadı — üzerine yazma riski KONTROL EDİLEMEDİ.";
+      }
+      var msg = yerlesecek.length + " ses dosyası yerleştirilecek:\n\n" + ozet.join("\n") + oyunNot + atlandiNot + ezmeNot +
         (tut.aykiriSayisi ? "\n\n⚠ " + tut.aykiriSayisi + " dosyanın kayması diğerlerinden farklı — " +
           "yanlış hizalanmış olabilir. Uyguladıktan sonra o kanalları kontrol et." : "") +
         (caprazNot ? "\n" + caprazNot : "") +
@@ -2156,6 +2245,26 @@
          gider — yani güvenlik ağı tam tersine veri kaybettirir. */
       var sv = String(await evalES("saveProject()"));
       snkLog("Kaydet: " + sv);
+
+      /* OYUN SESİNİ TAŞI — kişiler yerleşmeden ÖNCE. Sıra kritik: sonra yapılsaydı hedef
+         kanala zaten bir kişi konmuş olurdu ve taşıma "hedef boş değil" diye reddedilirdi;
+         daha kötüsü, kaynak kanala (A3) kişi yazılıp oyun sesi çoktan ezilmiş olurdu. */
+      if (oyunTasinacak) {
+        if (snk.iptal) throw new Error("İptal edildi");
+        snkProgress(88, "Oyun sesi A" + (oyunHedef + 1) + "'e taşınıyor…");
+        var tas = String(await evalES("kanalTasi(" + oyunKaynak + "," + oyunHedef + ")"));
+        snkLog("Oyun sesi taşıma: " + tas);
+        if (tas.indexOf("ok:") !== 0) {
+          /* Taşıma başarısızsa DEVAM ETME: kişiler yerleşirse oyun sesinin durduğu kanal
+             ezilir. host hiçbir şey silmeden döndüğü için timeline hâlâ sağlam. */
+          snkFail("⚠ Oyun sesi taşınamadı — hiçbir şey yerleştirilmedi.", "warn");
+          uiAlert("Oyun sesi taşınamadı, bu yüzden yerleştirme yapılmadı (timeline'ın bozulmasın diye).\n\n" +
+                  tas.replace(/^[a-z_]+:/, "") +
+                  "\n\nOyun sesini Premiere'de elle en alt kanala taşıyıp tekrar dene, ya da " +
+                  "“Oyun sesi şu an hangi kanalda?” seçimini “yok” yap.", "Senkron");
+          return;
+        }
+      }
       if (sv.indexOf("ok:") !== 0) {
         var devamKayit = await uiConfirm("Proje kaydedilemedi: " + hostMesaj(sv) + "\n\n" +
           "Devam edersem “Geri Al” bu ana DÖNEMEZ; daha eski bir sürüme döner ve aradaki " +
@@ -2196,8 +2305,9 @@
       snkProgress(92, "Premiere'e yerleştiriliyor…");
       var satirlar = [];
       yerlesecek.forEach(function (p) {
-        satirlar.push(p.konacakYol + "|" + p.kanal + "|" + Math.max(0, p.konacakBas).toFixed(3) + "|" +
-                      (p.bilinmeyen ? -1 : (p.renk != null ? p.renk : 0)) + "|" + p.karakter);
+        // Renk alanı KALDIRILDI (timeline etiketleme iptal edildi) — host da 4 alan bekliyor.
+        satirlar.push(p.konacakYol + "|" + p.kanal + "|" + Math.max(0, p.konacakBas).toFixed(3) +
+                      "|" + p.karakter);
       });
       var planDosya = path.join(cfg.workDir, "snkplan_" + Date.now() + ".txt");
       fs.writeFileSync(planDosya, satirlar.join("\n"), "utf8");
@@ -2270,6 +2380,10 @@
   // ---------- olay bağlantıları ----------
   if ($("snkKlasor")) $("snkKlasor").addEventListener("click", snkKlasorSec);
   if ($("snkUygula")) $("snkUygula").addEventListener("click", snkCalistir);
+  // Oyun sesi kanalı seçimi hatırlansın — kullanıcının düzeni videodan videoya aynı.
+  if ($("snkOyunKanal")) $("snkOyunKanal").addEventListener("change", function () {
+    lsSet("snkOyunKanal", this.value);
+  });
   if ($("snkCancel")) $("snkCancel").addEventListener("click", function () {
     snk.iptal = true;
     try { if (pipeline && pipeline.cancelAll) pipeline.cancelAll(); } catch (e) {}
@@ -2330,12 +2444,31 @@
      "kimse konuşmuyor" sayılıp kesiliyordu — yani arkadaşın konuşması siliniyordu.
      Artık klip içeren bütün kanallar listelenir. Varsayılan seçim A3 HARİÇ hepsi
      (A3 sabit kural gereği oyun sesi). Seçim kanal numarasına göre hatırlanır. */
-  var OYUN_KANALI = 2;             // 0-tabanlı: A3
+  /* OYUN SESİ ARTIK EN SON KANALDA (yeni kanal düzeni: A1 çeken · A2 diğeri · sonra
+     karakterler · en son oyun sesi). Eskiden burada "A3 = oyun sesi" sabiti vardı; o
+     düzende doğruydu ama yeni düzende A3 Mimi oluyor, yani yanlış kişiyi analiz dışı
+     bırakırdı. Varsayılan: klip içeren SON kanal hariç hepsi. Kullanıcı değiştirebilir,
+     seçim kanal numarasına göre hatırlanır. */
   var _acKanallar = [];            // [{idx, clips, chk}]
+  var _acSonKanal = -1;            // klip içeren en son kanal (yeni düzende oyun sesi)
 
+  /* VARSAYILAN: HEPSİ İŞARETLİ — tahmin YAPILMAZ.
+     Önce "son kanal oyun sesidir" diye varsayıp onu dışlıyordum. Ama panel oyun sesini
+     taşıyamadığı projelerde son kanal bir ARKADAŞ oluyor; o kanal analiz dışı kalınca
+     arkadaşın tek başına konuştuğu yerler "boşluk" sayılıp ripple-delete ile SİLİNİYORDU.
+     İki hatanın maliyeti eşit değil:
+       - oyun sesi yanlışlıkla İÇERİDE ise: hiç boşluk bulunmaz, kimse bir şey kaybetmez,
+         kullanıcı sonucu görüp kutuyu kaldırır.
+       - bir kişi yanlışlıkla DIŞARIDA ise: konuşması sessizce silinir.
+     Bu yüzden varsayılan güvenli tarafta: hepsi işaretli.
+
+     Anahtar adı "acCh" -> "acCh2_" oldu: kanal NUMARALARININ ANLAMI değişti (eski düzende
+     A3 oyun sesiydi, yenisinde bir kişi). Eski kayıtlı seçimler taşınsaydı, kullanıcının
+     "A3'ü analiz etme" tercihi artık bir ARKADAŞI dışarıda bırakırdı. Ad değişikliği eski
+     seçimleri bir kez unutturuyor. */
   function acKanalSecili(idx) {
-    var v = lsGet("acCh" + idx, null);
-    return (v == null) ? (idx !== OYUN_KANALI) : (v === "1");
+    var v = lsGet("acCh2_" + idx, null);
+    return (v == null) ? true : (v === "1");
   }
   function acSeciliKanallar() {
     var out = [];
@@ -2363,6 +2496,8 @@
       var u0 = $("acKanalUyari"); if (u0) u0.hidden = true;
       return;
     }
+    // Varsayılan seçim için: klip içeren SON kanal = yeni düzende oyun sesi.
+    _acSonKanal = dolu[dolu.length - 1].idx;
     dolu.forEach(function (t) {
       var row = document.createElement("label");
       row.className = "switch-row"; row.style.margin = "0";
@@ -2370,13 +2505,14 @@
       sol.appendChild(document.createTextNode("A" + (t.idx + 1)));
       var s = document.createElement("small");
       s.textContent = " " + t.clips + " klip" +
-        (t.idx === 0 ? " · senin mikrofonun" : (t.idx === OYUN_KANALI ? " · oyun sesi (genelde işaretlenmez)" : ""));
+        (t.idx === 0 ? " · senin mikrofonun"
+                     : (t.idx === _acSonKanal ? " · en alt kanal — oyun sesi buradaysa KUTUYU KALDIR" : ""));
       sol.appendChild(s);
       var chk = document.createElement("input");
       chk.type = "checkbox"; chk.checked = acKanalSecili(t.idx);
       (function (idx, kutu) {
         kutu.addEventListener("change", function () {
-          lsSet("acCh" + idx, kutu.checked ? "1" : "0");
+          lsSet("acCh2_" + idx, kutu.checked ? "1" : "0");
           acAnalizGecersiz();          // seçim değişti: ekrandaki eski analiz artık geçersiz
           acKanalUyariGuncelle();
         });

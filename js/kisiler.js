@@ -24,11 +24,15 @@ var LABELLER = ["Violet", "Iris", "Caribbean", "Lavender", "Cerulean", "Forest",
 /* Varsayılan kadro. renk = Premiere label indeksi; panelin karakter renklerine en yakın olan seçildi
    (Tofi kırmızı -> Rose, Moni mavi -> Blue, Dora yeşil -> Green, Mimi pembe -> Magenta,
     Niko sarı -> Yellow, Sage -> Teal). */
+/* SIRA ÖNEMLİDİR — ses kanallarının sırasını bu liste belirler.
+   A1 = videoyu çeken (Tofi/Moni'den hangisi seçiliyse), A2 = ikisinden diğeri,
+   sonra bu listedeki sırayla kalan karakterler, en sonda oyun sesi.
+   Videoda olmayan karakter atlanır ve alttakiler yukarı kayar. */
 var VARSAYILAN = [
   { karakter: "Tofi", adlar: ["yusufwrl"], renk: 6 },
   { karakter: "Moni", adlar: ["e", "31241324asdwq12123"], renk: 9 },
-  { karakter: "Dora", adlar: ["dielyzed"], renk: 13 },
   { karakter: "Mimi", adlar: ["1298721"], renk: 11 },
+  { karakter: "Dora", adlar: ["dielyzed"], renk: 13 },
   { karakter: "Sage", adlar: ["tenebrissa"], renk: 10 },
   { karakter: "Niko", adlar: ["pompa456", "adsadsaadas"], renk: 15 }
 ];
@@ -144,13 +148,17 @@ function parseText(text, oncekiler) {
   }
   return out;
 }
+/* Renk etiketi ARTIK YAZILMIYOR: timeline'da klip renklendirme kaldırıldı (kafa karıştırıyordu).
+   parseText hâlâ "[Mavi]" gibi eski satırları kabul ediyor ki kullanıcının mevcut listesi
+   bozulmasın; sadece yeni yazımda gösterilmiyor.
+   SIRA ÖNEMLİ: bu listenin sırası ses kanallarının sırasını belirler. */
 function toText(entries) {
   var out = [];
   entries = entries || [];
   for (var i = 0; i < entries.length; i++) {
     var k = entries[i];
     if (!k || !k.karakter) continue;
-    out.push(k.karakter + ": " + ((k.adlar || []).join(", ")) + " [" + (LABELLER[k.renk] || "Violet") + "]");
+    out.push(k.karakter + ": " + ((k.adlar || []).join(", ")));
   }
   return out.join("\n");
 }
@@ -161,8 +169,31 @@ function defaults() { return JSON.parse(JSON.stringify(VARSAYILAN)); }
    buradan okur; panel parseText'i tek argümanla çağırdığı için tek koruma noktası budur. */
 var _sonListe = null;
 
+/* SIRA GÖÇÜ (sürüm 2).
+   Listenin SIRASI artık ses kanallarının sırasını belirliyor. Daha önce sıra hiçbir işe
+   yaramadığı için kullanıcıların kayıtlı dosyası rastgele (eski varsayılan) sırada:
+   Tofi, Moni, Dora, Mimi… Bu dosya olduğu gibi okunursa yeni düzen KULLANICIYA HİÇ ULAŞMAZ
+   ve panel, sürüm notunda yazandan farklı bir kanal sırası üretir.
+   Göç yalnızca SIRAYI düzeltir: kullanıcının eklediği Discord adları ve listede olmayan
+   ekstra karakterler korunur (bilinmeyenler sona, kendi sıralarıyla). */
+var SURUM = 2;
+function _siraGocu(liste) {
+  var hedef = VARSAYILAN, sirali = [], kalan = [], i, j;
+  var alindi = {};
+  for (i = 0; i < hedef.length; i++) {
+    for (j = 0; j < liste.length; j++) {
+      if (alindi[j]) continue;
+      if (liste[j] && _norm(liste[j].karakter) === _norm(hedef[i].karakter)) {
+        sirali.push(liste[j]); alindi[j] = true; break;
+      }
+    }
+  }
+  for (j = 0; j < liste.length; j++) if (!alindi[j] && liste[j]) kalan.push(liste[j]);
+  return sirali.concat(kalan);
+}
+
 function load(extRoot) {
-  var sonuc = null;
+  var sonuc = null, gocGerekli = false;
   try {
     var p = path.join(extRoot, DOSYA);
     if (fs.existsSync(p)) {
@@ -170,10 +201,17 @@ function load(extRoot) {
       if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
       var j = JSON.parse(raw);
       // dizi DEĞİLSE varsayılana dön — elle bozulmuş JSON paneli çökertiyordu
-      if (j && Object.prototype.toString.call(j.kisiler) === "[object Array]") sonuc = j.kisiler;
+      if (j && Object.prototype.toString.call(j.kisiler) === "[object Array]") {
+        sonuc = j.kisiler;
+        gocGerekli = (parseInt(j.surum, 10) || 1) < SURUM;
+      }
     }
   } catch (e) {}
   if (!sonuc) sonuc = defaults();
+  else if (gocGerekli) {
+    sonuc = _siraGocu(sonuc);
+    try { save(extRoot, sonuc); } catch (e2) {}   // bir kez düzelt, bir daha uğraşma
+  }
   _sonListe = sonuc;
   return sonuc;
 }
@@ -185,7 +223,10 @@ function save(extRoot, entries) {
     if (!k) continue;
     temiz.push({ karakter: k.karakter, adlar: k.adlar || [], renk: (k.renk != null ? k.renk : 0) });
   }
-  fs.writeFileSync(path.join(extRoot, DOSYA), JSON.stringify({ kisiler: temiz }, null, 2), "utf8");
+  /* surum: sıra göçünün bir kez çalışıp bir daha çalışmaması için. Yazılmazsa panel her
+     açılışta kullanıcının elle değiştirdiği sırayı varsayılana geri çevirirdi. */
+  fs.writeFileSync(path.join(extRoot, DOSYA),
+    JSON.stringify({ surum: SURUM, kisiler: temiz }, null, 2), "utf8");
   _sonListe = temiz;    // yazma başarılıysa "bilinen son iyi liste" bu olur
 }
 

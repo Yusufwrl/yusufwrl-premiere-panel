@@ -69,7 +69,7 @@
             </div>
             <div class="tc-body">
               <div class="tc-title">Senkron</div>
-              <div class="tc-desc">Craig kayıtlarını otomatik hizala, kanallara yerleştir, renklendir</div>
+              <div class="tc-desc">Craig kayıtlarını otomatik hizala ve doğru kanallara yerleştir</div>
             </div>
             <div class="tc-arrow">›</div>
           </button>
@@ -92,12 +92,12 @@
           <div class="seg" id="segTrack">
             <button class="seg-btn active" data-track="0" title="Sadece senin mikrofonun yazıya dökülür">A1</button>
             <button class="seg-btn" data-track="1" title="Sadece arkadaşların kanalı (Discord) yazıya dökülür">A2</button>
-            <button class="seg-btn" data-track="2" title="A3 genelde oyun sesidir; konuşma yoksa altyazı da çıkmaz">A3</button>
+            <button class="seg-btn" data-track="2" title="Sadece A3 kanalı yazıya dökülür">A3</button>
             <!-- Eski etiket "Mix" idi: ne yaptığı hiçbir yerde yazmıyordu. Etiket artık kendini anlatıyor. -->
             <button class="seg-btn" data-track="mix" title="A1 + A2 birlikte yazıya dökülür (A3 oyun sesi dahil edilmez)">A1+A2</button>
           </div>
           <!-- Kanal numaraları tek başına bir şey anlatmıyordu; tek satırlık hatırlatma. -->
-          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord) · A3 = oyun sesi.</p>
+          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord karışımı ya da Senkron sonrası tek kişi). Senkron yaptıysan oyun sesi <b>en alt</b> kanaldadır.</p>
           <div class="field" style="margin-top:12px;">
             <label>Stil</label>
             <!-- "caption" yazılımcı olmayan kullanıcıya bir şey anlatmıyor: bu seçenek MOGRT yerine
@@ -285,7 +285,8 @@
              varken o bölüm "boşluk" sayılıp KESİLİYORDU. -->
         <div class="card">
           <div class="card-title">Konuşma kanalları</div>
-          <p class="note" style="margin:0 0 10px">Boşluk = <b>işaretli kanalların hiçbirinde</b> konuşma yok demek. Oyun sesi ve müzik kanallarını işaretleme, yoksa hiç boşluk bulunamaz.</p>
+          <p class="note" style="margin:0 0 10px">Boşluk = <b>işaretli kanalların hiçbirinde</b> konuşma yok demek. <b style="color:var(--text)">Oyun sesi ve müzik kanallarının kutusunu KALDIR</b> — yoksa hiç boşluk bulunamaz.<br>
+            Hepsi işaretli geliyor: bir kanalı yanlışlıkla dışarıda bırakmak o kişinin konuşmasını sildirir, içeride bırakmak ise sadece “boşluk bulunamadı” dedirtir.</p>
           <div id="acKanalRows"></div>
           <button class="btn-ghost" id="acKanalTara" type="button" style="margin-top:10px">Kanalları Yenile</button>
           <p class="note" id="acKanalUyari" hidden></p>
@@ -375,7 +376,13 @@
             <button class="seg-btn active" data-ceken="Tofi" type="button">Tofi</button>
             <button class="seg-btn" data-ceken="Moni" type="button">Moni</button>
           </div>
-          <p class="note">Çeken kişi A1'de kalır (OBS mikrofonun). Karşı taraf A2'ye yerleşir, diğerleri A4'ten devam eder.</p>
+          <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
+               yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
+          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen (OBS mikrofonun, dokunulmaz) · A2 = Tofi/Moni'den diğeri · sonra “Karakter İsimleri” listesindeki <b>sırayla</b> arkadaşların · <b>en alttaki kanal oyun sesi</b>. Videoda olmayan karakter kanal harcamaz, alttakiler yukarı kayar.</p>
+          <div class="field" style="margin-top:12px">
+            <label>Oyun sesi şu an hangi kanalda? <small style="color:var(--faint)">(panel onu en alta taşıyacak)</small></label>
+            <div class="select"><select id="snkOyunKanal"></select></div>
+          </div>
         </div>
 
         <div class="card" id="snkPlanCard" hidden>
@@ -412,7 +419,7 @@
           </summary>
           <div class="dict-body">
             <textarea id="snkKisiText" class="dict-text" rows="7" spellcheck="false"
-              placeholder="Tofi: yusufwrl [Rose]&#10;Moni: e, 31241324asdwq12123 [Blue]"></textarea>
+              placeholder="Tofi: yusufwrl&#10;Moni: e, 31241324asdwq12123&#10;(sıra = ses kanalı sırası)"></textarea>
             <div class="dict-actions">
               <button class="btn-ghost" id="snkKisiSave" type="button">Kaydet</button>
               <button class="btn-ghost" id="snkKisiReset" type="button">Varsayılanlar</button>

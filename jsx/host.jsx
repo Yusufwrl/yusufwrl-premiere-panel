@@ -174,7 +174,7 @@ function clearAudioTrack(trackIdx, korunacakAd) {
  * Craig dosyalarını projeye alır, doğru ses kanalına doğru saniyeye yerleştirir ve
  * proje panelinde karakterin rengini verir.
  *
- * Plan dosyası (UTF-8), her satır:  medyaYolu|sesKanalIndeksi|baslangicSaniye|renkIndeksi|ad
+ * Plan dosyası (UTF-8), her satır:  medyaYolu|sesKanalIndeksi|baslangicSaniye|ad
  *
  * DİKKAT — bu fonksiyonun kritik incelikleri:
  *  - Zaman SANİYE (Number) olarak verilir. ticks string verilirse klip 0'a düşer.
@@ -182,11 +182,11 @@ function clearAudioTrack(trackIdx, korunacakAd) {
  *  - Yerleştirmeden sonra kanalın klip sayısı KONTROL EDİLİR. Kanal tipi uyumsuzsa (saf Mono
  *    kanala stereo klip) Premiere sessizce hiçbir şey yapmıyor; bunu yakalamazsak kullanıcı
  *    "oldu" sanır.
- *  - İçe alınan ses dosyaları Premiere'de otomatik olarak varsayılan bir renk etiketi alır,
- *    bu yüzden setColorLabel her dosya için AÇIKÇA çağrılır.
+ *  - RENK ETIKETI VERILMEZ. Eskiden her klibe setColorLabel ile karakter rengi atanıyordu;
+ *    kullanıcı bunu kafa karıştırıcı buldu (Premiere'in kendi etiket renkleriyle çakışıyor).
  */
 function senkronUygula(planDosyaPath) {
-    /* Undo grubu: N dosyanin yerlestirilmesi + renk etiketleri tek Ctrl+Z ile geri alinabilsin.
+    /* Undo grubu: N dosyanin yerlestirilmesi tek Ctrl+Z ile geri alinabilsin.
        Grup olmadan her klip ayri bir undo adimiydi; yanlis klasor secildiginde kullanicinin
        tek tek onlarca kez geri alma yapmasi gerekiyordu. */
     var _ug = false; try { app.beginUndoGroup("Yusufwrl Senkron"); _ug = true; } catch (eug) {}
@@ -198,9 +198,9 @@ function senkronUygula(planDosyaPath) {
         var isler = [], yollar = [], i;
         for (i = 0; i < lines.length; i++) {
             var ln = lines[i]; if (!ln) continue;
-            var p = ln.split("|"); if (p.length < 5) continue;
+            var p = ln.split("|"); if (p.length < 4) continue;
             var is = { yol: p[0], kanal: parseInt(p[1], 10), bas: parseFloat(p[2]),
-                       renk: parseInt(p[3], 10), ad: p.slice(4).join("|") };
+                       ad: p.slice(3).join("|") };
             if (isNaN(is.kanal) || isNaN(is.bas)) continue;
             if (is.bas < 0) is.bas = 0;
             isler.push(is); yollar.push(is.yol);
@@ -297,10 +297,10 @@ function senkronUygula(planDosyaPath) {
             var pi = _bul(it.yol);
             if (!pi) { hata++; if (!ilkHata) ilkHata = it.ad + ": projede bulunamadı"; continue; }
 
-            // renk etiketi (yerleştirmeden ÖNCE — timeline klibi de renkli doğsun)
-            if (!isNaN(it.renk) && it.renk >= 0 && it.renk <= 15) {
-                try { pi.setColorLabel(it.renk); } catch (ec) {}
-            }
+            /* RENK ETIKETI VERILMEZ (kullanici istegi). Burada eskiden setColorLabel cagriliyor,
+               her Craig klibi karakterin rengiyle isaretleniyordu; Premiere'in kendi etiket
+               renkleriyle karisip kafa karistiriyordu. Klipler artik Premiere'in varsayilan
+               etiketiyle kaliyor. */
 
             if (it.kanal < 0 || it.kanal >= seq.audioTracks.numTracks) {
                 hata++; if (!ilkHata) ilkHata = it.ad + ": A" + (it.kanal + 1) + " kanalı yok";
@@ -484,6 +484,117 @@ function _setTextAllWays(ti, text) {
 
 function _setEndSec(ti, endSec, TICKS) {
     try { var t = new Time(); t.ticks = String(Math.round(endSec * TICKS)); ti.end = t; } catch (e) {}
+}
+
+/* BIR SES KANALINDAKI TUM KLIPLERI BASKA KANALA TASIR.
+   Premiere'de "klibi baska kanala tasi" API'si YOKTUR; tek yol ayni projectItem'i hedef
+   kanala overwriteClip ile koyup kaynaktakini silmektir. Bu bir KOPYALAMA oldugu icin
+   iki tehlike var, ikisi de burada kapatiliyor:
+
+   1) COKLU-AKISLI KAYIT: OBS tek dosyaya birden cok ses akisi yazdiginda A1/A2/A3
+      AYNI projectItem'in 1./2./3. akisidir — kanal konumu klibin KIMLIGIDIR. Boyle bir
+      klibi baska kanala koyarsak Premiere VARSAYILAN eslemeyi kullanir ve hedefe oyun
+      sesi degil MIKROFON duser. Dosya yolu ayni oldugu icin dogrulama da yakalayamaz.
+      Bu yuzden kaynak klibin medya dosyasi baska bir kanalda da geciyorsa TASIMA YAPILMAZ.
+   2) DOGRULANMAMIS SILME: yerlestirme basarisiz olursa kaynak silinmemeli. Once hedefe
+      konur, sayi ve medya yolu dogrulanir; tutmazsa YENI konanlar geri alinir ve kaynak
+      oldugu gibi birakilir.
+
+   Klibe uygulanmis efektler ve ses seviyesi anahtar kareleri KOPYALANMAZ — panel bunu
+   kullaniciya onay ekraninda soyler. */
+function kanalTasi(kaynakIdx, hedefIdx) {
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Kanal Tasi"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var n = seq.audioTracks.numTracks;
+        var ki = parseInt(kaynakIdx, 10), hi = parseInt(hedefIdx, 10);
+        if (isNaN(ki) || isNaN(hi)) return "err:Kanal numarasi gecersiz";
+        if (ki === hi) return "ok:0 klip tasindi (zaten dogru kanalda)";
+        if (ki < 0 || ki >= n) return "err:A" + (ki + 1) + " kanali yok";
+        if (hi < 0 || hi >= n) return "err:A" + (hi + 1) + " kanali yok. Premiere'de " +
+                                       (hi + 1 - n) + " ses kanali ekle (panel ekleyemiyor).";
+        var kay = seq.audioTracks[ki], hed = seq.audioTracks[hi];
+        var adet = kay.clips.numItems;
+        if (!adet) return "ok:0 klip tasindi (A" + (ki + 1) + " bos)";
+        if (hed.clips.numItems > 0) return "err:A" + (hi + 1) + " bos degil (" +
+                                          hed.clips.numItems + " klip var). Once orayi bosalt.";
+
+        var TICKS = 254016000000, i, j;
+
+        // --- kaynak kliplerin bilgisi ---
+        var bilgi = [];
+        for (i = 0; i < adet; i++) {
+            var c = kay.clips[i], yol = "";
+            try { yol = String(c.projectItem.getMediaPath()); } catch (e1) { yol = ""; }
+            if (!yol) return "err:A" + (ki + 1) + " kanalindaki bir klibin medya dosyasi okunamadi " +
+                            "(ic ice sekans / birlestirilmis klip olabilir). Tasima yapilmadi.";
+            bilgi.push({ pi: c.projectItem, yol: yol,
+                         bas: parseFloat(c.start.ticks), son: parseFloat(c.end.ticks),
+                         inT: parseFloat(c.inPoint.ticks) });
+        }
+
+        /* --- COKLU-AKIS KONTROLU --- kaynak medyalari baska bir ses kanalinda da var mi? */
+        for (i = 0; i < n; i++) {
+            if (i === ki) continue;
+            var tr = seq.audioTracks[i];
+            for (j = 0; j < tr.clips.numItems; j++) {
+                var y2 = "";
+                try { y2 = String(tr.clips[j].projectItem.getMediaPath()); } catch (e2) { y2 = ""; }
+                if (!y2) continue;
+                for (var b = 0; b < bilgi.length; b++) {
+                    if (bilgi[b].yol === y2) {
+                        return "err:A" + (ki + 1) + " ile A" + (i + 1) + " AYNI dosyadan geliyor " +
+                               "(coklu-akisli kayit). Boyle bir klip baska kanala tasinirsa yanlis " +
+                               "ses akisi yerlesir; tasima YAPILMADI. Oyun sesini elle tasi ya da " +
+                               "Klip > Degistir > Ses Kanallari ile eslemesini degistir.";
+                    }
+                }
+            }
+        }
+
+        // --- hedefe yerlestir ---
+        var konan = 0;
+        for (i = 0; i < bilgi.length; i++) {
+            var bi = bilgi[i];
+            var oldu = false;
+            try { oldu = hed.overwriteClip(bi.pi, bi.bas / TICKS); } catch (e3) { oldu = false; }
+            var yeni = _findClipNear(hed, bi.bas / TICKS, TICKS);
+            if (!yeni) break;
+            // in/out ve bitisi orijinaline esitle (klip kirpilmis olabilir)
+            try { var tin = new Time(); tin.ticks = String(Math.round(bi.inT)); yeni.inPoint = tin; } catch (e4) {}
+            try { var ten = new Time(); ten.ticks = String(Math.round(bi.son)); yeni.end = ten; } catch (e5) {}
+            konan++;
+        }
+
+        // --- DOGRULA: sayi ve medya yollari tutuyor mu? ---
+        var saglam = (konan === bilgi.length && hed.clips.numItems === bilgi.length);
+        if (saglam) {
+            for (i = 0; i < hed.clips.numItems; i++) {
+                var y3 = "";
+                try { y3 = String(hed.clips[i].projectItem.getMediaPath()); } catch (e6) { y3 = ""; }
+                var bulundu = false;
+                for (j = 0; j < bilgi.length; j++) if (bilgi[j].yol === y3) { bulundu = true; break; }
+                if (!bulundu) { saglam = false; break; }
+            }
+        }
+        if (!saglam) {
+            // geri al: yeni konanlari temizle, kaynak oldugu gibi kalsin
+            for (i = hed.clips.numItems - 1; i >= 0; i--) { try { hed.clips[i].remove(false, false); } catch (e7) {} }
+            return "err:Tasima dogrulanamadi (" + konan + "/" + bilgi.length +
+                   "). Hicbir sey silinmedi, kanallar eski halinde.";
+        }
+
+        // --- dogrulandi: kaynagi bosalt ---
+        var silinen = 0;
+        for (i = kay.clips.numItems - 1; i >= 0; i--) {
+            try { kay.clips[i].remove(false, false); silinen++; } catch (e8) {}
+        }
+        return "ok:" + konan + " klip A" + (ki + 1) + " -> A" + (hi + 1) + " tasindi" +
+               (silinen !== konan ? (", DIKKAT: kaynakta " + (bilgi.length - silinen) + " klip silinemedi") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 // vTrack'te başlangıcı startSec'e en yakın klibi bulur (yeni yerleştirilen).

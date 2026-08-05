@@ -5,7 +5,7 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 ## Yapı
 - Panel arayüzü: `index.html` + `js/app.js` + `js/pipeline.js` — CEP (CSInterface.js, `--enable-nodejs --mixed-context`).
 - Karakter sözlüğü: `js/sozluk.js` — özel isimleri düzeltir (Tofi/Moni/Dora/Mimi/Niko). İki katman: motora `--hotwords` ipucu + transkript sonrası kesin kelime düzeltmesi (zincirlenmiş Türkçe ekler dahil: "Tofilerden"). Liste `sozluk.json`'da (gitignore'lu), panelden düzenlenir.
-- Senkron kartı: `js/kisiler.js` (Discord adı → karakter + Premiere renk etiketi) + `js/hizala.js` (ses hizalama). Liste `kisiler.json`'da (gitignore'lu), panelden düzenlenir.
+- Senkron kartı: `js/kisiler.js` (Discord adı → karakter; **liste sırası = ses kanalı sırası**) + `js/hizala.js` (ses hizalama). Liste `kisiler.json`'da (gitignore'lu), panelden düzenlenir.
 
 ## Üretim modları (js/app.js)
 - **Tek Stil** (`runSingle`) — tek kanal ya da **A1+A2** (birleşik; panel düğmesinin etiketi budur, eski adı "Mix"ti).
@@ -25,8 +25,10 @@ Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşm
 - Üretim sonunda oturum `%ENGINE%\work\oturum_<sekans>.json`'a yazılır; panel açılışında geri yükleme teklif edilir.
 
 ## Senkron kartı (Craig kayıtları)
-Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.m4a`) otomatik hizalar, doğru kanala koyar, renk etiketi verir. Diarizasyonun yerini alır — ayrım %100 doğru.
-- **Kanal kuralı sabit:** A1 = videoyu çeken (OBS mikrofonu, dokunulmaz) · A2 = Tofi/Moni'den diğeri · A3 = oyun sesi (dokunulmaz) · A4+ = kalanlar. Çekenin Craig kaydı **timeline'a konmaz**, yalnızca hizalama referansıdır (sesi zaten A1'de).
+Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.m4a`) otomatik hizalar ve doğru kanala koyar. Diarizasyonun yerini alır — ayrım %100 doğru.
+- **Kanal kuralı:** A1 = videoyu çeken (OBS mikrofonu, dokunulmaz) · A2 = Tofi/Moni'den diğeri · sonra `kisiler.json` **sırasıyla** kalan karakterler · **en son oyun sesi**. Videoda olmayan karakter kanal harcamaz, alttakiler yukarı kayar (Sage+Niko yoksa oyun sesi A5). Çekenin Craig kaydı **timeline'a konmaz**, yalnızca hizalama referansıdır.
+- **Oyun sesini panel TAŞIR** (`kanalTasi`): kopyala-doğrula-sil. Kaynak medya başka bir ses kanalında da geçiyorsa (çoklu-akışlı OBS kaydı: A1/A2/A3 aynı dosyanın 1./2./3. akışı) taşıma **reddedilir** — yeniden yerleştirilen klibe varsayılan eşleme düşer ve hedefe oyun sesi değil mikrofon gider. Doğrulanmadan kaynak silinmez; efekt/ses seviyesi anahtar kareleri kopyalanmaz.
+- **Timeline renk etiketi YOK** (kullanıcı iptal etti). `setColorLabel` çağrısı kaldırıldı, plan dosyası biçimi `yol|kanal|başlangıç|ad`.
 - Hizalama enerji zarfı çapraz korelasyonu (`js/hizala.js`): kaba 200 ms → ince 20 ms, Pearson r. **Güvenilirlik sinyali korelasyon değil, medyan tutarlılığıdır** — tek başına r doğru eşleşmeyi yanlıştan ayıramıyor (ölçüldü). `tutarlilikKontrol` diğerlerinden sapan kaymayı işaretler.
 - Her karakterin her videoda olması gerekmez — eksik karakter normaldir, hata değil. Aynı kişiye iki dosya düşerse (Craig `_2` eki) ilki ana kayıt, kalanlar "(2. kayıt)" etiketiyle ayrı kanala gider.
 - Premiere'de **ses kanalı ekleme API'si yok** — kanal yetmezse panel uyarır, kullanıcı elle ekler. Yerleştirme yalnızca `audioTracks[i].overwriteClip(item, saniye)` ile yapılır; sekans düzeyindeki 4 parametreli biçim hedef kanalı garanti etmez ve A1'i ezebilir.
@@ -36,7 +38,7 @@ Discord'da Craig bot'un kişi başına ayrı aldığı kayıtları (`1-yusufwrl.
 
 ## AutoCut (sessizlik kesme)
 Konuşma olmayan boşlukları bulup timeline'dan ripple-delete eder. **Boşluk = işaretli kanalların HİÇBİRİNDE konuşma yok** demek.
-- **Kanallar sabit DEĞİL.** Panel klip içeren tüm ses kanallarını listeler; varsayılan seçim **A3 hariç hepsi** (A3 = oyun sesi). Seçim kanal numarasına göre localStorage'da hatırlanır (`yw.acCh<idx>`), AutoCut görünümü her açıldığında liste tazelenir.
+- **Kanallar sabit DEĞİL, tahmin de yapılmaz.** Panel klip içeren tüm ses kanallarını listeler; varsayılan **hepsi işaretli**. Asimetrik risk: bir kanalı yanlışlıkla dışarıda bırakmak o kişinin konuşmasını sildirir, içeride bırakmak yalnızca "boşluk bulunamadı" dedirtir. Seçim `yw.acCh2_<idx>`'te hatırlanır — kanal numaralarının ANLAMI değiştiği için eski `acCh` anahtarı bilerek terk edildi.
 - Eskiden A1+A2 **sabitti**; Senkron kartı arkadaşları A4+'ya koyduğu için onların sesi analize hiç girmiyor, yalnız A4'te biri konuşurken o bölüm boşluk sayılıp **kesiliyordu**. Yeni kanal eklerken bu tuzağı hatırla.
 - Bir kanalın sesi hazırlanamazsa analiz düşmez ama **sessizce de geçilmez** — log'a "ATLANDI" düşer, çünkü o kanaldaki konuşma kesilir.
 - Kesim maliyeti boşluk SAYISIYLA büyür: "En kısa boşluk" 0.1 sn binlerce kesim üretip saatlerce sürebilir; 0.3 sn neredeyse aynı kazancı çok daha hızlı verir.
