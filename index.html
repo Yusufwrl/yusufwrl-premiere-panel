@@ -113,7 +113,10 @@
             <input type="checkbox" id="chkShorts">
           </label>
           <div id="shortsAyar" hidden>
-            <p class="note" style="margin-top:8px">Altyazı kısalır (uzunluğa göre 1, en fazla 2 kelime) ve dikey karede aşağıdaki yüksekliğe konur.</p>
+            <!-- Bu satır GÖRÜNÜR olmalı: eskiden yalnız düğme ipucunda (title) yazıyordu ve
+                 kullanıcı "Konuşmacıya Göre neden kapalı?" diye sordu. -->
+            <p class="note" style="margin-top:8px">Altyazı kısalır (uzunluğa göre 1, en fazla 2 kelime) ve dikey karede aşağıdaki yüksekliğe konur.<br>
+              <b style="color:var(--text)">“Konuşmacıya Göre” bu sırada kapalıdır</b> — dikey karede iki kişinin altyazısı üst üste sığmıyor. Kutuyu kaldırınca geri gelir.</p>
             <div class="field" style="margin-top:10px">
               <label>Altyazının yüksekliği <small style="color:var(--faint)">(0 = en üst, 100 = en alt)</small></label>
               <div class="range-row">
