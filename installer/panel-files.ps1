@@ -32,7 +32,9 @@ $PanelInclude = @("index.html", "config.json", "update.json", "version.json",
 # kurulumda panel hic acilmaz. Guncellemede korunmasi js\updater.js configBirlestir()
 # ve installer\kur.ps1'deki birlestirme ile saglaniyor.
 $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
-                    "kisiler.json", "assemblyai-key.txt")
+                    "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
+                    "presetler.json",
+                    "presetler.bak.json")
 
 # Panele girmemesi NORMAL olan ust duzey ogeler (gelistirme/dagitim/dokuman dosyalari).
 # Test-PanelFileList bunlari "unutulmus" saymaz.

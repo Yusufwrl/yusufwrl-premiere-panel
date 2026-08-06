@@ -29,6 +29,38 @@ var VARSAYILAN = [
   { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko"] }
 ];
 
+/* BİLİNEN İSİMLER — oyun, marka ve süper kahraman adları. Motor Türkçe dinlerken bunları
+   kulaktan yazıyor ("maynkraft", "betmen") ve her videoda elle düzeltiliyordu.
+
+   YALNIZ METİN DÜZELTME KATMANINA GİRER, --hotwords'E GİRMEZ. Sebep: motorun kendi --help'i
+   hotwords'ün "unsafely cuts into the new tokens space" dediğini yazıyor ve faster-whisper
+   listeyi 223 token'da sessizce kesiyor — listeyi şişirmek KULLANICININ kendi karakter
+   isimlerini (Tofi/Moni/Dora…) ipucu dışına iter, yani asıl işi bozar.
+
+   KULLANICI HER ZAMAN KAZANIR: buildMap'te bu liste kullanıcı girdilerinden ÖNCE işlenir,
+   sonraki anahtar öncekini ezer. Kullanıcı "Batman" için başka bir yazım isterse sözlüğüne
+   yazar ve burası geçersiz kalır.
+
+   VARYANT SEÇİM KURALI (üstteki uyarının sıkı hâli): varyant en az 5 harf olacak ve gerçek
+   bir Türkçe kelimeye BENZEMEYECEK. Bu yüzden bilerek DIŞARIDA bırakılanlar:
+     · Hulk → "halk"  (halk = gerçek Türkçe kelime, masum cümleler bozulurdu)
+     · Thor → "tor"   (tor = Türkçe kelime, üstelik 3 harf)
+     · Flash → "flaş" (flaş = Türkçe'de yerleşik kelime)
+   Liste ÖLÇÜMLE genişletilmeli: bir sonraki gerçek videonun transkriptinde motorun NE yazdığına
+   bakıp varyant eklenir. Tahminle uzatmak yanlış düzeltme riskini büyütür. */
+var BILINEN = [
+  { ad: "Minecraft", varyant: ["maynkraft", "mayn kraft", "minekraft", "maynkraf", "maincraft"] },
+  { ad: "Roblox", varyant: ["robloks", "rob loks", "roblocks", "roblox'", "robluks"] },
+  { ad: "Spider-Man", varyant: ["spayderman", "spayder man", "spaydırman", "spaydermen", "spider men"] },
+  { ad: "Iron Man", varyant: ["ayronman", "ayron man", "ayronmen", "iron men"] },
+  { ad: "Batman", varyant: ["betmen", "bet men", "batmen"] },
+  { ad: "Superman", varyant: ["sipermen", "süpermen", "super men", "sipirmen"] },
+  { ad: "Captain America", varyant: ["kaptan amerika", "keptın amerika", "kapten amerika"] },
+  { ad: "Deadpool", varyant: ["detpul", "dedpul", "dead pool", "detpol"] },
+  { ad: "Wolverine", varyant: ["vulverin", "wolwerin", "vulwerin", "volverin"] },
+  { ad: "Thanos", varyant: ["tanos", "thanoss", "tanoss"] }
+];
+
 // Harf sayılan karakterler (Türkçe dahil). Noktalamayı kelimeden ayırmak için.
 var RE_HARF = /[A-Za-z0-9ÇçĞğİıŞşÖöÜüÂâÎîÛû]/;
 // Apostrof aileleri — "Tofi'ye" gibi eklerin ayracı
@@ -97,7 +129,10 @@ function _bol(tok) {
    "__proto__" için de aynı tuzak vardı. */
 function buildMap(entries) {
   var tek = Object.create(null), ikili = Object.create(null), varMi = false;
-  entries = entries || [];
+  /* BİLİNEN İSİMLER ÖNCE, KULLANICI SÖZLÜĞÜ SONRA. Aşağıdaki döngüde sonraki anahtar
+     öncekini ezdiği için çakışmada kullanıcı her zaman kazanır (bkz. BILINEN notu).
+     Bu birleştirme yalnız BURADA yapılır — hotwords() bilinen isimleri ALMAZ. */
+  entries = BILINEN.concat(entries || []);
   for (var i = 0; i < entries.length; i++) {
     var e = entries[i];
     if (!e || !e.ad) continue;
@@ -179,7 +214,11 @@ function fixText(text, map) {
   return parcalar.join("");
 }
 
-// Motora verilecek ipucu dizesi: "Tofi, Moni, Dora, Mimi, Niko"
+/* Motora verilecek ipucu dizesi: "Tofi, Moni, Dora, Mimi, Niko"
+   BURAYA BILINEN LİSTESİNİ EKLEME. --hotwords sınırlı bir token alanı kullanıyor (motorun
+   kendi --help'i "unsafely cuts into the new tokens space" diyor, faster-whisper 223 token'da
+   sessizce kesiyor); liste şişerse kullanıcının KENDİ karakter isimleri ipucu dışında kalır ve
+   asıl iş bozulur. Bilinen isimler yalnız transkript sonrası düzeltmeye girer (bkz. buildMap). */
 function hotwords(entries) {
   var out = [];
   entries = entries || [];

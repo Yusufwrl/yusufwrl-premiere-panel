@@ -61,7 +61,8 @@ New-Item -ItemType Directory -Path $extRoot -Force | Out-Null
 # pack-panel.ps1 ve deploy-dev.ps1 listeyi oradan okur), installer\installer.iss (Excludes),
 # js\updater.js (KULLANICI_DOSYALARI) ve burasi -> BESINI birden guncelle.
 # config.json bu listede DEGIL: pakette gelir, asagida BIRLESTIRILIYOR (bkz. satir ~90).
-$koru  = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json", "assemblyai-key.txt")
+$koru  = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json",
+           "assemblyai-key.txt", "anthropic-key.txt", "presetler.json", "presetler.bak.json")
 $yedek = Join-Path $env:TEMP ("panel_koru_" + [guid]::NewGuid().ToString("N"))
 $korunan = @()
 

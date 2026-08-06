@@ -53,7 +53,7 @@ Type: files; Name: "{app}\.debug"
 ; DIKKAT: config.json bu listede DEGIL ve buraya EKLENMEZ. Pakette gelir ve temiz
 ; kurulumda gerekir; dislanirsa panel hic acilmaz (js\pipeline.js loadConfig patlar).
 ; Guncellemede korunmasi js\updater.js configBirlestir() ve kur.ps1 ile saglaniyor.
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt"; \
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
 ;     (Motoru ayri dagitacaksan bu satiri sil ve arkadasin motoru elle koysun.)

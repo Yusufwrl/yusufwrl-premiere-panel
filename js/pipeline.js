@@ -1,7 +1,8 @@
 /*
  * Node.js işlem hattı (CEP nodejs açık olmalı).
  * ffmpeg ile ses hazırlar, Whisper ile yazıya döker (opsiyonel konuşmacı ayırma),
- * 2-3 kelimelik cue nesneleri üretir (renk/konuşmacı bilgisi taşır).
+ * kısa cue nesneleri üretir {start,end,text,speaker,cumleId}.
+ * Cue başına kelime tavanını ÇAĞIRAN belirler (opts.maxWords); config.json yalnızca yedektir.
  */
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -485,10 +486,14 @@ function filterHallucinations(data) {
   return atilan;
 }
 
-// Whisper JSON -> düz kelime listesi
+/* Whisper JSON -> düz kelime listesi.
+   Her kelime GELDİĞİ SEGMENTİN sırasını (seg) taşır. Segment ≈ bir cümle; cue'ya cumleId olarak
+   geçer. Bu bilgi buradan atılırsa geri kazanılamaz: cleanPunct noktayı sildiği için cümle sınırı
+   metinden de okunamıyor. Sıra numarası filterHallucinations'tan SONRAKİ listeye göredir —
+   kimlik olarak kullanıldığı için (eşit mi değil mi) bu yeterli. */
 function flattenWords(data) {
   var words = [];
-  (data.segments || []).forEach(function (seg) {
+  (data.segments || []).forEach(function (seg, segIx) {
     (seg.words || []).forEach(function (w) {
       var t = String(w.word).replace(/\s+/g, " ").trim();
       var st = Number(w.start), en = Number(w.end);
@@ -497,7 +502,7 @@ function flattenWords(data) {
          ayrıca toparlıyor, burada sadece süreyi pozitife çekip zaman sırasını bozulmaz kılıyoruz. */
       if (en <= st) en = st + 0.001;
       // geçersiz/eksik zaman damgalı kelimeyi ele (null/undefined/NaN → bozuk SRT önlenir)
-      if (t && w.start != null && w.end != null && isFinite(st) && isFinite(en)) words.push({ start: st, end: en, word: t, speaker: null });
+      if (t && w.start != null && w.end != null && isFinite(st) && isFinite(en)) words.push({ start: st, end: en, word: t, speaker: null, seg: segIx });
     });
   });
   return words;
@@ -536,9 +541,46 @@ function assignSpeakers(words, intervals) {
   }
 }
 
-// Kelimeleri 2-3 kelimelik cue nesnelerine böl {start,end,text,speaker}. censor=true ise küfür maskelenir.
-function buildCues(words, maxWords, censor, maxChars) {   // censor: false | true (hepsi) | "hard" (sadece agir)
-  var GAP = 0.7; maxWords = maxWords || 3;
+/* Ekranda GÖRÜNEN kelime sayısı. Bir cue'nun "kaç kelime" olduğu, tuttuğu token sayısıyla aynı
+   şey DEĞİL: aşağıdaki birleştirmeler (soru eki, dolgu, apostroflu ek) iki kelimeyi tek token'ın
+   İÇİNE yazıyor ("gördün müydünüz" tek token, iki kelime). Kullanıcı ekranda kelimeleri sayıyor,
+   token'ları değil — bu yüzden tavan boşlukla ayrılmış kelimeye uygulanır. */
+function _kelimeSay(s) {
+  var t = String(s == null ? "" : s).trim();
+  return t ? t.split(/\s+/).length : 0;
+}
+function _grupKelimeSay(g) {
+  var n = 0; for (var i = 0; i < g.length; i++) n += _kelimeSay(g[i].word); return n;
+}
+
+/* cumleId'nin ÇAĞRI ÖNEKİ. Segment sırası her transkriptte 0'dan başlar; "Herkes" kaynağında
+   her ses kanalı AYRI yazıya döküldüğü ve sonuç tek listede birleştirildiği için düz segment
+   numarası kullanılsaydı A2'nin 0. cümlesi ile A3'ün 0. cümlesi AYNI cümle sanılırdı
+   (cümle birimiyle çalışan vurucu.js için sessiz ve bulunması zor bir hata). Sayaç her
+   buildCues çağrısında artar, yani her kanal/çalıştırma kendi uzayında kalır.
+
+   ⚠ SAYAÇ TEK BAŞINA YETMİYOR — panel yeniden yüklendiğinde 0'dan başlıyor, ama ESKİ cue'lar
+   listede kalabiliyor: app.js runChannels yalnız İŞARETLİ kanalların cue'larını siliyor
+   (işareti kaldırılmış kanalın altyazısı bilerek korunuyor), oturum geri yükleme de eski
+   cue'ları olduğu gibi geri getiriyor. Senaryo: 1. oturumda A1+A5 (kaynakNo 1,2) → panel
+   kapanıp açıldı → 2. oturumda A5 işaretsiz, A1+A2+A3 üretildi (yeni kaynakNo 1,2,3) →
+   A2'nin "2:0"'ı ile korunan A5'in "2:0"'ı AYNI. vurucu.js cumleId'yi TEK ölçüt saydığı için
+   iki FARKLI kişinin cue'ları tek cümle olurdu. Çözüm: önek panel oturumuna özel bir jetonla
+   başlar; modül yüklenince BİR KEZ üretilir, yani her panel yüklemesi kendi uzayında kalır.
+   Rastgele kuyruk, iki yüklemenin aynı milisaniyeye denk gelme ihtimalini de kapatır. */
+var _cumleOturumJetonu = Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36);
+var _cumleKaynakSayaci = 0;
+
+// Kelimeleri kısa cue nesnelerine böl {start,end,text,speaker,cumleId}. censor=true ise küfür maskelenir.
+function buildCues(words, maxWords, censor, maxChars, onLog) {   // censor: false | true (hepsi) | "hard" (sadece agir)
+  var GAP = 0.7;
+  /* KELİME TAVANI ÇAĞIRANDAN GELİR. config.json'daki maxWordsPerCue'ya bel bağlanamaz:
+     oto-güncelleme (updater.configBirlestir) kullanıcının MEVCUT değerini koruyor, yani
+     repodaki config.json'u değiştirmek kurulu panele hiç ulaşmıyor. Değer gelmezse eski
+     varsayılan (3) sürer — çağıran susarken sessizce 2'ye çekmek onun isteğini ezmek olurdu. */
+  maxWords = parseInt(maxWords, 10);
+  if (!(maxWords >= 1)) maxWords = 3;
+  var kaynakNo = ++_cumleKaynakSayaci;   // bkz. _cumleKaynakSayaci: kanallar arası cümle karışmasın
   // soru eki birleştir
   var merged = [];
   for (var r = 0; r < words.length; r++) {
@@ -568,7 +610,9 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
                && (wr.start - pv.end) <= GAP                                  // araya uzun duraklama girmemiş
                && (!wr.speaker || !pv.speaker || wr.speaker === pv.speaker)) { // aynı konuşmacı
       pv.word += " " + wr.word; pv.end = wr.end;
-    } else merged.push({ start: wr.start, end: wr.end, word: wr.word, speaker: wr.speaker });
+    /* seg (kaynak segment = cümle) İLK kelimeden alınır: yukarıdaki üç birleştirme de eki/dolguyu
+       ÖNCEKİ kelimenin içine yazdığı için token hep başladığı cümleye aittir. */
+    } else merged.push({ start: wr.start, end: wr.end, word: wr.word, speaker: wr.speaker, seg: wr.seg });
   }
   /* Grupla (konuşmacı değişince de böl).
      KARAKTER SINIRI ŞART: yukarıdaki birleştirmeler (soru eki, dolgu, apostroflu ek) metni
@@ -582,6 +626,7 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
   var MAX_CHARS = parseInt(maxChars, 10);
   if (!MAX_CHARS || isNaN(MAX_CHARS) || MAX_CHARS < 6) MAX_CHARS = 38;
   var groups = [], cur = [];
+  var segBol = 0;   // cümle sınırında bölünen cue sayısı (aşağıdaki segment dalı) — log'a düşer
   function flush() { if (cur.length) { groups.push(cur); cur = []; } }
   for (var i = 0; i < merged.length; i++) {
     var w = merged[i];
@@ -589,6 +634,16 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
       var prev = cur[cur.length - 1];
       if (w.start - prev.end > GAP) flush();
       else if (w.speaker && prev.speaker && w.speaker !== prev.speaker) flush();
+      /* CÜMLE (Whisper segmenti) DEĞİŞİNCE DE BÖL — yoksa cumleId "kesin" değil, YAKLAŞIK olur.
+         Bir cue iki ayrı segmentten kelime taşıyabiliyordu ama cumleId olarak yalnız İLK
+         kelimenin segmenti yazılıyordu. ÖLÇÜLDÜ (20 koşu × 500 kelime): segment sonları hep
+         noktalamalıysa %0, %35'i noktalamasızsa cue'ların %4.3'ü, hiçbirinde noktalama yoksa
+         %13.2'si iki cümleden kelime taşıyor. Sonucu vurucu.js'te görülüyor: "vurucu cümle"
+         seçildiğinde sonraki cümlenin ilk kelimeleri de ekranda kalıyor ve bu hiçbir yerde
+         SAYILMIYORDU. Bölmenin maliyeti yok (cue zaten maxWords'te bölünüyor), kazancı
+         cumleId'nin gerçekten kesin olması. Segment bilgisi olmayan kelimede (seg == null)
+         karar verilemez — orada eski davranış sürer, uydurma bölme yapılmaz. */
+      else if (prev.seg != null && w.seg != null && w.seg !== prev.seg) { segBol++; flush(); }
     }
     /* SINIRI AŞMADAN ÖNCE BÖL. Uzunluk kontrolü eskiden kelime EKLENDİKTEN sonra
        yapılıyordu; yani bir grup sınırı son kelimenin boyu kadar aşabiliyordu.
@@ -599,13 +654,17 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
       var simdiki = 0;
       for (var hp = 0; hp < cur.length; hp++) simdiki += cur[hp].word.length + (hp ? 1 : 0);
       if (simdiki + 1 + w.word.length > MAX_CHARS) flush();
+      /* KELİME TAVANINA da eklemeden ÖNCE bakılır. Eski kontrol (aşağıda) TOKEN sayıyordu:
+         soru eki/dolgu yapışmış tek token iki kelime ettiği için "maxWords 2" denmesine rağmen
+         ekranda 3 kelime çıkıyordu. Tek başına tavanı aşan token yine eklenir — bölünemez. */
+      else if (_grupKelimeSay(cur) + _kelimeSay(w.word) > maxWords) flush();
     }
     cur.push(w);
     // "2." gibi SIRA SAYILARI cümle sonu değildir ("2. bölüm", "1. sıra") — rakam+nokta bölmez.
     var hard = /[!?…:]$/.test(w.word) || (/\.$/.test(w.word) && !/\d\.$/.test(w.word));
     var soft = /,$/.test(w.word);
     var harf = 0; for (var hq = 0; hq < cur.length; hq++) harf += cur[hq].word.length + (hq ? 1 : 0);
-    if (cur.length >= maxWords || harf >= MAX_CHARS || hard || (soft && cur.length >= 2)) flush();
+    if (_grupKelimeSay(cur) >= maxWords || harf >= MAX_CHARS || hard || (soft && cur.length >= 2)) flush();
   }
   flush();
   /* Yetim tek-kelimelik cue'ları öncekine bağla.
@@ -613,7 +672,11 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
      zaten doluydu, yani kural neredeyse hiç çalışmıyordu (728 cue'nun 109'u tek kelime, çoğu
      0.1-0.3 sn ekranda yanıp sönüyordu). Yeni ölçüt kelime SAYISI değil METNİN HARF SAYISI:
      MOGRT'ye sığdığı sürece birleşsin. Cümle sonu koruması ŞART — nokta cleanPunct'ta silindiği
-     için iki ayrı cümle tek satıra kaynarsa ekranda anlamsız görünür. */
+     için iki ayrı cümle tek satıra kaynarsa ekranda anlamsız görünür.
+     ⚠ Bu kural yalnız KARAKTER sınırına bakıyordu; kelime tavanını delen iki yerden biri buydu
+     ("maxWords 2" verilmiş cue'ya üçüncü kelime buradan giriyordu). Artık kelime tavanı da
+     kontrol ediliyor — tavan 2 iken önceki grup çoğunlukla dolu olduğu için bu birleştirme
+     nadiren çalışır; geriye kalan kısacık yetim cue'lar aşağıda SÜRE ÖDÜNCÜ ile uzatılır. */
   function _grupMetin(g) { var t = ""; for (var q = 0; q < g.length; q++) t += (q ? " " : "") + g[q].word; return t; }
   for (var c = groups.length - 1; c > 0; c--) {
     if (groups[c].length !== 1) continue;
@@ -621,6 +684,12 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
     var sameSp = (!a.speaker || !bg.speaker || a.speaker === bg.speaker);
     if (!sameSp || (a.start - bg.end) > GAP) continue;
     if (/[.!?…:]$/.test(bg.word)) continue;                                    // önceki cümleyi bitirmiş
+    /* Yetim kelime BAŞKA BİR CÜMLEDEN geliyorsa birleştirme YOK: yukarıdaki segment bölmesini
+       tam burada geri alırdı ve cue yine iki cümleden kelime taşırdı. cumleId ilk gruptan
+       geldiği için de YANLIŞ cümleyi gösterirdi. Metin kaybolmuyor — yetim cue kendi başına
+       kalıyor ve aşağıdaki SÜRE ÖDÜNCÜ ile yine de görünür uzunluğa çıkarılıyor. */
+    if (bg.seg != null && a.seg != null && a.seg !== bg.seg) continue;
+    if (_grupKelimeSay(onceki) + _kelimeSay(a.word) > maxWords) continue;      // kelime tavanı aşılır
     if (cleanPunct(_grupMetin(onceki) + " " + a.word).length > MAX_CHARS) continue;   // satır taşar
     groups[c - 1] = onceki.concat(groups[c]); groups.splice(c, 1);
   }
@@ -632,7 +701,17 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
     text = cleanPunct(text);
     if (censor) text = censorText(text, censor);
     if (!text) continue;
-    cues.push({ start: start, end: end, text: text, speaker: g[0].speaker || null });
+    /* cumleId = "<oturum jetonu>-<çağrı no>:<Whisper segmenti>" (≈ bir cümle). Cue'da cümle
+       kimliği yoktu: cleanPunct noktayı sildiği için cümle sınırı METİNDEN de okunamıyor.
+       "Bir cümlenin bütün parçalarını birlikte göster/gizle" (vurucu cümle kipi) ancak bu
+       alanla yapılabilir. Jeton önekinin NEDENİ için bkz. _cumleOturumJetonu — panel yeniden
+       açıldığında ESKİ cue'ların kimliğiyle çakışmayı o engelliyor.
+       Kimlik olarak kullanılır (eşit mi değil mi), sıralama/aritmetik için DEĞİL — metin olması
+       bu yüzden sorun değil. Segment bilgisi yoksa null: okuyan taraf kendi sezgisine düşer.
+       Grup artık tek segmentten geliyor (yukarıdaki cümle bölmesi), yani g[0].seg gruptaki
+       BÜTÜN kelimeleri temsil ediyor — eskiden yalnız ilk kelimeyi temsil ediyordu. */
+    cues.push({ start: start, end: end, text: text, speaker: g[0].speaker || null,
+                cumleId: (g[0].seg != null ? (_cumleOturumJetonu + "-" + kaynakNo + ":" + g[0].seg) : null) });
   }
   /* NEREDEYSE AYNI ANDA BAŞLAYAN CUE'LARI TOPARLA — bunu süre döngüsünden ÖNCE yapmak şart.
      Whisper gerçek çıktıda start == end olan (sıfır süreli) kelime damgaları üretiyor; bunlardan
@@ -640,13 +719,24 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
      (sonraki cue - 0.08) cue'nun KENDİ başlangıcının altına düşüyor ve cue 0.05 sn'de kalıyor.
      host.jsx cue'ları sırayla overwriteClip ile bastığı için aynı saniyeye gelen ikinci klip
      birincinin üstüne yazıyor: o altyazı videoda HİÇ görünmüyor, panel yine de "eklendi" diyor.
-     Çözüm: sığıyorsa iki cue'yu birleştir, sığmıyorsa öncekinden zaman ödünç alarak geriye kaydır. */
+     Çözüm: sığıyorsa iki cue'yu birleştir, sığmıyorsa öncekinden zaman ödünç alarak geriye kaydır.
+
+     ⚠ BİLİNEN TAKAS — bu blok "erken başlayan altyazı" üretebiliyor: kelimeSigar koşulu
+     (kelime tavanı) birleşmeyi engellediğinde akış aşağıdaki "cue'yu ERKEN başlat" dalına
+     düşüyor ve cue MIN_GORUNUR (0.25 sn) kadar GERİYE çekiliyor — yani ses gelmeden başlıyor.
+     Normalde bunu sesleHizala geri topluyor (yalnız ileri kaydırır). Ama hizalama
+     opts.sesHizala === false ile KAPATILIRSA bu geri çekmeler olduğu gibi kalır ve sessizde
+     başlayan altyazı sayısı ARTAR. Yani kelime tavanını düşürmek (Shorts: 2) bu dalı daha sık
+     çalıştırır ve hizalamayı kapatmanın bedelini büyütür. Hizalamayı kapatmadan önce bunu bil. */
   var MIN_GORUNUR = 0.25;   // bir altyazının ekranda fark edilmesi için gereken en kısa süre
   for (var z = 0; z + 1 < cues.length; z++) {
     var cA = cues[z], cB = cues[z + 1];
     if (cB.start - cA.start >= MIN_GORUNUR) continue;
     var ayniKisi = (!cA.speaker || !cB.speaker || cA.speaker === cB.speaker);
-    if (ayniKisi && (cA.text.length + 1 + cB.text.length) <= MAX_CHARS) {
+    /* Birleştirme kelime tavanını AŞAMAZ (burası da metni tek satıra kaynatıyor). Sığmıyorsa
+       aşağıdaki "erken başlat" dalı çakışmayı zaten çözüyor, yani metin kaybolmuyor. */
+    var kelimeSigar = (_kelimeSay(cA.text) + _kelimeSay(cB.text)) <= maxWords;
+    if (ayniKisi && kelimeSigar && (cA.text.length + 1 + cB.text.length) <= MAX_CHARS) {
       cA.text = cA.text + " " + cB.text;
       cA.end = Math.max(cA.end, cB.end);
       cues.splice(z + 1, 1);
@@ -675,28 +765,193 @@ function buildCues(words, maxWords, censor, maxChars) {   // censor: false | tru
        Premiere'de gerçek bir sorun olduğu için taşma pahasına uzatma yapılmıyor. */
     cu.end = Math.max(cu.start + 0.05, target);
   }
-  // Metni komşuya taşırken konuşmacı KARIŞMAMALI — üstteki toparlama döngüsündeki
-  // `ayniKisi` kuralının aynısı (yoksa S1'in kelimesi S3'ün rengine yazılıyor).
-  function _ayniKisi(a, b) { return (!a.speaker || !b.speaker || a.speaker === b.speaker); }
-  /* SON EMNİYET — yukarıdaki toparlamaya rağmen 0.15 sn'nin (≈4 kare) altında kalan bir cue
-     Premiere'de pratikte görünmez ve bir sonraki klip onu ezer, yani METİN KAYBOLUR. Böyle bir
-     satırın metnini sığdığı komşuya taşıyıp cue'yu listeden düşürüyoruz: hiçbir kelime kaybolmaz.
-     Hiçbir komşuya sığmıyorsa dokunmuyoruz (eski davranış) — kelimeyi silmek daha kötü olurdu. */
-  for (var y = cues.length - 1; y >= 0; y--) {
-    if (cues[y].end - cues[y].start >= 0.15) continue;
-    var sn = (y + 1 < cues.length) ? cues[y + 1] : null;      // sonraki (zaman olarak en yakın)
+  /* SON EMNİYET — yukarıdaki toparlamaya rağmen MIN_KLIP'in (≈4 kare) altında kalan bir cue
+     Premiere'de pratikte görünmez ve bir sonraki klip onu ezer, yani METİN KAYBOLUR.
+     ESKİ ÇÖZÜM metni sığdığı komşuya TAŞIYIP cue'yu listeden düşürüyordu; kelime tavanını delen
+     ikinci yer buydu — taşınan metin komşuyu 3-4 kelimeye çıkarıyordu. Yeni çözüm metne hiç
+     dokunmuyor, komşudan SÜRE ödünç alıyor: cue uzuyor, kelime sayısı sabit kalıyor.
+     Sıra: önce ÖNDEN (kendi başlangıcını geriye çek), yetmezse ARKADAN (sonrakinin başlangıcını
+     ileri it). Her iki komşu da en az MIN_KLIP görünür kalır — birini kurtarıp diğerini
+     görünmez yapmak hiçbir şey kazandırmaz. İleri döngü ŞART: arkadan ödünç alınca sonraki cue
+     kısalabiliyor, sırası gelince o da aynı onarımdan geçsin. */
+  var MIN_KLIP = 0.15;
+  var sureOdunc = 0, sureYok = 0;
+  for (var y = 0; y < cues.length; y++) {
+    var cy = cues[y];
+    if (cy.end - cy.start >= MIN_KLIP) continue;
     var on = (y > 0) ? cues[y - 1] : null;                    // önceki
-    if (sn && _ayniKisi(cues[y], sn) && (cues[y].text.length + 1 + sn.text.length) <= MAX_CHARS) {
-      sn.text = cues[y].text + " " + sn.text;
-      sn.start = Math.min(sn.start, cues[y].start);
-      cues.splice(y, 1);
-    } else if (on && _ayniKisi(on, cues[y]) && (on.text.length + 1 + cues[y].text.length) <= MAX_CHARS) {
-      on.text = on.text + " " + cues[y].text;
-      // uzatırken sonraki cue'nun üstüne binme (0.05 tabanı bazen tavanı aşabiliyor)
-      on.end = Math.max(on.end, Math.min(cues[y].end, sn ? (sn.start - MIN_GAP) : Infinity));
-      cues.splice(y, 1);
+    var sn = (y + 1 < cues.length) ? cues[y + 1] : null;      // sonraki
+    // 1) ÖNDEN: başlangıcı geriye çek. Önceki cue'nun sonu da aynı kadar kısalır (üst üste binmesin).
+    var enErken = on ? (on.start + MIN_KLIP + MIN_GAP) : 0;
+    var geri = Math.min(MIN_KLIP - (cy.end - cy.start), cy.start - enErken);
+    if (geri > 0) {
+      cy.start = +(cy.start - geri).toFixed(3);
+      if (on && on.end > cy.start - MIN_GAP) on.end = +(cy.start - MIN_GAP).toFixed(3);
+    }
+    // 2) ARKADAN: sonrakinin başlangıcını ileri it (en fazla kendisi MIN_KLIP görünür kalana dek).
+    if (MIN_KLIP - (cy.end - cy.start) > 0.001) {
+      var hedefSon = cy.start + MIN_KLIP;
+      if (sn) {
+        /* ÖNCE KAZANCI HESAPLA, SONRA İT — sonraki cue BOŞUNA itilmesin.
+           Eski sıra tersti: sonraki cue önce itiliyor, hedefSon SONRA "üstüne binme" clamp'inden
+           geçiyordu. Clamp hedefSon'u cy.end'in ALTINA düşürdüğünde kısa cue hiç uzamıyor ama
+           sonraki cue yine de kısalmış oluyordu — karşılıksız bir bedel. ÖLÇÜLDÜ: 244 itmenin
+           4'ü tamamen boşa (toplam 0.143 sn), 19'u kısmen faydalı ama hedefe ulaşmıyor.
+           Yeni sıra: cue'nun ulaşabileceği EN İYİ bitişi baştan hesapla; kazanç yoksa sonraki
+           cue'ya HİÇ dokunma, varsa yalnızca o kazancı sağlayacak mesafe kadar it.
+           Not: "eksik süre kadar itmek" hâlâ yetmiyor — kelime damgaları çakıştığında
+           (bkz. 0.05 sn tabanı) cy.end zaten MIN_GAP boşluğunun içine girmiş oluyor; bu yüzden
+           hedef, sn.start'a MIN_GAP kalacak biçimde kurulur. */
+        var itilebilir = Math.max(0, (sn.end - MIN_KLIP) - sn.start);   // sonraki de görünür kalmalı
+        var ulasilabilir = Math.min(hedefSon, (sn.start + itilebilir) - MIN_GAP);
+        if (ulasilabilir - cy.end > 0.001) {
+          var ileri = (ulasilabilir + MIN_GAP) - sn.start;   // yalnız FAYDALI mesafe (<= itilebilir)
+          if (ileri > 0) sn.start = +(sn.start + ileri).toFixed(3);
+          // Yuvarlama sonrası gerçek sn.start'a göre son kez kıs: üstüne binme kalmasın.
+          hedefSon = Math.min(ulasilabilir, sn.start - MIN_GAP);
+        } else hedefSon = cy.end;   // kazanç yok → itme yok, cue olduğu gibi kalır
+      }
+      if (hedefSon > cy.end) cy.end = +hedefSon.toFixed(3);
+    }
+    if (MIN_KLIP - (cy.end - cy.start) > 0.001) sureYok++; else sureOdunc++;
+  }
+  /* Tavanı hâlâ aşan cue'lar: tek bir token'ın içinde iki kelime varsa (soru eki/dolgu yapışmış)
+     bölünecek yer yoktur. SESSİZCE geçilmez — kaç satırın tavanı aştığı log'a yazılır ki
+     "2 kelime dedim ama 3 görüyorum" şüphesi ölçüyle karşılansın. */
+  var kelimeTasan = 0;
+  for (var kt = 0; kt < cues.length; kt++) if (_kelimeSay(cues[kt].text) > maxWords) kelimeTasan++;
+  /* RAPOR TEK UZUN SATIR OLAMAZ — panel onu KIRPAR. app.js whenLog her satırı
+     `s.length > 80 ? s.slice(-80) : s` ile kısaltıyor (o sınır motorun tqdm çubuğu için kondu)
+     ve transcribe'a geçilen onLog tam olarak o sarmalayıcı. ÖLÇÜLDÜ: eski tek satırlık özet
+     278 karakterdi, yani panelde yalnız SON 80'i görünüyordu — altyazı sayısı, ödünç alınan
+     süre ve "süre bulunamadı" uyarısı baştan kırpılıp atılıyordu; bu paketin raporlama amacı
+     boşa gidiyordu. Çözüm: her ölçü AYRI ve 80 karakterin altında bir onLog çağrısı.
+     (app.js'e dokunulmadı: 80 sınırı tqdm için doğru, düzeltilmesi gereken taraf burası.) */
+  if (onLog) {
+    onLog("[cue] " + cues.length + " altyazı üretildi (tavan " + maxWords + " kelime).\n");
+    if (segBol) onLog("[cue] " + segBol + " altyazı cümle sınırında bölündü.\n");
+    if (sureOdunc) onLog("[cue] " + sureOdunc + " kısa altyazı komşudan süre ödünç aldı.\n");
+    if (sureYok) {
+      onLog("[cue] " + sureYok + " kısa altyazıya süre BULUNAMADI, görünmeyebilir.\n");
+      onLog("[cue] (sebep: komşuları da " + MIN_KLIP.toFixed(2) + " sn altına inerdi.)\n");
+    }
+    if (kelimeTasan) {
+      onLog("[cue] " + kelimeTasan + " altyazı kelime tavanını aşıyor.\n");
+      onLog("[cue] (sebep: soru eki/dolgu tek token'a yapışmış, bölünemez.)\n");
     }
   }
+  return cues;
+}
+
+/* ÇAKIŞMA GİDER — zaman olarak ÜST ÜSTE BİNEN cue'ları ayırır.
+   NEDEN GEREKLİ: Panel eskiden her ses kanalını AYRI caption track'e yazıyordu, o yüzden
+   kanallar arası çakışma sorun değildi. Yeni düzende yalnız İKİ altyazı kanalı var —
+   C1 = videoyu çeken (A1), C2 = diğer BÜTÜN konuşanlar birleşik. C2'de iki arkadaş aynı anda
+   konuşunca cue'lar çakışıyor ve Premiere çakışan altyazılardan birini YUTUYOR: panel yine
+   "ok" dönüyor, kullanıcı metnin kaybolduğunu ancak videoyu çıkarırken fark ediyor.
+   buildCues çakışmayı yalnız KENDİ listesi içinde önlüyor (tek transkript), cuesToSrt ise
+   sıfır kontrol yapıyor — bu yüzden birleştirmeden SONRA çalışacak ayrı bir adım gerekti.
+
+   TAKAS (bilerek): metin ASLA birleştirilmez, cue ASLA silinmez. Birleştirme kelime tavanını
+   (Shorts'ta 2) delerdi; silmek doğrudan metin kaybı olurdu. Çözülemeyen çakışma üst üste
+   bırakılır ve SAYILIR — üst üste binme, kaybolan metinden yeğdir.
+   Cue'lar geriye KAYDIRILMAZ (ses hizalamasının temel kuralı, bkz. sesleHizala): yalnız önceki
+   cue'nun BİTİŞİ kırpılır, o mümkün değilse sonraki cue İLERİ itilir.
+   Girdi zaman sırasına dizili olmalı — çağıran zaten sıralı veriyor. */
+function cakismaGider(cues, onLog) {
+  var MIN_GAP = 0.08;        // iki altyazı arasında bırakılan en küçük boşluk (buildCues ile aynı)
+  /* 0.15 sn ≈ 4 kare: buildCues'un SON EMNİYET bölümündeki MIN_KLIP ile AYNI değer, çünkü
+     ölçüt de aynı — bunun altındaki bir klip Premiere'de pratikte görünmez. (buildCues'taki
+     MIN_GORUNUR 0.25'tir; o "göz fark etsin" ölçüsü, buradaki "klip var sayılsın" ölçüsü.) */
+  var MIN_GORUNUR = 0.15;
+  var sayac = { bulunan: 0, kirpilan: 0, itilen: 0, gecersiz: 0, yenidenSiralandi: 0 };
+  /* Sayaçlar dizinin ÜZERİNE iliştirilir (aynı desen vurucu.js'te _bosCue vb. için kullanılıyor):
+     fonksiyon diziyi döndürür, çağıran isterse ölçüyü de okur. Boş/tek elemanlı listede de
+     iliştirilir ki çağıran "alan var mı" diye ayrıca kontrol etmek zorunda kalmasın. */
+  if (!cues || cues.length < 2) { if (cues) cues._cakisma = sayac; return cues; }
+
+  /* ÇOK TURLU — TEK GEÇİŞ YETMİYOR. İtme, cue'yu zamanda ileri taşıyor ama dizideki yerini
+     değiştirmiyor; sıra onarıldıktan sonra ORTAYA YENİ KOMŞU ÇİFTLER çıkıyor ve onlar da
+     çözülebiliyor. ÖLÇÜLDÜ (800 cue, yoğun çakışma): kalan çakışan çift
+     1823 → 920 → 669 → 630 → 624; 4. turdan sonra kazanç sıfır.
+     Tur sayısı SABİT ve küçük: sonsuz döngü riski yok, kazanç zaten tükeniyor. */
+  var TUR = 4, tur, i, s;
+  for (tur = 0; tur < TUR; tur++) {
+    var turIslem = 0;
+    for (i = 0; i + 1 < cues.length; i++) {
+      var onc = cues[i], snr = cues[i + 1];
+      /* Zaman damgası sayı değilse karşılaştırma SESSİZCE "çakışma yok" derdi. Atlanan çift
+         gerçekten çakışıyor olabilir — sessiz geçmek yasak, sayılıp log'a düşürülür.
+         Yalnız İLK turda sayılır, yoksa aynı çift 4 kez sayılıp sayaç şişer. */
+      if (!isFinite(onc.start) || !isFinite(onc.end) ||
+          !isFinite(snr.start) || !isFinite(snr.end)) { if (!tur) sayac.gecersiz++; continue; }
+      if (onc.end <= snr.start) continue;            // çakışma yok
+      sayac.bulunan++;
+      /* 1) ÖNCE KIRP — en ucuz çözüm: yalnız önceki cue'nun bitişi kısalır, hiçbir cue yer
+         değiştirmez. Yuvarlama ATAMADAN ÖNCE yapılır ki görünürlük kontrolü, gerçekten
+         yazılacak değerin üstünde çalışsın. */
+      var yeniBitis = +(snr.start - MIN_GAP).toFixed(3);
+      if (yeniBitis - onc.start >= MIN_GORUNUR) { onc.end = yeniBitis; sayac.kirpilan++; turIslem++; continue; }
+      /* 2) KIRPILAMIYORSA İT — kırpınca önceki cue görünmez kalıyor demektir. Bu kez sonraki
+         cue ileri itilir, ama kendi bitişine MIN_GORUNUR kadar yer kalmak şartıyla: birini
+         kurtarıp diğerini görünmez yapmak hiçbir şey kazandırmaz. */
+      var yeniBas = +(onc.end + MIN_GAP).toFixed(3);
+      if (snr.end - yeniBas >= MIN_GORUNUR) { snr.start = yeniBas; sayac.itilen++; turIslem++; continue; }
+      // 3) İkisi de sıkışık: cue SİLİNMEZ, olduğu gibi bırakılır. Metin kaybetmektense üst üste binsin.
+    }
+
+    /* SIRAYI ONAR — İTME DİZİ SIRASINI BOZUYOR. İtilen cue zamanda ileri gidiyor ama dizideki
+       YERİ değişmiyor; cuesToSrt diziyi olduğu sırayla yazdığı için SRT'de zaman damgası bir
+       öncekinden GERİDE olan satırlar oluşuyordu (ölçüldü: 800 cue'luk koşuda 45 satır).
+       Zamanı geriye giden SRT'yi Premiere reddedebilir ya da altyazıyı yanlış yere koyar.
+       Sıralama YERİNDE yapılır: çağıran aynı dizi referansıyla devam ediyor. Aynı zamanda
+       bir sonraki turun yeni komşu çiftleri görmesini sağlayan adım budur. */
+    var bozuk = false;
+    for (s = 1; s < cues.length; s++) {
+      if (isFinite(cues[s].start) && isFinite(cues[s - 1].start) &&
+          cues[s].start < cues[s - 1].start) { bozuk = true; break; }
+    }
+    if (bozuk) {
+      cues.sort(function (a, b) { return (a.start || 0) - (b.start || 0); });
+      sayac.yenidenSiralandi++;
+    }
+    if (!turIslem) break;   // bu turda hiçbir şey düzelmedi, devamı da düzelmez
+  }
+
+  /* KALAN ÇAKIŞMAYI GERÇEKTEN SAY. Yukarıdaki döngü yalnız KOMŞU çiftlere bakıyor; uzun bir
+     cue kendinden sonraki BİRDEN ÇOK cue'yu örtebiliyor ve o çiftler hiç görülmüyordu —
+     ölçüldü: log "181 cozulemedi" derken gerçekte 238 çift hâlâ çakışıyordu. Kullanıcıya
+     eksik sayı vermek sessiz başarısızlığın yumuşak hâli; gerçek sayı ölçülüp yazılır.
+     Maliyet düşük: iç döngü ilk kesişmeyen cue'da BREAK ediyor (dizi artık sıralı). */
+  var kalan = 0, a, b;
+  for (a = 0; a < cues.length; a++) {
+    if (!isFinite(cues[a].start) || !isFinite(cues[a].end)) continue;
+    for (b = a + 1; b < cues.length; b++) {
+      if (!isFinite(cues[b].start)) continue;
+      if (cues[b].start >= cues[a].end) break;
+      kalan++;
+    }
+  }
+  sayac.kalanCakisma = kalan;
+
+  /* RAPOR: her satır 80 karakterin ALTINDA ve ayrı bir onLog çağrısı — app.js whenLog uzun
+     satırların BAŞINI kırpıyor (`s.slice(-80)`), yani tek uzun özet bilgiyi çöpe atardı.
+     Hiç çakışma yoksa hiç satır basılmaz (gürültü olmasın); geçersiz zaman ve kalan çakışma
+     ise çakışma bulunmasa bile basılır, çünkü ikisi de ATLAMA — sessiz kalması yasak. */
+  if (onLog) {
+    /* `bulunan` BASILMAZ: turlar boyunca birikiyor ve aynı çift birden çok kez sayılabiliyor,
+       yani kullanıcıya anlamsız bir sayı olurdu. Kullanıcıyı ilgilendiren üç şey var:
+       kaç tanesine dokunuldu, kaçı HÂLÂ üst üste, bir de atlanan varsa o. */
+    if (sayac.kirpilan) onLog("[cakisma] " + sayac.kirpilan + " altyazinin bitisi kirpildi.\n");
+    if (sayac.itilen) onLog("[cakisma] " + sayac.itilen + " altyazi ileri itildi.\n");
+    if (sayac.yenidenSiralandi) onLog("[cakisma] zaman sirasi onarildi.\n");
+    /* GERÇEK kalan sayısı: komşu-çift taraması uzun bir cue'nun örttüğü UZAK cue'ları
+       göremiyordu (ölçüldü: "181 cozulemedi" derken gerçekte 238 çift çakışıyordu).
+       Bu satır Premiere'de kaç altyazının üst üste bineceğini söylüyor. */
+    if (kalan) onLog("[cakisma] " + kalan + " altyazi HALA ust uste kaliyor.\n");
+    if (sayac.gecersiz) onLog("[cakisma] " + sayac.gecersiz + " cift gecersiz zaman, atlandi.\n");
+  }
+  cues._cakisma = sayac;
   return cues;
 }
 
@@ -773,8 +1028,10 @@ function _hotwordsTaninmadi(e) {
 
    Kural: SADECE İLERİ kaydırılır, asla geriye. Cue'nun başında ses zaten varsa dokunulmaz.
    Kaydırma en fazla MAX_KAYDIR; daha büyük boşluk muhtemelen yanlış hizalama demektir ve
-   körlemesine kaydırmak altyazıyı yanlış yere taşır. Cue'ya okunacak süre kalmıyorsa da
-   dokunulmaz — erken altyazı, kaybolan altyazıdan iyidir. */
+   körlemesine kaydırmak altyazıyı yanlış yere taşır. Cue KISALMAZ — start ile end birlikte
+   kayar, tek fren sonraki cue'nun başlangıcıdır (üst üste binen altyazı, erken altyazıdan
+   kötüdür). Eski "okunacak süre kalmıyorsa dokunma" kuralı kaldırıldı: cue artık kısalmadığı
+   için okuma süresi zaten korunuyor, o fren yalnızca düzeltmeleri iptal ediyordu. */
 function _wavZarf(wavPath, pencereSn) {
   var buf = fs.readFileSync(wavPath);
   var hz = 16000, bit = 16, kanal = 1, dataOff = -1, dataLen = 0;
@@ -785,12 +1042,16 @@ function _wavZarf(wavPath, pencereSn) {
     } else if (id === "data") { dataOff = o + 8; dataLen = sz; break; }
     o += 8 + sz + (sz & 1);
   }
-  // buildTimelineAudio 16 kHz mono 16-bit üretir; başka bir şey gelirse hizalama atlanır.
-  if (dataOff < 0 || bit !== 16 || !hz) return null;
+  /* buildTimelineAudio 16 kHz mono 16-bit üretir; başka bir şey gelirse hizalama atlanır —
+     ama SEBEBİ SÖYLENEREK. Eskiden hepsi düz `null` dönüyordu ve çağıran tek bir "ses
+     okunamadı" mesajı basıyordu; kullanıcı hangi sorunu arayacağını bilemiyordu. */
+  if (dataOff < 0) return { zarf: null, sebep: "WAV'da 'data' bloğu yok" };
+  if (bit !== 16) return { zarf: null, sebep: bit + " bit (16 bekleniyordu)" };
+  if (!hz) return { zarf: null, sebep: "örnekleme hızı okunamadı" };
   var adim = Math.max(1, Math.round(hz * pencereSn)) * kanal;
   var toplamOrnek = Math.floor(Math.min(dataLen, buf.length - dataOff) / 2);
   var n = Math.floor(toplamOrnek / adim);
-  if (n < 10) return null;
+  if (n < 10) return { zarf: null, sebep: "ses çok kısa (" + n + " pencere)" };
   var zarf = new Float64Array(n);
   for (var i = 0; i < n; i++) {
     var s = 0, taban = dataOff + i * adim * 2;
@@ -801,41 +1062,101 @@ function _wavZarf(wavPath, pencereSn) {
 }
 
 function sesleHizala(cues, wavPath, onLog) {
-  var PEN = 0.010, MAX_KAYDIR = 0.60, EN_AZ_KALAN = 0.35, ONEMSIZ = 0.06;
-  var z = null;
-  try { z = _wavZarf(wavPath, PEN); } catch (e) { z = null; }
-  if (!z) { if (onLog) onLog("[hizala] ses okunamadı, altyazı zamanlarına dokunulmadı.\n"); return cues; }
+  /* CUE KISALTILMAZ — start ile birlikte end de AYNI MİKTAR kaydırılır.
+     Eskiden yalnız start ileri gidiyordu: cue kısalıyor, "okunacak süre kalmıyor" freni
+     (EN_AZ_KALAN) devreye giriyor ve cue'ya HİÇ dokunulmuyordu. Kelime tavanı 2'ye inince
+     cue'lar zaten kısaldığı için o fren düzeltmelerin çoğunu iptal ediyordu. Cue tümüyle
+     kaydırılınca süresi sabit kalıyor, fren gereksizleşiyor ve daha çok cue düzeltilebiliyor.
+     Kurallar aynı: ASLA geriye kaydırma yok · en fazla MAX_KAYDIR ileri · sonraki cue'nun
+     başına HIZ_GAP kala durulur (üst üste binen altyazı, erken altyazıdan kötüdür). */
+  var PEN = 0.010, MAX_KAYDIR = 0.60, ONEMSIZ = 0.06, HIZ_GAP = 0.08;
+  /* İKİ AYRI SEBEP, İKİ AYRI MESAJ. Eskiden `catch (e) { z = null; }` istisna metnini YUTUYOR
+     ve tek bir "ses okunamadı" satırı iki bambaşka durumu birbirine karıştırıyordu:
+     (a) dosya açılamadı / WAV başlığı ayrıştırılırken çöktü (istisna — yol, izin, bozuk dosya),
+     (b) dosya okundu ama hizalamaya elverişli değil (16-bit değil, data bloğu yok, çok kısa).
+     Kullanıcı bu ikisini ayırt edemeyince nereye bakacağını da bilemiyordu. */
+  var z = null, zIstisna = "";
+  try { z = _wavZarf(wavPath, PEN); }
+  catch (e) { z = null; zIstisna = String((e && e.message) || e); }
+  if (!z || !z.zarf) {
+    if (onLog) {
+      /* İstisna metni panelde kırpılmasın diye kısaltılır (bkz. app.js whenLog 80 karakter
+         sınırı); dosya adı AYRI satıra yazılır, yoksa tam yol istisna metnini yiyor. */
+      if (zIstisna) {
+        onLog("[hizala] WAV okunamadı (istisna): " + zIstisna.slice(0, 40) + "\n");
+        onLog("[hizala] dosya: " + path.basename(String(wavPath)).slice(0, 55) + "\n");
+      } else onLog("[hizala] WAV elverişsiz: " + ((z && z.sebep) || "bilinmeyen sebep") + "\n");
+      onLog("[hizala] altyazı zamanlarına dokunulmadı.\n");
+    }
+    return cues;
+  }
   var zarf = z.zarf, N = zarf.length;
 
   /* Konuşma eşiği: gürültü tabanının katı. Taban, sıfır olmayan değerlerin %35'lik
      dilimi (sessizlik payı bol tutuldu ki nefes/tık sesi konuşma sayılmasın). */
   var sirali = [];
   for (var i = 0; i < N; i++) if (zarf[i] > 0) sirali.push(zarf[i]);
-  if (sirali.length < 10) return cues;
+  // Eşik kurulamıyorsa hizalama YAPILMAZ — ama sessizce değil: kullanıcı "hizalama açıktı,
+  // neden hiçbir şey değişmedi?" diye sorduğunda cevabı log'da bulsun.
+  if (sirali.length < 10) {
+    // İki kısa satır: tek uzun satır panelde kırpılıyor (bkz. app.js whenLog 80 karakter).
+    if (onLog) {
+      onLog("[hizala] ses neredeyse tümüyle sessiz (ölçülebilir " + sirali.length + " pencere).\n");
+      onLog("[hizala] eşik kurulamadı, altyazı zamanlarına dokunulmadı.\n");
+    }
+    return cues;
+  }
   sirali.sort(function (a, b) { return a - b; });
   var esik = sirali[Math.floor(sirali.length * 0.35)] * 3;
-  if (!(esik > 0)) return cues;
+  if (!(esik > 0)) {
+    if (onLog) onLog("[hizala] konuşma eşiği hesaplanamadı — altyazı zamanlarına dokunulmadı.\n");
+    return cues;
+  }
 
-  var kaydirilan = 0, toplamKayma = 0;
+  /* SAYAÇLAR — sessiz düzeltme de sessiz başarısızlık da yasak. "Kaç cue'ya dokunuldu"
+     tek başına işe yaramıyor: asıl soru DÜZELTİLEMEYENLERİN NEDEN düzeltilemediği.
+     Sonraki her değişikliğin (kelime tavanı, pencere boyu, eşik) etkisini ölçmenin tek yolu bu. */
+  var duzeltildi = 0, toplamKayma = 0, kismi = 0;
+  var yokPencere = 0;    // 0.60 sn'lik pencerede konuşma hiç başlamadı
+  var yokTavan = 0;      // sonraki cue yer bırakmadı (tavana çarptı)
+  var yokOnset = 0;      // cue, ses zarfının dışında kalıyor (WAV o noktayı kapsamıyor)
+  var dokunulmadi = 0;   // başında ses zaten var / kayma önemsiz — düzeltmeye gerek yok
   for (var c = 0; c < cues.length; c++) {
     var cue = cues[c];
     var bas = Math.floor(cue.start / PEN);
-    if (bas < 0 || bas >= N) continue;
-    if (zarf[bas] >= esik) continue;                       // başında ses VAR, dokunma
+    if (bas < 0 || bas >= N) { yokOnset++; continue; }
+    if (zarf[bas] >= esik) { dokunulmadi++; continue; }     // başında ses VAR, dokunma
     var sinir = Math.min(N, bas + Math.ceil(MAX_KAYDIR / PEN));
     var onset = -1;
     for (var k = bas; k < sinir; k++) if (zarf[k] >= esik) { onset = k; break; }
-    if (onset < 0) continue;                               // sınır içinde konuşma yok
-    var yeni = onset * PEN;
-    var kayma = yeni - cue.start;
-    if (kayma <= ONEMSIZ) continue;                        // zaten neredeyse aynı
-    if (yeni > cue.end - EN_AZ_KALAN) continue;            // okunacak süre kalmıyor
-    cue.start = +yeni.toFixed(3);
-    kaydirilan++; toplamKayma += kayma;
+    if (onset < 0) { yokPencere++; continue; }              // sınır içinde konuşma yok
+    var kayma = onset * PEN - cue.start;
+    if (kayma <= ONEMSIZ) { dokunulmadi++; continue; }      // zaten neredeyse aynı
+    /* Tavan: cue'nun SONU bir sonrakinin başına HIZ_GAP kala durmalı. Son cue'da sonraki yoktur;
+       orada MAX_KAYDIR'ın kendisi zaten tavandır (kayma hiçbir koşulda onu geçemez). */
+    var tavan = (c + 1 < cues.length) ? ((cues[c + 1].start - HIZ_GAP) - cue.end) : MAX_KAYDIR;
+    if (tavan <= ONEMSIZ) { yokTavan++; continue; }
+    if (kayma > tavan) { kayma = tavan; kismi++; }          // kısmen kaydırıldı: hiç yoktan iyi
+    cue.start = +(cue.start + kayma).toFixed(3);
+    cue.end = +(cue.end + kayma).toFixed(3);
+    duzeltildi++; toplamKayma += kayma;
   }
-  if (onLog && kaydirilan) {
-    onLog("[hizala] " + kaydirilan + " altyazı sese hizalandı (ortalama " +
-          (toplamKayma / kaydirilan).toFixed(2) + " sn ileri).\n");
+  /* ÖZET AYRI AYRI KISA SATIRLAR HÂLİNDE BASILIR. Eski tek satırlık özet 274 karakterdi;
+     app.js whenLog satırı 80 karaktere kırptığı için (`s.slice(-80)`) panelde YALNIZCA sonu
+     görünüyordu — "kaç düzeltildi / kaç düzeltilemedi" hiç görünmüyordu, yani bu sayaçların
+     varlık sebebi boşa gidiyordu. Her satır 80 karakterin altında tutulur. */
+  if (onLog) {
+    var basarisiz = yokPencere + yokTavan + yokOnset;
+    var sat = "[hizala] " + duzeltildi + " altyazı düzeltildi";
+    if (duzeltildi) sat += " (ort. " + (toplamKayma / duzeltildi).toFixed(2) + " sn ileri)";
+    onLog(sat + ".\n");
+    if (kismi) onLog("[hizala] " + kismi + " tanesi tavana takılıp kısmen kaydı.\n");
+    onLog("[hizala] " + basarisiz + " düzeltilemedi · " + dokunulmadi + " zaten yerinde.\n");
+    // Düzeltilemeyenlerin SEBEBİ tek tek: "neden değişmedi" sorusunun cevabı burada.
+    if (yokPencere) onLog("[hizala] " + yokPencere + " pencere dışı: " + MAX_KAYDIR.toFixed(2) +
+      " sn'de konuşma başlamadı.\n");
+    if (yokTavan) onLog("[hizala] " + yokTavan + " tavana çarptı: sonraki altyazı yer bırakmadı.\n");
+    if (yokOnset) onLog("[hizala] " + yokOnset + " onset yok: ses o noktayı kapsamıyor.\n");
   }
   return cues;
 }
@@ -945,7 +1266,11 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   }
   // DİKKAT: "!!" KULLANMA — censor üç değerli (false | "all" | "hard"); boolean'a çevirmek
   // "sadece ağır küfür" seçeneğini sessizce "hepsi" yapar.
-  var cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor, opts.maxChars);
+  /* KELİME TAVANI: önce çağıranın dediği (opts.maxWords). config.json yalnızca YEDEK — kullanıcının
+     kurulu kopyasındaki maxWordsPerCue oto-güncellemede korunduğu için repodaki değeri değiştirmek
+     panele ulaşmaz; kalıcı bir tavan istiyorsan app.js'te opts.maxWords ver.
+     onLog buildCues'a da geçer: kısa cue onarımı ve tavanı aşan satırlar log'a SAYIYLA düşsün. */
+  var cues = buildCues(words, opts.maxWords || cfg.maxWordsPerCue || 3, opts.censor, opts.maxChars, onLog);
   /* Altyaziyi sese hizala: motorun damgasi konusmadan once basliyor olabilir (bkz. sesleHizala).
      opts.sesHizala === false ile kapatilabilir; varsayilan ACIK. */
   if (opts.sesHizala !== false) {
@@ -1076,7 +1401,8 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
-  buildCues, sesleHizala, cuesToSrt, buildShortSrt, cleanPunct, flattenWords, analyzeSilence, cancelAll,
+  buildCues, sesleHizala, cakismaGider, cuesToSrt, buildShortSrt, cleanPunct, flattenWords,
+  analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
   // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında
   // "kullanıcı iptal etti mi?" diye sorabilsin diye dışa açıldı.

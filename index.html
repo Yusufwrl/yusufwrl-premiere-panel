@@ -73,6 +73,31 @@
             </div>
             <div class="tc-arrow">›</div>
           </button>
+
+          <!-- Preset: altyazıdan bağımsız, genel bir klip aracı. Bu yüzden Altyazı'nın
+               altında değil KENDİ bölümünde — timeline'da ne seçiliyse ona uygulanıyor. -->
+          <button class="tool-card" data-view="preset">
+            <div class="tc-icon grad-e">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Preset</div>
+              <div class="tc-desc">Seçili klibe tek tıkla efekt ve animasyon uygula</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+
+          <!-- Ayarlar: üretim ekranından çıkarılan, nadiren dokunulan şeyler burada. -->
+          <button class="tool-card" data-view="ayarlar">
+            <div class="tc-icon grad-d">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Ayarlar</div>
+              <div class="tc-desc">Karakter isimleri ve motor ayarları</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
         </div>
         <div class="home-foot">Yeni araçlar zamanla eklenecek.</div>
       </div>
@@ -89,15 +114,18 @@
           <div class="seg" id="segTrack">
             <button class="seg-btn active" data-track="0" title="Sadece senin mikrofonun yazıya dökülür">A1</button>
             <button class="seg-btn" data-track="1" title="Sadece arkadaşların kanalı (Discord) yazıya dökülür">A2</button>
-            <button class="seg-btn" data-track="2" title="Sadece A3 kanalı yazıya dökülür">A3</button>
-            <!-- Eski etiket "Mix" idi: ne yaptığı hiçbir yerde yazmıyordu. Etiket artık kendini anlatıyor. -->
-            <button class="seg-btn" data-track="mix" title="A1 + A2 birlikte yazıya dökülür (A3 oyun sesi dahil edilmez)">A1+A2</button>
-            <!-- Her kanal AYRI yazıya dökülür (üst üste konuşmalar karışmaz), sonuc tek altyazı
-                 kanalında zaman sırasıyla birleştirilir. Eski "Konuşmacıya Göre" modunun yerini alır. -->
-            <button class="seg-btn" data-track="herkes" title="Konuşma olan her kanal ayrı ayrı yazıya dökülür, sonra birleştirilir — en doğru sonuç">Herkes</button>
+            <!-- A3 ve A1+A2 KALDIRILDI (kullanıcı isteği). Gerekçe: Senkron düzeninde A3 sabit bir
+                 anlam taşımıyor (kadroya göre bir arkadaş ya da oyun sesi) ve "Herkes" onu zaten
+                 kapsıyor; A1+A2'nin ürettiği tek karışık kanal ise "Herkes"in kanal ayrımı yanında
+                 hep daha kötüydü (üst üste konuşmalar birbirine karışıyordu).
+                 Kayıtlı eski seçim ("2"/"mix") restoreSegs'te A1'e alınır ve kullanıcıya SÖYLENİR —
+                 sessiz düşüşün bedeli, boşa giden 20-30 dakikalık GPU işi. -->
+            <!-- Her kanal AYRI yazıya dökülür (üst üste konuşmalar karışmaz) ve her biri KENDİ
+                 altyazı kanalına yazılır — böylece karaktere göre farklı stil verilebiliyor. -->
+            <button class="seg-btn" data-track="herkes" title="Konuşma olan her kanal ayrı ayrı yazıya dökülür ve kendi altyazı kanalına yazılır — en doğru sonuç">Herkes</button>
           </div>
           <!-- Kanal numaraları tek başına bir şey anlatmıyordu; tek satırlık hatırlatma. -->
-          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord karışımı ya da Senkron sonrası tek kişi). Senkron yaptıysan oyun sesi <b>en alt</b> kanaldadır.</p>
+          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord karışımı ya da Senkron sonrası tek kişi). Birden fazla kanalda konuşma varsa <b>Herkes</b> seç — her kanal ayrı altyazı kanalına yazılır. Senkron yaptıysan oyun sesi <b>en alt</b> kanaldadır.</p>
           <!-- "Herkes" seçiliyken: hangi kanallar yazıya dökülsün? Eski "Konuşmacıya Göre"
                modunun kanal listesi buraya taşındı; mod kalktı, kaynak seçeneği oldu. -->
           <div id="kanalBox" hidden style="margin-top:12px">
@@ -106,11 +134,20 @@
             <p class="note" id="kanalUyari" hidden></p>
           </div>
 
-          <!-- STİL SEÇİCİ KALDIRILDI: altyazı artık Premiere'in kendi altyazı kanalına
-               yazılıyor ve o kanalın tek bir stili olur. Yazı tipi, renk, kontur ve konum
-               Premiere'de bir kez ayarlanır (altyazıya tıkla → Essential Graphics →
-               Track Style → Create Style) ve tüm altyazılara birden uygulanır. -->
-          <p class="note" style="margin-top:10px">Görünümü (yazı tipi, renk, kontur, konum) Premiere'de <b>bir kez</b> ayarlarsın: altyazıya tıkla → Essential Graphics → <b>Track Style → Create Style</b>. Sonra hepsi birden değişir.</p>
+          <!-- ALTYAZI KANALI STİLLERİ — HER KARAKTERE BİR SATIR, İÇERİK DİNAMİK.
+               Panel "Herkes" kaynağında A1 + yazıya dökülen her ses kanalını AYRI altyazı
+               kanalına yazıyor, yani satır sayısı kadroya göre değişiyor; bu yüzden burası
+               sabit HTML değil, app.js'teki trackStilDoldur() dolduruyor.
+               Satır başlıkları KASITEN C-numarası içermiyor: konuşma çıkmayan bir kanal track
+               almadığı için buradaki sıra ile gerçek track sırası kayabilir. Kesin eşleme
+               ("C2 (Dora) → Pink Text") üretim bitince sonuç mesajında veriliyor.
+               Panel stili Premiere'e KENDİSİ atayamıyor (ölçüldü, host.jsx notuna bak) —
+               seçim yalnız o talimatı üretmek için. -->
+          <div id="trackStilBox" hidden style="margin-top:14px"></div>
+
+          <!-- Stili panel ATAYAMAZ (seq.captionTracks Premiere'de yok) — kullanıcı her track'e
+               kendi stilini elle verir. Bedeli bu; karşılığı karaktere göre renk. -->
+          <p class="note" style="margin-top:10px">Görünümü (yazı tipi, renk, kontur, konum) Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> kaynağında <b>her karakter kendi altyazı kanalına</b> yazılır — her birine farklı stil verip karaktere göre renk yapabilirsin. Panel stili kendisi atayamıyor: üretim bitince <b>hangi kanala hangi stili vereceğini</b> sonuç mesajında yazar.</p>
 
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
@@ -121,7 +158,9 @@
           <div id="shortsAyar" hidden>
             <!-- Bu satır GÖRÜNÜR olmalı: eskiden yalnız düğme ipucunda (title) yazıyordu ve
                  kullanıcı "Konuşmacıya Göre neden kapalı?" diye sordu. -->
-            <p class="note" style="margin-top:8px">Altyazı kısalır: uzunluğuna göre <b>1, en fazla 2 kelime</b>. Konum ve boyutu Premiere'de altyazı stilinden ayarlarsın (bir kez).</p>
+            <!-- Kelime tavanı ARTIK HER ZAMAN 2 (Shorts'tan bağımsız, bkz. app.js trOpts).
+                 Shorts yalnız KARAKTER sınırını daraltır — dikey karede satır dar. -->
+            <p class="note" style="margin-top:8px">Satır daha da kısalır: dikey karede az yer olduğu için <b>karakter sınırı</b> düşer. Kelime tavanı zaten her videoda <b>en fazla 2</b>. Konum ve boyutu Premiere'de altyazı stilinden ayarlarsın.</p>
             <!-- Hangi yolda olduğumuzu söyleyen satır (app.js wireShorts dolduruyor).
                  Altyazı kanalı = tek kanal, kasma yok, animasyon yok.
                  MOGRT = animasyonlu ama altyazı başına bir klip. -->
@@ -130,25 +169,28 @@
                  konumu Premiere'in kendi altyazı stili belirler, panel karışamaz. -->
             <p class="note" id="shortsUyari" hidden style="color:var(--warn)"></p>
           </div>
+
+          <!-- TOFI MONI VİDEO MODU: her cümleyi altyazılamak yerine SEYREK ve vurucu.
+               Seçimi yapay zekâ yapar (js/vurucu.js → Claude API). Panelin internete çıkan
+               TEK yolu budur; kutu kapalıyken hiçbir istek gönderilmez. -->
+          <label class="switch-row" style="margin-top:14px">
+            <span>Tofi Moni video modu <small>(seyrek altyazı — yapay zekâ seçer)</small></span>
+            <input type="checkbox" id="chkVurucu">
+          </label>
+          <div id="vurucuAyar" hidden>
+            <p class="note" style="margin-top:8px">İlk <b>1 dakika</b> herkesin konuşması tam altyazılanır (cümle bitmediyse 1 dakikayı aşar). Sonrasında <b>~20 saniyede bir</b>, o aralığın en vurucu cümlesi yazılır; gerisi yazılmaz.</p>
+            <!-- app.js dolduruyor: anahtar var mı, yoksa nereye konacak. -->
+            <p class="note" id="vurucuAnahtarNot" style="margin-top:8px"></p>
+          </div>
         </div>
 
 
-        <details class="card dict-card" id="dictCard">
-          <summary class="dict-summary">
-            <span class="card-title" style="margin:0">Karakter İsimleri</span>
-            <span class="dict-badge" id="dictBadge">0</span>
-            <span class="dict-chev">▾</span>
-          </summary>
-          <div class="dict-body">
-            <textarea id="dictText" class="dict-text" rows="7" spellcheck="false"
-              placeholder="Tofi: toffy, tofy&#10;Moni: money, monny"></textarea>
-            <div class="dict-actions">
-              <button class="btn-ghost" id="dictSave" type="button">Kaydet</button>
-              <button class="btn-ghost" id="dictReset" type="button">Varsayılanlar</button>
-              <span class="dict-status" id="dictStatus"></span>
-            </div>
-          </div>
-        </details>
+        <!-- Karakter İsimleri kartı BURADAN ALINDI, "Ayarlar" görünümüne taşındı (kullanıcı
+             isteği: üretim ekranında görünmesin, gerekirse ayarlardan düzenlensin).
+             Kart SİLİNMEDİ ve id'leri (dictText/dictSave/dictReset/dictBadge/dictStatus)
+             aynı kaldı — böylece js/app.js'teki sözlük kodunda tek satır bile değişmedi.
+             Silmenin bedeli olurdu: dictApply, üretilmiş altyazıyı yeniden GPU'ya sokmadan
+             düzelten tek yol. Sözlük motora gitmeye devam ediyor (hotwords + düzeltme). -->
 
         <div class="field">
           <label>Süre aralığı <small style="color:var(--faint)">(boş = tüm video)</small></label>
@@ -217,7 +259,83 @@
 
         </div><!-- /genArea -->
 
+        <!-- SEÇİLİ KLİBE ANİMASYON.
+             ÖLÇÜLDÜ (26.3.0): kullanıcının .prfpset presetleri script'ten OKUNAMIYOR —
+             ne DOM'da ne qe.project'te preset metodu var. AMA ComponentParam tamamen
+             yazılabilir (addKey/setValueAtKey/setTimeVarying) ve her klipte Motion +
+             Opacity zaten hazır. Bu yüzden animasyon preset dosyasından değil, host.jsx'teki
+             koddan üretiliyor — kullanıcı açısından sonuç aynı: tek tık. -->
+        <!-- Preset kartı BURADAN TAŞINDI → kendi bölümü (#viewPreset). Sebep: altyazıya
+             değil, timeline'da ne seçiliyse ona uygulanan genel bir araç. -->
+
         <!-- ================= RENK DEĞİŞTİR (3. sekme) ================= -->
+      </div>
+
+      <!-- ================= PRESET =================
+           Timeline'da SEÇİLİ olana, öğretilmiş preset'i uygular.
+           Kartlara SAĞ TIK → yeniden adlandır / kaldır. Sıralama HER ZAMAN alfabetik
+           (Türkçe) — kullanıcı kartın yerini ezberliyor, sıra oynamamalı. -->
+      <div class="view" id="viewPreset" hidden>
+        <div class="card">
+          <div class="card-title">Preset</div>
+          <div id="presetBtnlar" class="preset-grid"></div>
+          <span class="dict-status" id="animStatus" style="display:block;margin-top:12px"></span>
+          <!-- "Öğretme modu" kutusu KALDIRILDI: kartlar iki modda da aynı görünüyordu ve
+               yanlış modun bedeli asimetrikti (yanlışlıkla uygulamak zararsız, yanlışlıkla
+               öğrenmek saatlerce emeği siliyordu). Artık sol tık HEP uygular, öğretme sağ tıkta. -->
+          <p class="note" style="margin:14px 0 0">Karta <b>sol tık</b>: seçili klip(ler)e uygular. <b>Sağ tık</b>: bu klipten öğret · oynatma kafasına uygula · tersini oluştur · yeniden adlandır · kaldır.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Yeni preset oluştur</div>
+          <div class="dict-actions">
+            <input type="text" id="presetYeniAd" class="kanal-ad" style="flex:1" placeholder="preset adı" spellcheck="false" autocomplete="off">
+            <button class="btn-ghost" id="btnPresetEkle" type="button">Ekle</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= AYARLAR ================= -->
+      <!-- Üretim ekranını sadeleştirmek için açılan görünüm. Altyazı ekranında sürekli
+           göze giren ama nadiren dokunulan ayarlar buraya taşınıyor. -->
+      <div class="view" id="viewAyarlar" hidden>
+        <details class="card dict-card" id="dictCard" open>
+          <summary class="dict-summary">
+            <span class="card-title" style="margin:0">Karakter İsimleri</span>
+            <span class="dict-badge" id="dictBadge">0</span>
+            <span class="dict-chev">▾</span>
+          </summary>
+          <div class="dict-body">
+            <textarea id="dictText" class="dict-text" rows="7" spellcheck="false"
+              placeholder="Tofi: toffy, tofy&#10;Moni: money, monny"></textarea>
+            <div class="dict-actions">
+              <button class="btn-ghost" id="dictSave" type="button">Kaydet</button>
+              <button class="btn-ghost" id="dictReset" type="button">Varsayılanlar</button>
+              <span class="dict-status" id="dictStatus"></span>
+            </div>
+            <p class="note" style="margin-top:10px">Motor bu isimleri iki yerde kullanır: yazıya dökerken ipucu olarak, sonra da metinde kesin düzeltme olarak (Türkçe ekler dahil — “Tofilerden”). Buraya dokunmasan da çalışır.</p>
+          </div>
+        </details>
+
+        <!-- API ANAHTARI. Yalnız "Tofi Moni video modu" için gerekli; panelin geri kalanı
+             internetsiz çalışır. Anahtar panel klasöründeki anthropic-key.txt'ye yazılır —
+             o dosya kullanıcı dosyaları listesinde, güncellemede EZİLMEZ (5 yerde kayıtlı:
+             .gitignore · installer/panel-files.ps1 · installer.iss · installer/kur.ps1 · js/updater.js). -->
+        <div class="card">
+          <div class="card-title">Yapay Zekâ Anahtarı</div>
+          <p class="note">“Tofi Moni video modu” altyazıların hangisinin vurucu olduğunu seçmek için Claude'a soruyor. Anahtarını <b>console.anthropic.com</b> → API Keys'ten alırsın.</p>
+          <input type="password" id="apiKeyText" class="kanal-ad" style="margin-top:10px" placeholder="sk-ant-…" spellcheck="false" autocomplete="off">
+          <div class="dict-actions" style="margin-top:10px">
+            <button class="btn-ghost" id="apiKeySave" type="button">Kaydet</button>
+            <button class="btn-ghost" id="apiKeyClear" type="button">Sil</button>
+            <span class="dict-status" id="apiKeyStatus"></span>
+          </div>
+          <p class="note" style="margin-top:10px;color:var(--warn)">⚠ O mod açıkken <b>transkript metni</b> (ses ya da görüntü değil) Anthropic'e gönderilir. Mod kapalıyken panel internete hiç çıkmaz.</p>
+        </div>
+
+        <!-- Tanılama kartları KALDIRILDI: ikisi de sorusunu cevapladı ve sonuçlar
+             CLAUDE.md'ye yazıldı. Fonksiyonlar host.jsx'te duruyor (captionStilTani,
+             presetTani), yeni bir Premiere sürümünde DevTools'tan tekrar çağrılabilir. -->
       </div>
 
       <!-- ================= AUTOCUT ================= -->
@@ -321,10 +439,11 @@
           <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
                yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
           <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen (OBS mikrofonun, dokunulmaz) · A2 = Tofi/Moni'den diğeri · sonra “Karakter İsimleri” listesindeki <b>sırayla</b> arkadaşların · <b>en alttaki kanal oyun sesi</b>. Videoda olmayan karakter kanal harcamaz, alttakiler yukarı kayar.</p>
-          <div class="field" style="margin-top:12px">
-            <label>Oyun sesi şu an hangi kanalda? <small style="color:var(--faint)">(panel onu en alta taşıyacak)</small></label>
-            <div class="select"><select id="snkOyunKanal"></select></div>
-          </div>
+          <!-- "Oyun sesi şu an hangi kanalda?" seçici KALDIRILDI. Panel oyun sesini artık
+               taşımıyor (Premiere'de klip taşıma API'si yok; overwriteClip çoklu-akışlı OBS
+               kaydında yanlış ses akışını yerleştiriyordu). Yerleşim tablosu oyun sesi için
+               en alta bir satır koyar ve kullanıcı klibi oraya ELLE taşır. -->
+          <p class="note" style="margin-top:8px">Oyun sesini <b style="color:var(--text)">Premiere'de en alt kanala sen taşı</b>, sonra Uygula'ya bas — panel oyun sesine dokunmaz.</p>
         </div>
 
         <div class="card" id="snkPlanCard" hidden>
