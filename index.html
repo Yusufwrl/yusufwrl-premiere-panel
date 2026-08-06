@@ -47,7 +47,7 @@
             </div>
             <div class="tc-body">
               <div class="tc-title">Altyazı</div>
-              <div class="tc-desc">Otomatik Türkçe altyazı — karakterlere göre renkli, animasyonlu</div>
+              <div class="tc-desc">Otomatik Türkçe altyazı — her karakter kendi kanalında</div>
             </div>
             <div class="tc-arrow">›</div>
           </button>
@@ -122,10 +122,10 @@
                  sessiz düşüşün bedeli, boşa giden 20-30 dakikalık GPU işi. -->
             <!-- Her kanal AYRI yazıya dökülür (üst üste konuşmalar karışmaz) ve her biri KENDİ
                  altyazı kanalına yazılır — böylece karaktere göre farklı stil verilebiliyor. -->
-            <button class="seg-btn" data-track="herkes" title="Konuşma olan her kanal ayrı ayrı yazıya dökülür ve kendi altyazı kanalına yazılır — en doğru sonuç">Herkes</button>
+            <button class="seg-btn" data-track="herkes" title="Her kanal ayrı yazıya dökülür — en doğru sonuç">Herkes</button>
           </div>
           <!-- Kanal numaraları tek başına bir şey anlatmıyordu; tek satırlık hatırlatma. -->
-          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşlar (Discord karışımı ya da Senkron sonrası tek kişi). Birden fazla kanalda konuşma varsa <b>Herkes</b> seç — her kanal ayrı altyazı kanalına yazılır. Senkron yaptıysan oyun sesi <b>en alt</b> kanaldadır.</p>
+          <p class="note" style="margin-top:9px">A1 = senin mikrofonun · A2 = arkadaşların. Birden fazla kişi konuşuyorsa <b>Herkes</b> seç.</p>
           <!-- "Herkes" seçiliyken: hangi kanallar yazıya dökülsün? Eski "Konuşmacıya Göre"
                modunun kanal listesi buraya taşındı; mod kalktı, kaynak seçeneği oldu. -->
           <div id="kanalBox" hidden style="margin-top:12px">
@@ -134,20 +134,16 @@
             <p class="note" id="kanalUyari" hidden></p>
           </div>
 
-          <!-- ALTYAZI KANALI STİLLERİ — HER KARAKTERE BİR SATIR, İÇERİK DİNAMİK.
-               Panel "Herkes" kaynağında A1 + yazıya dökülen her ses kanalını AYRI altyazı
-               kanalına yazıyor, yani satır sayısı kadroya göre değişiyor; bu yüzden burası
-               sabit HTML değil, app.js'teki trackStilDoldur() dolduruyor.
-               Satır başlıkları KASITEN C-numarası içermiyor: konuşma çıkmayan bir kanal track
-               almadığı için buradaki sıra ile gerçek track sırası kayabilir. Kesin eşleme
-               ("C2 (Dora) → Pink Text") üretim bitince sonuç mesajında veriliyor.
-               Panel stili Premiere'e KENDİSİ atayamıyor (ölçüldü, host.jsx notuna bak) —
-               seçim yalnız o talimatı üretmek için. -->
-          <div id="trackStilBox" hidden style="margin-top:14px"></div>
+          <!-- ALTYAZI KANALI STİL SEÇİCİLERİ KALDIRILDI (kullanıcı isteği, 2026-08-06).
+               Kanal başına bir "Track Style" seçici vardı (#trackStilBox) ama stili HİÇ
+               uygulamıyordu — Premiere'de caption track'e erişip stil atamanın yolu kapalı
+               (üç API yüzeyi ölçüldü). Tek işi bir talimat metni yazdırmaktı; bedeli 7 kanallı
+               kadroda 7 satır boş seçiciydi. Sonuç mesajı hangi karakterin kaçıncı altyazı
+               kanalına yazıldığını zaten söylüyor; stili kullanıcı Premiere'de kendi veriyor. -->
 
           <!-- Stili panel ATAYAMAZ (seq.captionTracks Premiere'de yok) — kullanıcı her track'e
                kendi stilini elle verir. Bedeli bu; karşılığı karaktere göre renk. -->
-          <p class="note" style="margin-top:10px">Görünümü (yazı tipi, renk, kontur, konum) Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> kaynağında <b>her karakter kendi altyazı kanalına</b> yazılır — her birine farklı stil verip karaktere göre renk yapabilirsin. Panel stili kendisi atayamıyor: üretim bitince <b>hangi kanala hangi stili vereceğini</b> sonuç mesajında yazar.</p>
+          <p class="note" style="margin-top:10px">Yazı tipi, renk ve konumu Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> seçiliyken her karakter ayrı bir altyazı kanalına gider; hangisine hangi rengi vereceğin üretim bitince yazar.</p>
 
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
@@ -160,11 +156,10 @@
                  kullanıcı "Konuşmacıya Göre neden kapalı?" diye sordu. -->
             <!-- Kelime tavanı ARTIK HER ZAMAN 2 (Shorts'tan bağımsız, bkz. app.js trOpts).
                  Shorts yalnız KARAKTER sınırını daraltır — dikey karede satır dar. -->
-            <p class="note" style="margin-top:8px">Satır daha da kısalır: dikey karede az yer olduğu için <b>karakter sınırı</b> düşer. Kelime tavanı zaten her videoda <b>en fazla 2</b>. Konum ve boyutu Premiere'de altyazı stilinden ayarlarsın.</p>
+            <p class="note" style="margin-top:8px">Dikey karede satırlar daha kısa olur (kelime sayısı her videoda zaten <b>en fazla 2</b>). Konum ve boyut Premiere'deki altyazı stilinden ayarlanır.</p>
             <!-- Hangi yolda olduğumuzu söyleyen satır (app.js wireShorts dolduruyor).
                  Altyazı kanalı = tek kanal, kasma yok, animasyon yok.
                  MOGRT = animasyonlu ama altyazı başına bir klip. -->
-            <p class="note" id="shortsYolNot" hidden style="margin-top:8px"></p>
             <!-- Konum/boyut kaydırıcıları YALNIZ MOGRT yolunda anlamlı: altyazı kanalında
                  konumu Premiere'in kendi altyazı stili belirler, panel karışamaz. -->
             <p class="note" id="shortsUyari" hidden style="color:var(--warn)"></p>
@@ -178,7 +173,7 @@
             <input type="checkbox" id="chkVurucu">
           </label>
           <div id="vurucuAyar" hidden>
-            <p class="note" style="margin-top:8px">İlk <b>1 dakika</b> herkesin konuşması tam altyazılanır (cümle bitmediyse 1 dakikayı aşar). Sonrasında <b>~20 saniyede bir</b>, o aralığın en vurucu cümlesi yazılır; gerisi yazılmaz.</p>
+            <p class="note" style="margin-top:8px">İlk <b>1 dakika</b> her şey altyazılanır. Sonrasında yaklaşık <b>20 saniyede bir</b> sadece en vurucu cümle yazılır.</p>
             <!-- app.js dolduruyor: anahtar var mı, yoksa nereye konacak. -->
             <p class="note" id="vurucuAnahtarNot" style="margin-top:8px"></p>
           </div>
@@ -253,7 +248,7 @@
               </div>
             </div>
           </div>
-          <p class="note" id="trHint" style="margin:0 0 10px">Satırlara tıklayıp metni düzeltebilirsin (yerleştirmeden önce). Renk yanlışsa noktaya tıkla.</p>
+          <p class="note" id="trHint" style="margin:0 0 10px">Timeline'a eklemeden önce satırlara tıklayıp metni düzeltebilirsin. Konuşan kişi yanlışsa soldaki noktaya tıkla.</p>
           <div class="transcript" id="transcript"></div>
         </div>
 
@@ -283,7 +278,7 @@
           <!-- "Öğretme modu" kutusu KALDIRILDI: kartlar iki modda da aynı görünüyordu ve
                yanlış modun bedeli asimetrikti (yanlışlıkla uygulamak zararsız, yanlışlıkla
                öğrenmek saatlerce emeği siliyordu). Artık sol tık HEP uygular, öğretme sağ tıkta. -->
-          <p class="note" style="margin:14px 0 0">Karta <b>sol tık</b>: seçili klip(ler)e uygular. <b>Sağ tık</b>: bu klipten öğret · oynatma kafasına uygula · tersini oluştur · yeniden adlandır · kaldır.</p>
+          <p class="note" style="margin:14px 0 0"><b>Sol tık</b> seçili klibe uygular. <b>Sağ tık</b>: öğret · oynatma kafasına uygula · tersini oluştur · yeniden adlandır · kaldır.</p>
         </div>
 
         <div class="card">
@@ -313,7 +308,7 @@
               <button class="btn-ghost" id="dictReset" type="button">Varsayılanlar</button>
               <span class="dict-status" id="dictStatus"></span>
             </div>
-            <p class="note" style="margin-top:10px">Motor bu isimleri iki yerde kullanır: yazıya dökerken ipucu olarak, sonra da metinde kesin düzeltme olarak (Türkçe ekler dahil — “Tofilerden”). Buraya dokunmasan da çalışır.</p>
+            <p class="note" style="margin-top:10px">Buraya yazdığın isimler altyazıda doğru yazılır — “Tofilerden” gibi ekli hâlleri dahil. Dokunmasan da çalışır.</p>
           </div>
         </details>
 
@@ -323,14 +318,14 @@
              .gitignore · installer/panel-files.ps1 · installer.iss · installer/kur.ps1 · js/updater.js). -->
         <div class="card">
           <div class="card-title">Yapay Zekâ Anahtarı</div>
-          <p class="note">“Tofi Moni video modu” altyazıların hangisinin vurucu olduğunu seçmek için Claude'a soruyor. Anahtarını <b>console.anthropic.com</b> → API Keys'ten alırsın.</p>
+          <p class="note">Sadece “Tofi Moni video modu” için gerekir. Anahtarı <b>console.anthropic.com</b> → API Keys'ten alırsın.</p>
           <input type="password" id="apiKeyText" class="kanal-ad" style="margin-top:10px" placeholder="sk-ant-…" spellcheck="false" autocomplete="off">
           <div class="dict-actions" style="margin-top:10px">
             <button class="btn-ghost" id="apiKeySave" type="button">Kaydet</button>
             <button class="btn-ghost" id="apiKeyClear" type="button">Sil</button>
             <span class="dict-status" id="apiKeyStatus"></span>
           </div>
-          <p class="note" style="margin-top:10px;color:var(--warn)">⚠ O mod açıkken <b>transkript metni</b> (ses ya da görüntü değil) Anthropic'e gönderilir. Mod kapalıyken panel internete hiç çıkmaz.</p>
+          <p class="note" style="margin-top:10px;color:var(--warn)">⚠ O mod açıkken sadece altyazı metni internete gider — ses ve görüntü gitmez. Kapalıyken hiçbir şey gönderilmez.</p>
         </div>
 
         <!-- Tanılama kartları KALDIRILDI: ikisi de sorusunu cevapladı ve sonuçlar
@@ -345,8 +340,7 @@
              varken o bölüm "boşluk" sayılıp KESİLİYORDU. -->
         <div class="card">
           <div class="card-title">Konuşma kanalları</div>
-          <p class="note" style="margin:0 0 10px">Boşluk = <b>işaretli kanalların hiçbirinde</b> konuşma yok demek. <b style="color:var(--text)">Oyun sesi ve müzik kanallarının kutusunu KALDIR</b> — yoksa hiç boşluk bulunamaz.<br>
-            Hepsi işaretli geliyor: bir kanalı yanlışlıkla dışarıda bırakmak o kişinin konuşmasını sildirir, içeride bırakmak ise sadece “boşluk bulunamadı” dedirtir.</p>
+          <p class="note" style="margin:0 0 10px">Konuşma olan kanalları işaretli bırak. <b style="color:var(--text)">Oyun sesi ve müzik kanallarının kutusunu kaldır</b> — yoksa hiç boşluk bulunamaz.</p>
           <div id="acKanalRows"></div>
           <button class="btn-ghost" id="acKanalTara" type="button" style="margin-top:10px">Kanalları Yenile</button>
           <p class="note" id="acKanalUyari" hidden></p>
@@ -377,12 +371,11 @@
               </select></div>
             </div>
           </div>
-          <label class="switch-row" style="margin-top:12px">
-            <span>Gürültü azaltma <small>(gürültülü kayıtta daha isabetli — analiz ~5 kat yavaşlar)</small></span>
-            <input type="checkbox" id="chkDenoise">
-          </label>
-          <p class="note">Hangi kanalların analiz edileceğini yukarıdaki <b>Konuşma kanalları</b> kartından seçersin. <b>Senkron için:</b> önce AutoCut, sonra altyazı ekle.<br>
-            <b style="color:var(--text)">Hız notu:</b> “En kısa boşluk” ne kadar küçükse o kadar çok kesim olur ve kesim o kadar uzun sürer. 0.1 sn seçmek binlerce kesim üretebilir; 0.3 sn neredeyse aynı süreyi kazandırıp çok daha hızlı biter.</p>
+          <!-- "Gürültü azaltma" kutusu KALDIRILDI (kullanıcı isteği, 2026-08-06): analizi ~5 kat
+               yavaşlatıyordu ve ölçümde boşlukların %83'ü onsuz da aynı çıkıyordu. Kod tarafında
+               `opts.denoise` desteği pipeline.js'te DURUYOR (varsayılan kapalı) — gerekirse
+               yeniden bağlanabilir. -->
+          <p class="note">Önce AutoCut, sonra altyazı ekle. “En kısa boşluk” küçüldükçe kesim sayısı artar ve iş uzar: 0.1 sn saatler sürebilir, <b>0.3 sn</b> neredeyse aynı kazancı çok daha hızlı verir.</p>
         </div>
 
         <button class="btn-primary btn-lg" id="acAnalyze">
@@ -438,7 +431,7 @@
           </div>
           <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
                yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
-          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen (OBS mikrofonun, dokunulmaz) · A2 = Tofi/Moni'den diğeri · sonra “Karakter İsimleri” listesindeki <b>sırayla</b> arkadaşların · <b>en alttaki kanal oyun sesi</b>. Videoda olmayan karakter kanal harcamaz, alttakiler yukarı kayar.</p>
+          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · A2 = Tofi/Moni'den diğeri · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz.</p>
           <!-- "Oyun sesi şu an hangi kanalda?" seçici KALDIRILDI. Panel oyun sesini artık
                taşımıyor (Premiere'de klip taşıma API'si yok; overwriteClip çoklu-akışlı OBS
                kaydında yanlış ses akışını yerleştiriyordu). Yerleşim tablosu oyun sesi için

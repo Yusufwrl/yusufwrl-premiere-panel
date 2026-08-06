@@ -203,8 +203,6 @@
   function modGorunumUygula() {
     // Kanal listesi yalnız "Herkes" kaynağında anlamlı.
     var kb = $("kanalBox"); if (kb) kb.hidden = (state.track !== "herkes");
-    // Stil satırları kaynağa bağlı: "Herkes"te karakter başına bir satır, tek kaynakta bir satır.
-    try { trackStilDoldur(); } catch (eTs) {}
     $("result").hidden = !allCues().length;
   }
   var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
@@ -618,6 +616,80 @@
      değil), yani kullanıcı dosyaları korumasının dışında kalır ve Premiere sürüm
      yükseltmesinde/önbellek temizliğinde sessizce gider. `presetler.json` ise beş listede
      korunuyor (bkz. CLAUDE.md — Kullanıcı dosyaları). */
+  /* ---------- HAZIR İÇERİK KURULUMU (varsayilan\ klasörü) ----------
+     Amaç: panel BAŞKA BİR MAKİNEDE de dolu gelsin — arkadaş kurunca preset'ler öğretilmiş,
+     Track Style'lar Premiere'de görünür olsun.
+     İKİ KURAL:
+       1. ÜZERİNE ASLA YAZMA. Kullanıcının kendi presetleri/stilleri varsa dokunulmaz;
+          yalnızca EKSİK olan konur. (presetler.json zaten korunan dosya listesinde.)
+       2. Sessiz kalma. Ne kurulduğu log'a yazılır.
+     Stil dosyaları pakette ASCII adla (stil01.prtextstyle) durur ve gerçek adları
+     stiller.json'dan okunur — zip'e Türkçe dosya adı koymak bozulma riski taşıyor. */
+  function belgelerAdayKlasorleri() {
+    var h = process.env.USERPROFILE || process.env.HOME || "";
+    if (!h) return [];
+    return [path.join(h, "Documents"), path.join(h, "Belgeler"),
+            path.join(h, "OneDrive", "Documents"), path.join(h, "OneDrive", "Belgeler")];
+  }
+  /* Premiere'in Track Style klasörü. Windows'ta "Belgeler" OneDrive'a yönlendirilmiş
+     olabiliyor ve adı dile göre değişiyor — bu yüzden adaylar taranır ve İÇİNDE Adobe\Common
+     OLAN tercih edilir (Premiere'in gerçekten kullandığı yol odur). */
+  function stilKlasoruBul() {
+    var adaylar = belgelerAdayKlasorleri(), i, p;
+    for (i = 0; i < adaylar.length; i++) {          // 1. tercih: Adobe\Common zaten var
+      p = path.join(adaylar[i], "Adobe", "Common");
+      try { if (fs.existsSync(p)) return path.join(p, "Assets", "Text Styles"); } catch (e) {}
+    }
+    for (i = 0; i < adaylar.length; i++) {          // 2. tercih: Belgeler klasörü var
+      try { if (fs.existsSync(adaylar[i])) return path.join(adaylar[i], "Adobe", "Common", "Assets", "Text Styles"); } catch (e2) {}
+    }
+    return "";
+  }
+  function varsayilanlariKur() {
+    if (!CEP) return;
+    var kok = path.join(extRoot, "varsayilan");
+    try { if (!fs.existsSync(kok)) return; } catch (e0) { return; }
+
+    // 1) Preset'ler — yalnız kullanıcının hiç kaydı yoksa
+    try {
+      var hedef = presetDosyaYolu();
+      if (!fs.existsSync(hedef)) {
+        var kaynak = path.join(kok, "presetler.json");
+        if (fs.existsSync(kaynak)) {
+          fs.writeFileSync(hedef, fs.readFileSync(kaynak));
+          _presetYigin = null;   // yeniden okunsun
+          var ad = Object.keys(presetYiginlar());
+          logLine("Hazır preset'ler kuruldu (" + ad.length + "): " + ad.join(", "));
+          _presetSecili = presetSeciliOku();
+          ad.forEach(function (a) { if (_presetSecili.indexOf(a) === -1) _presetSecili.push(a); });
+          presetSeciliYaz();
+        }
+      }
+    } catch (e1) { logLine("Hazır preset kurulamadı: " + (e1.message || e1)); }
+
+    // 2) Track Style'lar — yalnız o adda dosya YOKSA
+    try {
+      var manYol = path.join(kok, "stiller.json");
+      if (!fs.existsSync(manYol)) return;
+      var man = JSON.parse(String(fs.readFileSync(manYol, "utf8")).replace(/^﻿/, ""));
+      if (!man || !man.length) return;
+      var klasor = stilKlasoruBul();
+      if (!klasor) { logLine("Track Style klasörü bulunamadı — stiller kurulmadı."); return; }
+      pipeline.ensureDir(klasor);
+      var kondu = [];
+      man.forEach(function (s) {
+        try {
+          var src = path.join(kok, "stiller", s.dosya), dst = path.join(klasor, s.ad);
+          if (!fs.existsSync(src) || fs.existsSync(dst)) return;   // ÜZERİNE YAZMA
+          fs.writeFileSync(dst, fs.readFileSync(src));
+          kondu.push(s.ad.replace(/\.prtextstyle$/i, ""));
+        } catch (eS) {}
+      });
+      if (kondu.length) logLine("Track Style kuruldu (" + kondu.length + "): " + kondu.join(", ") +
+                                " — Premiere'de Text > Track Style altında görünür.");
+    } catch (e2) { logLine("Track Style kurulamadı: " + (e2.message || e2)); }
+  }
+
   var _presetYigin = null;
   var _presetKurtarildi = "";   // yedekten kurtarıldıysa açılışta kullanıcıya SÖYLENİR
   function presetDosyaYolu() { return path.join(extRoot, "presetler.json"); }
@@ -1069,6 +1141,9 @@
   }
 
   function wirePreset() {
+    /* HAZIR İÇERİK KURULUMU — kartlar çizilmeden ÖNCE: yeni kurulumda preset'ler dolu
+       gelsin, boş kart görünüp sonradan dolmasın. Kendi kaydı olanda hiçbir şey yapmaz. */
+    try { varsayilanlariKur(); } catch (eVk) { logLine("Hazır içerik kurulamadı: " + (eVk.message || eVk)); }
     _presetSecili = presetSeciliOku();
     presetBtnlarCiz();
 
@@ -1273,98 +1348,23 @@
     var d; try { d = JSON.parse(raw); } catch (e) { uiAlert("Sekans okunamadı: " + raw, "Kanal tarama"); return; }
     if (d.error === "no_sequence") { uiAlert("Aktif sekans yok. Önce bir sekans aç.", "Kanal tarama"); return; }
     state.kanalTarandi = true;   // tarandı ama boş çıktı -> runChannels farklı (doğru) mesaj versin
-    await captionStilleriTara();  // stil listesi kanal satırlarındaki seçicilere gerekli
     renderChannelMap(d.tracks || [], d.videoTracks || 0);
     logLine("Kanallar: " + (d.tracks || []).map(function (t) { return "A" + (t.idx + 1) + "(" + t.clips + ")"; }).join(" ") +
             " · " + (d.videoTracks || 0) + " video kanalı");
     var secili = aktifKanallar();
     if (secili.length) logLine("Yazıya dökülecek: " + secili.map(kanalAdi).join(", "));
   }
-  /* ---------- ALTYAZI STİLLERİ (Premiere'in Track Style'ları) ----------
-     "Herkes" kaynağında her ses kanalı AYRI altyazı kanalına yazılıyor ve bir altyazı
-     kanalının stili TRACK'in ayarı (Caption Track Settings > Style). Yani kanal başına
-     farklı stil = karaktere göre renk. Liste host'tan gelir; boş gelmesi "stil yok"
-     DEĞİL "bulamadık" demektir — o yüzden seçici yine gösterilir, kullanıcı Premiere'de
-     elle de verebilir. */
-  var _captionStilleri = [];
-  async function captionStilleriTara() {
-    if (!CEP) { _captionStilleri = []; return _captionStilleri; }
-    try {
-      var d = JSON.parse(String(await evalES("captionStilleriJSON()")));
-      _captionStilleri = (d && d.stiller && d.stiller.length) ? d.stiller : [];
-      logLine("Altyazı stilleri: " + (_captionStilleri.length ? _captionStilleri.join(", ") : "bulunamadı"));
-    } catch (e) { _captionStilleri = []; }
-    return _captionStilleri;
-  }
-  /* HER KARAKTERE AYRI ALTYAZI KANALI → stil seçicileri DİNAMİK.
-     Kaç konuşan varsa o kadar satır: A1 (sen) + yazıya dökülecek her ses kanalı. Sabit iki
-     seçici (C1/C2) devri bitti; kadro videodan videoya değiştiği için satırlar her taramada
-     yeniden kuruluyor.
-     Seçim yalnızca "hangi track'e hangi stili vereceksin" talimatını üretmek için — panel
-     stili Premiere'e KENDİSİ atayamıyor (host.jsx'teki ölçüme bak: seq.captionTracks yok). */
-  var _stilSecici = { a1: null, tek: null };   // kanal seçicileri ch.stilSel'de tutulur
-  function stilSecDoldur(sel, anahtar) {
-    var secili = lsGet(anahtar, "");
-    sel.innerHTML = "";
-    var o0 = document.createElement("option");
-    o0.value = ""; o0.textContent = _captionStilleri.length ? "stil seç…" : "stil bulunamadı";
-    sel.appendChild(o0);
-    _captionStilleri.forEach(function (ad) {
-      var o = document.createElement("option"); o.value = ad; o.textContent = ad; sel.appendChild(o);
-    });
-    /* Kayıtlı stil listede yoksa yine de göster: kullanıcı stili silmiş ya da başka projede
-       olabilir — sessizce "stil seç…"e düşerse seçimini kaybettiğini fark etmez. */
-    if (secili) {
-      var varMi = false;
-      for (var k = 0; k < sel.options.length; k++) if (sel.options[k].value === secili) varMi = true;
-      if (!varMi) {
-        var ox = document.createElement("option");
-        ox.value = secili; ox.textContent = secili + " (projede yok)";
-        sel.appendChild(ox);
-      }
-      sel.value = secili;
-    }
-    // Her çağrıda YENİ select üretiliyor, dinleyici bu yüzden tek sefer bağlanıyor.
-    sel.addEventListener("change", function () { lsSet(anahtar, sel.value); });
-  }
-  // Tek satır: [ başlık / açıklama ]  [ stil seçici ] — oluşturduğu select'i döndürür.
-  function stilSatir(box, baslik, aciklama, anahtar) {
-    var row = document.createElement("div"); row.className = "sp-row";
-    var info = document.createElement("div"); info.className = "sp-info";
-    var n = document.createElement("div"); n.className = "sp-name"; n.textContent = baslik;
-    var s = document.createElement("div"); s.className = "sp-sample"; s.textContent = aciklama;
-    info.appendChild(n); info.appendChild(s); row.appendChild(info);
-    var wrap = document.createElement("div"); wrap.className = "select sm";
-    var sel = document.createElement("select");
-    wrap.appendChild(sel); row.appendChild(wrap); box.appendChild(row);
-    stilSecDoldur(sel, anahtar);
-    return sel;
-  }
-  function trackStilDoldur() {
-    var box = $("trackStilBox"); if (!box) return;
-    box.innerHTML = ""; box.hidden = false;
-    _stilSecici.a1 = null; _stilSecici.tek = null;
-    state.channels.forEach(function (c) { c.stilSel = null; });
-
-    if (state.track !== "herkes") {
-      // Tek kaynak (A1 ya da A2) → tek altyazı kanalı, tek stil.
-      _stilSecici.tek = stilSatir(box, "Altyazı", "tek kaynak seçili · tek altyazı kanalı",
-                                  "trackStil.tek");
-      return;
-    }
-    /* "Herkes": A1 + yazıya dökülecek HER kanal ayrı altyazı kanalı alır.
-       BAŞLIKLARDA C-NUMARASI YOK — bilerek. İşaretli ama konuşma çıkmayan bir kanal track
-       almıyor, dolayısıyla buradaki sıra ile gerçek track sırası kayabilir; yanlış numara
-       yazmaktansa hiç yazmamak doğru. Kesin eşleme üretim sonunda sonuç mesajında veriliyor
-       (orada sıra `basarili` dizisinden, yani GERÇEKTEN oluşan track'lerden okunuyor).
-       Stil ses kanalı numarasına göre hatırlanır — kanal adıyla (kanalAd.<idx>) aynı mantık. */
-    _stilSecici.a1 = stilSatir(box, "sen", "A1 · senin mikrofonun", "kanalStil.a1");
-    aktifKanallar().forEach(function (ch) {
-      ch.stilSel = stilSatir(box, kanalAdi(ch), "A" + (ch.idx + 1) + " · kendi altyazı kanalı",
-                             "kanalStil." + ch.idx);
-    });
-  }
-  function stilDegeri(sel) { return (sel && sel.value) ? sel.value : ""; }
+  /* ---------- ALTYAZI STİLİ SEÇİCİLERİ KALDIRILDI (kullanıcı isteği, 2026-08-06) ----------
+     Vaktiyle burada kanal başına bir "Track Style" seçici vardı (#trackStilBox). Kaldırıldı
+     çünkü HİÇBİR ZAMAN stil UYGULAMIYORDU: Premiere ExtendScript'te caption track'e erişip
+     stil atamanın yolu kapalı (üç API yüzeyi de ölçüldü, bkz. CLAUDE.md). Seçicinin tek işi
+     üretim sonunda "C1 (sen) → Pink Text" diye bir TALİMAT metni yazdırmaktı; buna karşılık
+     7 kanallı bir kadroda ekranı 7 satır boş seçiciyle dolduruyordu.
+     Yerine ne var: sonuç mesajı hangi karakterin kaçıncı altyazı kanalına yazıldığını zaten
+     söylüyor ("C1 sen · C2 Dora"). Kullanıcı stili Premiere'de Track Style'dan kendi veriyor.
+     Not: host.jsx'teki `captionStilleriJSON` ve `addCaptionsToTimeline`'ın ".stil" dosyası
+     okuması artık ÇAĞRILMIYOR — dokunulmadı (çalışan altyazı yolunu kurcalamamak için),
+     panel o dosyayı hiç yazmadığı için sessizce devre dışı. */
 
   // list = [{idx, clips, style?, cues?}] — taramadan ya da kaydedilmiş oturumdan gelir
   function renderChannelMap(list, videoTracks) {
@@ -1374,7 +1374,7 @@
        verisinde cues alanı olmadığı için önceki cue'lar kanal numarasına göre geri bağlanır. */
     var eski = {};
     state.channels.forEach(function (c) {
-      // Stil artık kanal başına değil (bkz. trackStilDoldur) — yalnız cue'lar korunur.
+      // Stil seçici kaldırıldı — yalnız cue'lar korunur.
       if (c.cues && c.cues.length) eski[c.idx] = { cues: c.cues };
     });
     box.innerHTML = ""; state.channels = [];
@@ -1397,7 +1397,7 @@
     var a1Sm = document.createElement("div"); a1Sm.className = "sp-sample";
     a1Sm.textContent = "senin mikrofonun · her zaman yazıya dökülür";
     a1Info.appendChild(a1Ad); a1Info.appendChild(a1Sm); a1Row.appendChild(a1Info);
-    /* Stil seçici bu satırda DEĞİL, #trackStilBox'ta. Sebep: her karakter kendi altyazı
+    /* NOT: burada bir zamanlar stil seçici vardı, kaldırıldı. Sebep: her karakter kendi altyazı
        kanalını alıyor ve kullanıcı stilleri Premiere'de elle verecek — hangi track'e ne
        vereceğini tek bir listede yan yana görmesi, satırlara dağılmasından daha kolay. */
     box.appendChild(a1Row);
@@ -1421,9 +1421,6 @@
         function yansit() { if (c.checked) r.classList.remove("kanal-pasif"); else r.classList.add("kanal-pasif"); }
         c.addEventListener("change", function () {
           yansit();                                  // kaydedilmiyor, bkz. yukarıdaki not
-          /* Stil listesi işaretli kanallardan kuruluyor: işaret kalkınca o karakterin stil
-             satırı da gitmeli, yoksa kullanıcı hiç oluşmayacak bir track'e stil seçer. */
-          try { trackStilDoldur(); } catch (eTs) {}
         });
         yansit();
       })(t.idx, chk, row);
@@ -1443,8 +1440,6 @@
       (function (ix, el) {
         el.addEventListener("change", function () {
           lsSet("kanalAd." + ix, el.value.trim());
-          // Stil satırının başlığı bu isim — "A4" yazarken "Dora" yazsın diye tazelenir.
-          try { trackStilDoldur(); } catch (eTs) {}
         });
       })(t.idx, adInp);
       var sm = document.createElement("div"); sm.className = "sp-sample";
@@ -1452,8 +1447,7 @@
         (onceki && onceki.cues.length ? (" · " + onceki.cues.length + " altyazı hazır") : "");
       info.appendChild(adInp); info.appendChild(sm); row.appendChild(info);
 
-      /* Bu satırda yalnız "yazıya dökülsün mü" işareti ve kanalın adı var; stili
-         #trackStilBox'taki eş satırdan seçiyor (bkz. trackStilDoldur). */
+      // Bu satırda yalnız "yazıya dökülsün mü" işareti ve kanalın adı var.
       box.appendChild(row);
       /* `renk` ALANI ŞART: transkript satırlarındaki renk noktası kanal nesnesinden okunuyor
          (`ch.renk || speakerColor(i)`). Alan hiç yazılmadığı için her kanal yedek renge
@@ -1469,7 +1463,6 @@
        `videoTracks` parametresi imzada KALIYOR: çağıranlar hâlâ geçiyor ve ileride gerçek bir
        video kanalı kontrolü gerekirse buradan okunur. */
     if (uyari) uyari.hidden = true;
-    trackStilDoldur();   // stil listesi tazelendiyse iki track seçicisi de güncellensin
   }
   // Kanalin gorunen adi: kullanici isim yazdiysa o, yoksa "A4"
   function kanalAdi(ch) {
@@ -1764,17 +1757,17 @@
     var gruplar = [];
     if (state.genMode === "channels") {
       if (state.a1Cues && state.a1Cues.length) {
-        gruplar.push({ ad: "sen", cues: state.a1Cues, stil: stilDegeri(_stilSecici.a1) });
+        gruplar.push({ ad: "sen", cues: state.a1Cues });
       }
       /* Konuşma çıkmayan kanal ATLANIR: boş bir caption track oluşturmak hem işe yaramaz
-         hem sonraki track'lerin C-numarasını kaydırıp stil talimatını yanıltır. */
+         hem sonraki track'lerin C-numarasını kaydırıp "hangi track kimin" eşlemesini yanıltır. */
       aktifKanallar().forEach(function (ch) {
         if (ch.cues && ch.cues.length) {
-          gruplar.push({ ad: kanalAdi(ch), cues: ch.cues, stil: stilDegeri(ch.stilSel) });
+          gruplar.push({ ad: kanalAdi(ch), cues: ch.cues });
         }
       });
     } else if (state.singleCues && state.singleCues.length) {
-      gruplar.push({ ad: "Altyazı", cues: state.singleCues, stil: stilDegeri(_stilSecici.tek) });
+      gruplar.push({ ad: "Altyazı", cues: state.singleCues });
     }
 
     var isler = [];
@@ -1785,7 +1778,7 @@
       /* Zaman sırası ŞART: motor kanal içinde sırasız satır döndürebiliyor ve sesleHizala
          cue'ları ileri itebiliyor. cuesToSrt diziyi olduğu sırayla yazdığı için sıralanmamış
          liste, zamanı geriye giden bir SRT üretir ve Premiere böyle bir dosyayı reddedebilir. */
-      isler.push({ ad: g.ad, stil: g.stil || "",
+      isler.push({ ad: g.ad,
                    cues: c.slice().sort(function (a, b) { return a.start - b.start; }) });
     });
     if (!isler.length) { uiAlert("Önce altyazı oluştur."); return null; }
@@ -1834,14 +1827,10 @@
          ikinci SRT birincinin üstüne yazılıp aynı metin iki track'e düşüyordu. */
       var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + "_" + i + ".srt");
       fs.writeFileSync(srtFile, pipeline.cuesToSrt(is.cues), "utf8");
-      /* Stil adı ExtendScript'e PARAMETRE değil DOSYA ile geçiyor: evalScript'in string
-         literaline gömülen Türkçe karakter/tırnak kırılgan (panelin her yerinde aynı kural).
-         host, srtPath + ".stil" dosyasını varsa okuyup uyguluyor. */
-      if (is.stil) { try { fs.writeFileSync(srtFile + ".stil", is.stil, "utf8"); } catch (eSt) {} }
       var r = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
       logLine(is.ad + " → " + (basarili.length + 1) + ". altyazı kanalı (" + is.cues.length + " satır): " + r);
       if (r.indexOf("ok:") === 0) {
-        basarili.push({ ad: is.ad, stil: is.stil, stilOk: r.indexOf("[stil: uygulandi]") !== -1 });
+        basarili.push({ ad: is.ad });
         toplam += is.cues.length;
       } else hatalar.push(is.ad + " — " + r.replace(/^[a-z_]+:/, ""));
     }
@@ -1854,26 +1843,10 @@
        sırayla birebir aynı olmayabilir. */
     var adlar = basarili.map(function (b, i) { return "C" + (i + 1) + " " + b.ad; });
     var msg = "ok:" + toplam + " altyazı → " + basarili.length + " ayrı altyazı kanalı (" + adlar.join(" · ") + ")";
-    /* STİL ELLE VERİLECEKSE HANGİSİNE NE VERİLECEĞİNİ SÖYLE. Premiere ExtendScript'te caption
-       track'e erişim yok (seq.captionTracks mevcut değil), yani stil atama garantisi yok.
-       Böyle bir durumda kullanıcıyı "kendin hallet" diye bırakmak, 3-4 track arasında hangisinin
-       kim olduğunu aratır — sıra burada zaten biliniyor, yazılsın. */
-    var stilBekleyen = basarili.filter(function (b) { return b.stil && !b.stilOk; });
-    if (stilBekleyen.length) {
-      var talimat = [];
-      basarili.forEach(function (b, i) {
-        if (b.stil) talimat.push("C" + (i + 1) + " (" + b.ad + ") → " + b.stil);
-      });
-      msg += " | Stilleri Premiere'de elle ver (altyazıya tıkla → Track Style): " + talimat.join(" · ");
-    }
-    /* Stil seçilmemiş track'i SÖYLE. Karakter başına track düzeninde kolayca 4-5 satır oluyor
-       ve birine stil vermeyi atlamak, o karakterin Premiere'in varsayılan görünümüyle çıkması
-       demek — kullanıcı bunu ancak videoyu izlerken fark eder. */
-    var stilsiz = basarili.filter(function (b) { return !b.stil; });
-    if (stilsiz.length) {
-      msg += " | Stil seçilmemiş: " + stilsiz.map(function (b) { return b.ad; }).join(", ") +
-             " (varsayılan görünümle gelir)";
-    }
+    /* Stili panel ATAYAMIYOR (üç API yüzeyi de ölçüldü) — kullanıcı Premiere'de elle veriyor.
+       Bu yüzden hangi track'in kimin olduğunu yukarıda yazmak ŞART: 4-5 track hepsi "C1, C2…"
+       diye görünüyor ve isim olmadan hangisine hangi stili vereceği bilinemez. */
+    if (basarili.length > 1) msg += " | Stilleri Premiere'de ver: altyazıya tıkla → Track Style";
     /* showResult "(\d+) hata" arıyor; kısmi başarıda yeşil ✓ yerine uyarı göstersin diye
        sayıyı bu kalıpta yazmak ZORUNLU. */
     if (hatalar.length) msg += " | " + hatalar.length + " hata: " + hatalar.join(" ; ");
@@ -3046,8 +3019,8 @@
       acLogLine("Timeline sesi hazır — " + basarili.length + " kanal: " +
                 basarili.map(function (i) { return "A" + (i + 1); }).join(", "));
       acSetProgress(45, "Boşluklar taranıyor…");
-      var opts = { sensitivity: parseFloat($("acSens").value), minSilence: parseFloat($("acMin").value),
-                   denoise: !!($("chkDenoise") && $("chkDenoise").checked) };
+      // denoise KALDIRILDI (kutu arayüzden çıktı) — pipeline varsayılanı zaten kapalı.
+      var opts = { sensitivity: parseFloat($("acSens").value), minSilence: parseFloat($("acMin").value) };
       var res = await pipeline.analyzeSilence(cfg, voice, function (l) { var s = String(l).trim(); if (s) acLogLine(s); }, opts);
       try { fs.unlinkSync(voice); } catch (e) {}
       acCuts = res.cuts; acLast = res;
@@ -3238,9 +3211,6 @@
     for (var a = 0; a < acIds.length; a++) {
       var el = $(acIds[a]); if (el) el.addEventListener("change", acAnalizGecersiz);
     }
-    // AutoCut gürültü azaltma — varsayılan KAPALI (analizi ~5 kat yavaşlatıyor)
-    var dn = $("chkDenoise");
-    if (dn) { dn.checked = lsGet("denoise", "0") === "1"; dn.addEventListener("change", function () { lsSet("denoise", dn.checked ? "1" : "0"); acAnalizGecersiz(); }); }
     restoreSegs();
     // Shorts kutusu restoreSegs'ten SONRA: mod geri yüklendikten sonra kısıtı uygulamalı
     // (kayıtlı mod "speaker" ve Shorts açıksa Tek Stil'e geçirilir).

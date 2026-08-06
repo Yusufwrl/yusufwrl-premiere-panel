@@ -58,9 +58,15 @@ function Copy-Panel($dest) {
     if (Test-Path $p) { Copy-Item $p -Destination $dest -Recurse -Force }
     else { Write-Warning "Bulunamadi, atlandi: $i" }
   }
+  # Kullanici dosyalarini SIL — ama YALNIZ PANEL KOKUNDE.
+  # TUZAK: burasi -Recurse ile siliyordu ve varsayilan\presetler.json (pakete GIRMESI gereken
+  # HAZIR preset dosyasi) da ayni ada sahip oldugu icin siliniyordu. Zip sessizce eksik
+  # cikiyor, arkadasin panelinde preset'ler bos geliyordu. Kullanici dosyalarinin hepsi
+  # zaten panel kokunde; alt klasorleri taramanin gerekcesi yok.
+  # (.gitignore'da da ayni tuzak vardi; oradaki cozum kurallari / ile koke sabitlemek.)
   foreach ($x in $exclude) {
-    Get-ChildItem -Path $dest -Recurse -Filter $x -ErrorAction SilentlyContinue |
-      Remove-Item -Force -ErrorAction SilentlyContinue
+    $u = Join-Path $dest $x
+    if (Test-Path -LiteralPath $u) { Remove-Item -LiteralPath $u -Force -ErrorAction SilentlyContinue }
   }
 }
 

@@ -14,8 +14,11 @@
 
 # Panele giren ust duzey dosya/klasorler.
 # YENI BIR SEY EKLERKEN SADECE BURAYI GUNCELLE.
+# varsayilan\ = pakete giden HAZIR ICERIK: ogretilmis preset'ler + Track Style dosyalari.
+# Panel ilk acilista bunlari kurar (varsa UZERINE YAZMAZ) — bkz. js\app.js varsayilanlariKur.
+# Boylece arkadasinda da preset'ler hazir gelir ve stiller Premiere'de gorunur.
 $PanelInclude = @("index.html", "config.json", "update.json", "version.json",
-                  "js", "jsx", "css", "CSXS")
+                  "js", "jsx", "css", "CSXS", "varsayilan")
 
 # Kullaniciya/makineye ozel dosyalar: pakete GIRMEZ, kurulu kopyada ASLA ezilmez.
 #

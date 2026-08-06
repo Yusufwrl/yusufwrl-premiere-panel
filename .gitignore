@@ -4,15 +4,17 @@ installer/staging/
 installer/panel.zip
 installer/YusufwrlKur.exe
 
-# Makineye ozel
-engine-root.txt
-diarize-device.txt
-sozluk.json
-assemblyai-key.txt
-anthropic-key.txt
-kisiler.json
-presetler.json
-presetler.bak.json
+# Makineye ozel — YALNIZ PANEL KOKUNDE (bastaki / bunu saglar).
+# Bastaki / OLMADAN kural her klasorde gecerli olur ve varsayilan\presetler.json (pakete
+# GIREN hazir preset dosyasi) sessizce yok sayilir; arkadasin panelinde preset'ler bos gelir.
+/engine-root.txt
+/diarize-device.txt
+/sozluk.json
+/assemblyai-key.txt
+/anthropic-key.txt
+/kisiler.json
+/presetler.json
+/presetler.bak.json
 
 # Motor ASLA repoya girmez (~3 GB)
 engine/
