@@ -348,7 +348,61 @@ function seekTo(sec) {
     } catch (e) { return "err:" + e.toString(); }
 }
 
-// SRT'yi projeye alır ve caption track olarak timeline'a (0 anına) ekler.
+/* PROJEDEKI ALTYAZI STILLERI (Project panelinde "Ag" ikonuyla duran ogeler).
+   Premiere'in ExtendScript API'si caption style'i AYRI BIR TIP olarak vermiyor; bu yuzden
+   "bin degil + sekans degil + medya dosyasi yok" kuralıyla ayikliyoruz. Yanlis pozitif
+   cikabilir (ör. renk matte'i, ayarlama katmani) — liste kullaniciya gosteriliyor, dogrusunu
+   o seciyor. Bos liste "stil yok" demek DEGILDIR, "bulamadik" demektir. */
+function captionStilleriJSON() {
+    try {
+        var out = [];
+        _stilGez(app.project.rootItem, out, 0);
+        return JSON.stringify({ stiller: out });
+    } catch (e) { return JSON.stringify({ error: e.toString() }); }
+}
+function _stilGez(bin, out, derinlik) {
+    if (derinlik > 4) return;                      // ic ice bin'de sonsuza gitmesin
+    var n = 0; try { n = bin.children.numItems; } catch (e0) { return; }
+    for (var i = 0; i < n; i++) {
+        var ch = null; try { ch = bin.children[i]; } catch (e1) { continue; }
+        if (!ch) continue;
+        var t = -1; try { t = ch.type; } catch (e2) {}
+        if (t === 2) { _stilGez(ch, out, derinlik + 1); continue; }   // 2 = BIN
+        var isSeq = false; try { isSeq = ch.isSequence(); } catch (e3) {}
+        if (isSeq) continue;
+        var yol = ""; try { yol = String(ch.getMediaPath()); } catch (e4) { yol = ""; }
+        if (yol) continue;                          // diskte dosyasi var -> medya, stil degil
+        var ad = ""; try { ad = String(ch.name); } catch (e5) {}
+        if (ad) out.push(ad);
+    }
+}
+// Projede ada gore oge arar (stil uygulamak icin).
+function _projeOgesiBul(ad) {
+    var sonuc = { it: null };
+    try { _ogeAra(app.project.rootItem, String(ad), sonuc, 0); } catch (e) {}
+    return sonuc.it;
+}
+function _ogeAra(bin, ad, sonuc, derinlik) {
+    if (sonuc.it || derinlik > 4) return;
+    var n = 0; try { n = bin.children.numItems; } catch (e0) { return; }
+    for (var i = 0; i < n; i++) {
+        var ch = null; try { ch = bin.children[i]; } catch (e1) { continue; }
+        if (!ch) continue;
+        var chAd = ""; try { chAd = String(ch.name); } catch (e2) {}
+        if (chAd === ad) { sonuc.it = ch; return; }
+        var t = -1; try { t = ch.type; } catch (e3) {}
+        if (t === 2) { _ogeAra(ch, ad, sonuc, derinlik + 1); if (sonuc.it) return; }
+    }
+}
+/* NOT: Bir zamanlar burada _captionStilUygula vardı — track'e erişip stil atamayı deneyen
+   fonksiyon. KALDIRILDI çünkü dayandığı seq.captionTracks koleksiyonu Premiere'de YOK
+   (ölçüldü). Stil adı yalnızca "projede var mı" kontrolü için çözülüyor; uygulamayı
+   kullanıcı Premiere'de elle yapıyor. */
+
+/* SRT'yi projeye alır ve caption track olarak timeline'a (0 anına) ekler.
+   STİL: srtPath + ".stil" dosyası varsa içindeki ad, oluşan kanala uygulanmaya çalışılır.
+   Stil adı parametre yerine DOSYADAN okunuyor — evalScript'in string literaline gömülen
+   Türkçe karakter/tırnak kırılgan (panelin her yerinde aynı kural). */
 function addCaptionsToTimeline(srtPath) {
     try {
         var seq = app.project.activeSequence;
@@ -369,26 +423,1904 @@ function addCaptionsToTimeline(srtPath) {
         if (!item && after > before) item = root.children[root.children.numItems - 1];
         if (!item) return "err:Altyazı öğesi projede bulunamadı";
 
-        // Caption track oluştur (0 anına). Farklı sürümlerde imza değişebilir; sırayla dene.
+        // Stil adi: SRT'nin yanindaki ".stil" dosyasindan (parametre degil dosya — bkz. ustteki not)
+        var stilAdi = "";
+        try { stilAdi = String(_readFileUTF8(srtPath + ".stil")).replace(/^\s+|\s+$/g, ""); } catch (eS) { stilAdi = ""; }
+        var stilItem = null, stilNot = "";
+        if (stilAdi) {
+            stilItem = _projeOgesiBul(stilAdi);
+            if (!stilItem) stilNot = "'" + stilAdi + "' projede bulunamadi";
+        }
+
+        /* Caption track olustur (0 anina). Farkli surumlerde imza degisebilir; sirayla dene.
+
+           STIL OTOMATIK ATANAMIYOR — OLCULDU (5 Agustos 2026, Premiere 2026):
+             · seq.captionTracks diye bir koleksiyon YOK; track olustuktan sonra ona erisip
+               stil atamanin yolu kapali (videoTracks/audioTracks var, caption yok).
+             · createCaptionTrack'e stili 3. ve 4. parametre olarak gecirmek de DENENDI,
+               stil gelmedi.
+           Belgelenmemis imzalara dayanan denemeler KALDIRILDI: tutmuyorlar ve 3. parametre
+           baska bir seye (ör. format/dikey bayragi) denk gelirse sessiz bozulma riski var.
+           Stil kullanici tarafindan elle veriliyor; panel sonuc mesajinda hangi kanala hangi
+           stilin verilecegini yaziyor (bkz. app.js placeCaptions). */
+        var olustu = false;
         if (typeof seq.createCaptionTrack === "function") {
-            try { seq.createCaptionTrack(item, "0"); return "ok:Timeline'a eklendi"; }
+            try { seq.createCaptionTrack(item, "0"); olustu = true; }
             catch (e1) {
-                try { seq.createCaptionTrack(item, 0); return "ok:Timeline'a eklendi"; }
+                try { seq.createCaptionTrack(item, 0); olustu = true; }
                 catch (e2) {
                     try {
                         var t = new Time(); t.ticks = "0";
                         seq.createCaptionTrack(item, t);
-                        return "ok:Timeline'a eklendi";
+                        olustu = true;
                     } catch (e3) {
                         return "imported_only:Project panelinde. createCaptionTrack hata: " + e3.toString();
                     }
                 }
             }
+            if (olustu && stilItem && !stilNot) stilNot = "elle verilecek (Premiere script'ten izin vermiyor)";
         }
-        return "imported_only:Project panelinde (bu sürümde otomatik yerleştirme yok). Öğeyi timeline'a sürükle.";
+        if (!olustu) return "imported_only:Project panelinde (bu sürümde otomatik yerleştirme yok). Öğeyi timeline'a sürükle.";
+        return "ok:Timeline'a eklendi" + (stilNot ? " [stil: " + stilNot + "]" : "");
     } catch (e) {
         return "err:" + e.toString();
     }
+}
+
+/* ================= TANILAMA: caption track'e stil ATANABILIR MI? =================
+   CEVAP: HAYIR. Olculdu, Premiere 26.3.0, 6 Agustos 2026 — kullanicinin makinesinde.
+   BULGU (uc yuzey de kapali):
+     1. Normal DOM sequence: 15 ozellik / 42 metot. Caption'la ilgili TEK sey
+        createCaptionTrack — bir YARATMA metodu. Geri okuma, listeleme, stil verme YOK.
+        captionTracks · captions · captionTrack · getCaptionTrackCount · getCaptionTrackAt ·
+        setCaptionTrackStyle · captionStyle -> hepsi "undefined".
+     2. createCaptionTrack'in 3./4. parametresi (daha once olculdu): stili almiyor,
+        HATA DA VERMIYOR — sessizce yok sayiyor.
+     3. QE DOM sequence: 27 ozellik / 63 metot. getVideoTrackAt · getAudioTrackAt ·
+        addTracks · removeTracks var ama caption gecen TEK metot bile yok. Premiere'in
+        kendi ic arayuzu caption track'leri hic tanimiyor.
+   SONUC: createCaptionTrack "yaz ve unut" bir cagri. Track olustuktan sonra ona erisim
+   yok, dolayisiyla panel stili ATAYAMAZ. Stil kullanici tarafindan elle veriliyor; panel
+   sonuc mesajinda hangi track'in kim oldugunu ve hangi stili bekledigini yaziyor.
+   BIR DAHA DENEME — dorduncu bir yuzey yok. Tek teorik yol Premiere'in UXP API'si, o da
+   panelin CEP'ten UXP'ye tasinmasi demek.
+
+   FONKSIYON NEDEN DURUYOR: yeni bir Premiere surumunde caption API'si genisleyebilir.
+   Arayuzden kaldirildi (kalici ozellik degil), DevTools'tan cagrilabilir:
+     panel acikken http://localhost:8088 -> Console ->
+     new CSInterface().evalScript("captionStilTani()", console.log)
+   SALT OKUR: hicbir sey yaratmaz/degistirmez, QE'nin yazma metotlarini CAGIRMAZ (onlar
+   Premiere'i cokertebiliyor). */
+/* ---- reflect yardimcilari: tanilama fonksiyonlarinin ortak alt yapisi ----
+   ExtendScript'in `reflect` nesnesi bir nesnenin GERCEK ozellik/metot listesini verir.
+   "Su API var mi" sorusunun dogru cevabi budur: cagirip denemek yaniltici olabiliyor
+   (Premiere tanimadigi parametreyi sessizce yutup "ok" donebiliyor), reflect yutmuyor. */
+function _refAdlar(kol) {
+    var a = [], i;
+    if (!kol) return a;
+    for (i = 0; i < kol.length; i++) {
+        try { a.push(String(kol[i].name)); } catch (e) {}
+    }
+    a.sort();
+    return a;
+}
+/* Tam liste uzun; gozle taramak hataya acik. Aranan kelimeleri iceren adlari one al. */
+function _refIlginc(liste, anahtarlar) {
+    var a = [], i, j, s;
+    for (i = 0; i < liste.length; i++) {
+        s = String(liste[i]).toLowerCase();
+        for (j = 0; j < anahtarlar.length; j++) {
+            if (s.indexOf(anahtarlar[j]) !== -1) { a.push(liste[i]); break; }
+        }
+    }
+    return a;
+}
+function _refListele(out, baslik, nesne, anahtarlar) {
+    out.push("");
+    out.push("=== " + baslik + " ===");
+    if (!nesne) { out.push("(nesne yok)"); return; }
+    var ps = [], ms = [];
+    try {
+        ps = _refAdlar(nesne.reflect.properties);
+        ms = _refAdlar(nesne.reflect.methods);
+    } catch (e) { out.push("reflect okunamadi: " + e.toString()); return; }
+    var iP = _refIlginc(ps, anahtarlar), iM = _refIlginc(ms, anahtarlar);
+    out.push(">> ILGINC ozellik: " + (iP.length ? iP.join(", ") : "(yok)"));
+    out.push(">> ILGINC metot  : " + (iM.length ? iM.join(", ") : "(yok)"));
+    out.push("tum ozellikler (" + ps.length + "): " + ps.join(", "));
+    out.push("tum metotlar (" + ms.length + "): " + ms.join(", "));
+}
+
+function captionStilTani() {
+    var out = [];
+    var ANAHTAR = ["caption", "style", "subtitle", "track"];
+    function yaz(s) { out.push(String(s)); }
+
+    try { yaz("Premiere surum: " + app.version); } catch (eV) { yaz("surum okunamadi"); }
+
+    var seq = null;
+    try { seq = app.project.activeSequence; } catch (eS) {}
+    if (!seq) {
+        yaz("UYARI: aktif sekans yok. Premiere'de bir sekans ac ve tekrar bas.");
+        return out.join("\n");
+    }
+
+    _refListele(out, "Sequence (normal DOM)", seq, ANAHTAR);
+
+    /* Belgelenmemis ama bazi surumlerde var olabilen adlar — SADECE varlik testi,
+       cagirma yok. typeof "undefined" donerse o ad gercekten yok demektir. */
+    yaz("");
+    yaz("=== Dogrudan varlik testi (sequence) ===");
+    var denemeler = ["captionTracks", "captions", "captionTrack", "getCaptionTrackCount",
+                     "getCaptionTrackAt", "setCaptionTrackStyle", "captionStyle"];
+    var d, tip;
+    for (d = 0; d < denemeler.length; d++) {
+        try { tip = typeof seq[denemeler[d]]; } catch (eD) { tip = "erisimde hata"; }
+        yaz("seq." + denemeler[d] + " -> " + tip);
+    }
+
+    /* QE DOM — belgelenmemis ic arayuz. Yalniz reflect okunuyor. */
+    try {
+        if (typeof app.enableQE === "function") {
+            app.enableQE();
+            var qs = null;
+            try { qs = qe.project.getActiveSequence(); }
+            catch (eQ1) { yaz(""); yaz("qe.project.getActiveSequence hata: " + eQ1.toString()); }
+            _refListele(out, "QE Sequence", qs, ANAHTAR);
+        } else {
+            yaz("");
+            yaz("app.enableQE yok — QE DOM bu surumde kapali.");
+        }
+    } catch (eQ) {
+        yaz("");
+        yaz("QE acilamadi: " + eQ.toString());
+    }
+    return out.join("\n");
+}
+
+/* ================= TANILAMA: SECILI klibe panelden preset/efekt uygulanabilir mi? =========
+   HEDEF: kullanici Premiere'de bir klip seciyor, panelde bir dugmeye basiyor, "Pop In" gibi
+   bir efekt preseti o klibe uygulaniyor (Effects panelinden surukleme yerine).
+   NE BILINIYOR: seq.getSelection() normal DOM'da VAR (captionStilTani dokumunde goruldu),
+   yani panel neyin secili oldugunu okuyabiliyor. EKSIK olan, secili klibe preset/efekt
+   uygulayan metot.
+   BU FONKSIYON UC YERE BAKAR:
+     1. Secili TrackItem + components koleksiyonu — DOM'da yazma yolu var mi.
+     2. qe.project — QE'de efekt/preset arayan bir metot var mi (or. getVideoEffectByName).
+     3. QE TrackItem — klibe efekt EKLEYEN bir metot var mi (or. addVideoEffect).
+   Preset'e ozel bir API cikmazsa yedek plan: efekti uygulayip keyframe'leri panelin
+   kendisi yazmasi — bunun icin Component.properties yazilabilir olmali, o yuzden
+   Component[0] de dokuluyor.
+   SALT OKUR. Hicbir sey uygulamaz/degistirmez; QE'nin yazma metotlari CAGRILMAZ. */
+function presetTani() {
+    var out = [];
+    var ANAHTAR = ["preset", "effect", "efekt", "component", "apply", "add", "match", "param", "key"];
+    function yaz(s) { out.push(String(s)); }
+
+    try { yaz("Premiere surum: " + app.version); } catch (eV) { yaz("surum okunamadi"); }
+
+    var seq = null;
+    try { seq = app.project.activeSequence; } catch (eS) {}
+    if (!seq) {
+        yaz("UYARI: aktif sekans yok. Premiere'de bir sekans ac ve tekrar bas.");
+        return out.join("\n");
+    }
+
+    /* --- 1) SECIM: panel neyi goruyor? --- */
+    yaz("");
+    yaz("=== Secim (seq.getSelection) ===");
+    var sec = null;
+    try { sec = seq.getSelection(); }
+    catch (eSel) { yaz("getSelection HATA: " + eSel.toString()); }
+    if (!sec) yaz("getSelection null dondu");
+    else {
+        yaz("secili oge sayisi: " + sec.length);
+        if (!sec.length) {
+            yaz("UYARI: timeline'da hicbir klip secili degil.");
+            yaz("       Bir klip secip TEKRAR bas — secili klip olmadan asil olcum yapilamaz.");
+        } else {
+            try { yaz("ilk secili klip: " + sec[0].name); } catch (eN) {}
+            _refListele(out, "Secili TrackItem (normal DOM)", sec[0], ANAHTAR);
+            /* components = klibe uygulanmis efektler. Buraya EKLEME yolu var mi? */
+            try {
+                var comp = sec[0].components;
+                yaz("");
+                yaz("components.numItems: " + comp.numItems);
+                _refListele(out, "ComponentCollection", comp, ANAHTAR);
+                if (comp.numItems > 0) {
+                    _refListele(out, "Component[0] (" + String(comp[0].displayName) + ")", comp[0], ANAHTAR);
+                    /* Yedek plan buna dayaniyor: efekt parametreleri yazilabilir mi,
+                       keyframe eklenebiliyor mu? */
+                    try {
+                        var pr = comp[0].properties;
+                        yaz("Component[0].properties.numItems: " + pr.numItems);
+                        if (pr.numItems > 0)
+                            _refListele(out, "ComponentParam[0] (" + String(pr[0].displayName) + ")", pr[0], ANAHTAR);
+                    } catch (eP) { yaz("properties okunamadi: " + eP.toString()); }
+                }
+            } catch (eC) { yaz("components okunamadi: " + eC.toString()); }
+        }
+    }
+
+    /* --- 2) ve 3) QE DOM --- */
+    try {
+        if (typeof app.enableQE !== "function") { yaz(""); yaz("app.enableQE yok."); return out.join("\n"); }
+        app.enableQE();
+        _refListele(out, "qe.project", qe.project, ANAHTAR);
+
+        var qs = qe.project.getActiveSequence();
+        /* Ornek bir QE klibi bul — aranan sey METOT LISTESI, hangi klip oldugu onemsiz. */
+        var qc = null, t, k, qt, it, ad;
+        for (t = 0; t < qs.numVideoTracks && !qc; t++) {
+            try { qt = qs.getVideoTrackAt(t); } catch (eT) { continue; }
+            for (k = 0; k < 50; k++) {
+                it = null;
+                try { it = qt.getItemAt(k); } catch (eI) { break; }
+                if (!it) break;
+                ad = "";
+                try { ad = String(it.name); } catch (eAd) { ad = ""; }
+                if (ad) { qc = it; break; }
+            }
+        }
+        if (!qc) yaz("(QE'de ornek klip bulunamadi — video kanallarinda klip yok mu?)");
+        _refListele(out, "QE TrackItem (ornek klip)", qc, ANAHTAR);
+    } catch (eQ) { yaz(""); yaz("QE hata: " + eQ.toString()); }
+
+    return out.join("\n");
+}
+
+/* ================= SECILI KLIPLERE ANIMASYON =================
+   OLCULDU (Premiere 26.3.0, 6 Agustos 2026 — presetTani dokumu):
+     · Kullanicinin .prfpset PRESETLERI script'ten OKUNAMIYOR. Ne normal DOM'da ne
+       qe.project'te preset metodu var (getVideoEffectByName/getVideoEffectList VAR,
+       preset karsiligi YOK). Kaydedilmis preset dosyasini uygulama yolu kapali.
+     · AMA ComponentParam tamamen YAZILABILIR: addKey · setValueAtKey · setTimeVarying ·
+       setInterpolationTypeAtKey · removeKey. Keyframe API'sinin tamami acik.
+     · Ve her klipte Motion + Opacity bilesenleri ZATEN var — efekt eklemeye gerek yok.
+   BU YUZDEN: animasyon preset dosyasindan degil, buradaki koddan uretiliyor.
+     Bedeli : kullanici kendi presetini kullanamiyor, animasyon burada tarif ediliyor.
+     Kazanci: preset dosyasina bagimli degil — baska makinede, temiz kurulumda calisir.
+   QE'nin addVideoEffect'i SIMDILIK GEREKMIYOR (Motion/Opacity hazir geliyor); yeni bir
+   animasyon ek efekt isterse o zaman devreye girer. */
+
+/* NOT: burada bir zamanlar _bilesenAra (bileseni ADIYLA bulan) vardi. KALDIRILDI —
+   klip turune gore bilesen adlari ve sirasi degistigi icin kirilgandi ve .webp'te
+   patladi. Yerine _paramAraTum geldi: parametreyi butun bilesenlerde ariyor. */
+
+/* ComponentParam'da matchName YOK (olculdu) — yalniz displayName ile aranabiliyor. */
+function _paramAra(bilesen, adlar) {
+    var p = bilesen.properties, i, j, dn;
+    for (i = 0; i < p.numItems; i++) {
+        dn = "";
+        try { dn = String(p[i].displayName || ""); } catch (e) { continue; }
+        for (j = 0; j < adlar.length; j++) if (dn === adlar[j]) return p[i];
+    }
+    return null;
+}
+/* Keyframe zamani bazi surumlerde saniye (sayi), bazilarinda Time nesnesi bekliyor.
+   Ikisi de denenir. DONUS DEGERI SART: hangisinin tuttugu disaridan belli olmuyor ve
+   sessizce basarisiz olan bir keyframe "animasyon uygulandi" yalanina donusur. */
+var TICK_SN = 254016000000;   // Premiere: 1 saniye = 254016000000 tick
+
+/* Zaman nesnesi TICKS ile kurulur — `seconds` SALT OKUNUR olabiliyor ve sessizce 0
+   birakiyor. Sonuc: butun keyframe'ler 0 anina yigiliyor, tek keyframe gibi gorunuyor ve
+   animasyon olusmuyordu (kullanici bildirdi: "presette birden fazla, bizimkinde bir tane").
+   Ayni sebep "timeline'in basindaki klipte calisiyor, baska yerde calismiyor" belirtisini
+   de aciklıyor: 0 ani orada tesadufen dogru yerdi.
+   Projenin baska yeri de ticks kullaniyor (addCaptionsToTimeline).
+   KURDUKTAN SONRA DOGRULANIR: tutmadiysa null doner ve sayi yolu denenir. */
+function _zamanNesnesi(sn) {
+    var t = null;
+    try {
+        t = new Time();
+        t.ticks = String(Math.round(sn * TICK_SN));
+        var geri = _zamanSn(t);
+        if (isNaN(geri) || Math.abs(geri - sn) > 0.01) t = null;
+    } catch (e) { t = null; }
+    return t;
+}
+/* ---- KEYFRAME TEMIZLIGI ----
+   Basarisiz denemeler klipte COP keyframe birakiyordu: addKey istenen zamani kabul etmeyip
+   klip sinirina KIRPIYOR (istisna atmadan). Dort strateji denemesi + iki taban denemesi
+   ust uste ayni sinira coktugu icin geriye TEK keyframe kaliyordu — kullanicinin bildirdigi
+   "13 keyframe diyor, klipte bir tane var" semptomunun birebir kaynagi.
+   snapshot -> dene -> snapshot'ta olmayanlari geri al. */
+function _keySnapshot(pr) {
+    var a = [], kk = null, q, s;
+    try { kk = pr.getKeys(); } catch (e) { return null; }   // null = OKUNAMADI (dokunma)
+    if (!kk) return a;
+    for (q = 0; q < kk.length; q++) { s = _zamanSn(kk[q]); if (!isNaN(s)) a.push(s); }
+    return a;
+}
+function _keyGeriAl(pr, onceki) {
+    if (!onceki) return;                       // snapshot okunamadiysa RISK ALMA
+    var tur, kk, q, w, s, eskiVar, silindi;
+    /* TAVAN 200 DEGIL: egri ornekleme (baking) ile bir parametreye ORNEK_MAX kadar keyframe
+       yazilabiliyor. 200'de durmak, basarisiz bir denemeden sonra klipte yuzlerce COP
+       keyframe birakirdi — tam da bu fonksiyonun onlemek icin yazildigi sey. */
+    for (tur = 0; tur < ORNEK_MAX + 64; tur++) {   // silme listeyi bozuyor: her turda yeniden oku
+        kk = null; try { kk = pr.getKeys(); } catch (e0) { return; }
+        if (!kk || !kk.length) return;
+        silindi = false;
+        for (q = 0; q < kk.length; q++) {
+            s = _zamanSn(kk[q]);
+            if (isNaN(s)) continue;
+            eskiVar = false;
+            for (w = 0; w < onceki.length; w++) {
+                if (Math.abs(onceki[w] - s) < 0.005) { eskiVar = true; break; }
+            }
+            if (eskiVar) continue;
+            /* removeKey'e getKeys'ten gelen NESNE gecilir: kirpilmis key'in GERCEK zamani
+               bizim istedigimizden farkli, istenen zamanla silme iskaliyor. */
+            try { pr.removeKey(kk[q]); silindi = true; } catch (e1) {}
+            break;
+        }
+        if (!silindi) return;
+    }
+}
+
+/* ---- YAZMA STRATEJISI: TAHMIN DEGIL DENEME ----
+   Premiere'in keyframe API'si iki noktada belgelenmemis VE sessizce basarisiz oluyor:
+     1. ZAMAN BICIMI : addKey duz saniye (sayi) mi bekliyor, Time nesnesi mi?
+     2. ZAMAN TABANI : KAYNAK MEDYA zamani mi (clip.inPoint + t), sekans mi, klip-yerel mi?
+   Adobe belgeleri kaynak medya zamanini soyluyor (inPoint tabani) ve resim/still ogelerde
+   inPoint 3600 sn olabiliyor — bu taban denenmedigi surece HICBIR keyframe dogru yere
+   konmuyor, hepsi klip sinirina kirpiliyor.
+   ARALIK SARTI SART: geri okuma tek basina TOTOLOJI — addKey ve getKeys ayni tabani
+   kullandigi icin yanlis tabanla yazilan key ayni yanlis tabanla geri okunur ve "tuttu"
+   sanilir. Ancak okunan zamanin KLIP ARALIGINDA olup olmadigina bakmak ayirt edicidir. */
+function _keyDene(pr, sn, bicim, arAlt, arUst) {
+    var z = (bicim === "time") ? _zamanNesnesi(sn) : sn;
+    if (z === null || z === undefined) return false;
+    var snap = _keySnapshot(pr);
+    try { pr.addKey(z); } catch (e1) { _keyGeriAl(pr, snap); return false; }
+    var kk = null; try { kk = pr.getKeys(); } catch (e2) { _keyGeriAl(pr, snap); return false; }
+    var bulundu = false, q, s;
+    if (kk) {
+        for (q = 0; q < kk.length; q++) {
+            s = _zamanSn(kk[q]);
+            if (isNaN(s) || Math.abs(s - sn) >= 0.02) continue;
+            if (s < arAlt - 0.02 || s > arUst + 0.02) continue;   // KLIP ARALIGI SARTI
+            bulundu = true; break;
+        }
+    }
+    _keyGeriAl(pr, snap);   // basarili da olsa basarisiz da olsa COP BIRAKMA
+    return bulundu;
+}
+/* adaylar: [{ baz, arAlt, arUst, ad }] — ofs, gercek keyframe'lerin ORTASINA denk gelen
+   goreli an. Sabit 0.25 kullanmak yanlisti: capa="son" presetlerinde gercek yazimlar
+   NEGATIF ofsetle klibin icine duserken probe klip bitisinin 0.25 sn SONRASINI deniyordu
+   (yazmanin ters yonu) ve dort kombinasyon da bosuna basarisiz oluyordu. */
+function _stratejiOlc(pr, adaylar, ofs) {
+    var bicimler = ["sayi", "time"], b, f, dz, a;
+    for (b = 0; b < adaylar.length; b++) {
+        a = adaylar[b];
+        if (!a || a.baz === null || a.baz === undefined) continue;
+        dz = a.baz + ofs;
+        if (dz < a.arAlt - 0.001 || dz > a.arUst + 0.001) continue;   // aralik disi: DENEME
+        for (f = 0; f < bicimler.length; f++) {
+            if (_keyDene(pr, dz, bicimler[f], a.arAlt, a.arUst)) {
+                return { baz: a.baz, bicim: bicimler[f], ad: a.ad, arAlt: a.arAlt, arUst: a.arUst };
+            }
+        }
+    }
+    return null;
+}
+/* KEYFRAME INTERPOLASYONU (yumusatma) — best-effort.
+   ARASTIRILDI (6 Agustos 2026, Adobe forumu + calisan onayi): Premiere'de keyframe
+   interpolasyon tipini OKUYAN bir API YOK — yalniz setInterpolationTypeAtKey (SET) var,
+   getInterpolationTypeAtKey (GET) YOK (Adobe calisani dogruladi). Yani kaynak preset'in
+   GERCEK egrisi presetOkuJSON'da CEKILEMIYOR; yapabildigimiz tek sey yazarken sabit bir
+   yumusatma (Bezier) uygulamak. Cogu pop/zoom preset'i ease'li oldugu icin bu, duz
+   lineer'den gozle cok daha yakin durur — ama BIREBIR degil (bir Premiere API siniri).
+   GERI OKUMA MUMKUN DEGIL (getter yok) -> basari sayimina KATILMAZ: tutmazsa sessizce
+   lineer kalir, keyframe zaten ayri dogrulaniyor (bkz. _yazVeSay). Enum surume bagli
+   (2020'de 0/1 disi bug'liydi, 22.x'te duzeldi): Bezier=5, Hold=4. 26.3.0'da test edilmeli. */
+var KF_BEZIER = 5;
+/* ⚠ "HEPSINE BEZIER" DENENDI VE GERI ALINDI — ARAMA (kullanici olctu, 6 Agustos 2026).
+   setInterpolationTypeAtKey(z, 5) TUTUYOR ama tutamaklar (handle) DUZ geliyor: her
+   keyframe'de hiz SIFIRA dusuyor, animasyon dur-kalk-dur oluyor. Kullanicinin Effect
+   Controls olcumu: kaynak "Velocity: 22,6/second" (keyframe'in icinden AKIYOR), kopya
+   "Velocity: 0,0/second" (duruyor) — lineer'den bile kotu. Tutamak degerlerini yazan API
+   YOK, yani egri tipini zorlamak cozum degil. Cozum egriyi ORNEKLEMEK (bkz. _egriOrnekle).
+   Bu yuzden VARSAYILAN ARTIK "DOKUNMA" (-1): keyframe Premiere'in varsayilaniyla (lineer)
+   kalir ve sekli ornek siklig'i tasir. Fonksiyon duruyor: ileride tutamak API'si gelirse
+   ya da olculmus bir tip kaydedilirse giris noktasi burasi. */
+function _keyInterpUygula(param, z, interp) {
+    var tip = (interp === null || interp === undefined) ? -1 : interp;
+    if (tip < 0) return;   // -1 = DOKUNMA (varsayilan)
+    try { param.setInterpolationTypeAtKey(z, tip, true); } catch (e) {}
+}
+function _keyEkleD(param, sn, deger, bicim, interp) {
+    if (bicim) {
+        var z = (bicim === "time") ? _zamanNesnesi(sn) : sn;
+        if (z === null || z === undefined) return "zaman kurulamadi";
+        try { param.addKey(z); } catch (eA) { return "addKey(" + String(eA) + ")"; }
+        try { param.setValueAtKey(z, deger, true); }
+        catch (eB) { return "setValueAtKey(" + String(eB) + ")"; }
+        _keyInterpUygula(param, z, interp);   // best-effort; basariyi ETKILEMEZ
+        return "";
+    }
+    return _keyEkleDEski(param, sn, deger, interp);
+}
+function _keyEkleDEski(param, sn, deger, interp) {
+    /* Time nesnesi ONCE denenir. Sayi yolu belirsiz: addKey(0.4) bazi surumlerde 0.4
+       SANIYE, bazilarinda 0.4 TICK (~0 saniye) demek — ikincisi sessizce her key'i
+       basa yigiyor. Time nesnesinde boyle bir belirsizlik yok. */
+    var t = _zamanNesnesi(sn);
+    /* addKey ile setValueAtKey AYRI degerlendirilir. Eskiden ikisi tek try icindeydi:
+       addKey tutup setValueAtKey patlayinca ikisi birden basarisiz sayiliyor, sonra Time
+       ile tekrar deneniyor ve bu kez "keyframe zaten var" diye o da patliyordu — sonuc
+       "hicbir parametre yazilamadi" iken keyframe'ler aslinda konmustu. */
+    var eklendi = null, h1 = "", h2 = "";
+    if (t) { try { param.addKey(t); eklendi = t; } catch (e1) { h1 = String(e1); } }
+    if (!eklendi) { try { param.addKey(sn); eklendi = sn; } catch (e2) { h2 = String(e2); } }
+    if (eklendi === null) return "addKey(" + (h1 || h2 || "zaman kurulamadi") + ")";
+    try { param.setValueAtKey(eklendi, deger, true); }
+    catch (e3) { return "setValueAtKey(" + String(e3) + ")"; }
+    _keyInterpUygula(param, eklendi, interp);   // best-effort; basariyi ETKILEMEZ
+    return "";
+}
+// Yaz VE geri oku. _popIn yolu da artik bunu kullaniyor (eskiden yalniz istisnaya bakiyordu).
+function _keyVarMi(param, sn) {
+    var kk = null, q, s;
+    try { kk = param.getKeys(); } catch (e) { return false; }
+    if (!kk) return false;
+    for (q = 0; q < kk.length; q++) {
+        s = _zamanSn(kk[q]);
+        if (!isNaN(s) && Math.abs(s - sn) < 0.02) return true;
+    }
+    return false;
+}
+function _keyEkle(param, sn, deger) {
+    if (_keyEkleD(param, sn, deger, null) !== "") return false;
+    return _keyVarMi(param, sn);
+}
+
+/* Parametreyi TUM bilesenlerde ara.
+   NEDEN: once "Motion" adli bileseni bulup icinde Scale araniyordu. Bu KIRILDI — klip
+   turune gore (resim/.webp, MOGRT, ayarlama katmani) bilesen adlari ve SIRASI degisiyor.
+   Olculdu: Ates.webp'te Component[0] Opacity'ydi, Motion degil. Artik bilesenin adina
+   hic bakilmiyor, aranan PARAMETRE her bilesende aranıyor — "her seye uygulanabilsin"
+   istegi tam olarak bunu gerektiriyor. */
+function _paramAraTum(ti, adlar) {
+    var c = ti.components, i, p;
+    for (i = 0; i < c.numItems; i++) {
+        p = null;
+        try { p = _paramAra(c[i], adlar); } catch (e) {}
+        if (p) return p;
+    }
+    return null;
+}
+/* Hata mesaji icin: klipte hangi bilesen VE hangi parametreler var. Tek turda teshis —
+   "olmadi" deyip kullaniciyi ikinci bir olcume yollamamak icin. */
+function _icerikDokumu(ti) {
+    var c = ti.components, a = [], i, j, ps, pa, sat;
+    for (i = 0; i < c.numItems; i++) {
+        sat = "?";
+        try { sat = String(c[i].displayName); } catch (e0) {}
+        try {
+            ps = c[i].properties; pa = [];
+            for (j = 0; j < ps.numItems; j++) {
+                try { pa.push(String(ps[j].displayName)); } catch (e1) {}
+            }
+            if (pa.length) sat += "(" + pa.join("/") + ")";
+        } catch (e2) {}
+        a.push(sat);
+    }
+    return a.join(" · ");
+}
+
+/* Klibin SEKANSTAKI baslangic saniyesi.
+   ÖLÇÜLDÜ (kullanici, 6 Agustos 2026): keyframe zamanlari KLIBE GORE DEGIL SEKANSA gore.
+   Kanit: timeline'in basindaki video klibinde Pop In calisti, daha ileride baslayan
+   Ates.webp'te "uygulandi" dedi ama gorunmedi — cunku 0..0.4 sn'ye yazilan keyframe'ler
+   o klibin ONCESINE dusuyordu. Bu yuzden butun zamanlar bu degerle otelenir. */
+function _klipBas(ti) {
+    var b = NaN;
+    try { b = _zamanSn(ti.start); } catch (e0) {}
+    return isNaN(b) ? 0 : b;
+}
+/* KAYNAK MEDYA baslangici (inPoint). Adobe belgelerine gore ComponentParam keyframe
+   zamani KAYNAK MEDYA zamanidir: clip.inPoint.seconds + istenen an. Kirpilmis her klipte
+   (AutoCut'tan gecen hepsi) ve resim/still ogelerde (inPoint 3600 sn olabiliyor) bu taban
+   sekans zamanindan da klip-yerel sifirdan da FARKLI. Denenmedigi surece hicbir keyframe
+   dogru yere konmuyordu. */
+function _klipKaynakBas(ti) {
+    var b = NaN;
+    try { b = _zamanSn(ti.inPoint); } catch (e0) {}
+    return isNaN(b) ? 0 : b;
+}
+
+function _popIn(ti, sure) {
+    var sc = _paramAraTum(ti, ["Scale", "Olcek", "Ölçek", "Uniform Scale"]);
+    var opp = _paramAraTum(ti, ["Opacity", "Opaklik", "Opaklık"]);
+    /* IKISI DE yoksa gercekten yapacak bir sey yok (ses klibi vb.). Hata mesajina klibin
+       ICERIGI yaziliyor: bir sonraki tur icin tahmine gerek kalmasin. */
+    if (!sc && !opp) return "olcek/opaklik parametresi yok — icerik: " + _icerikDokumu(ti);
+
+    var t0 = _klipBas(ti);          // klibin sekanstaki baslangici
+    var yazildi = 0;
+    if (sc) {
+        try { sc.setTimeVarying(true); } catch (eT) {}
+        /* 0 -> 112 -> 100: klasik "pop". Ortadaki asma (overshoot) olmadan cansiz duruyor. */
+        if (_keyEkle(sc, t0, 0)) {
+            _keyEkle(sc, t0 + sure * 0.55, 112);
+            _keyEkle(sc, t0 + sure, 100);
+            yazildi++;
+        }
+    }
+    // Opaklik tek basina da anlamli: olcek yoksa en azindan yumusak giris olur.
+    if (opp) {
+        try { opp.setTimeVarying(true); } catch (eT2) {}
+        if (_keyEkle(opp, t0, 0)) { _keyEkle(opp, t0 + sure * 0.3, 100); yazildi++; }
+    }
+    if (!yazildi) return "keyframe yazilamadi (zaman birimi tutmadi) — icerik: " + _icerikDokumu(ti);
+    return "ok";
+}
+
+/* ---- KULLANICININ KENDI PRESETLERI ----
+   OLCULDU: qe.project'te preset'e OZEL metot yok. Geriye tek ihtimal kaldi — kullanicinin
+   Effects > Presets altina kaydettigi ogelerin, efekt listesine karisiyor olmasi.
+   Bu fonksiyon o soruyu cevapliyor: liste kullanicinin preset adlarini iceriyorsa panel
+   onlari dogrudan uygulayabilir; icermiyorsa preset yolu kesin kapali demektir. */
+function efektListesiJSON() {
+    try {
+        if (typeof app.enableQE !== "function") return JSON.stringify({ ok: false, hata: "QE bu surumde yok" });
+        app.enableQE();
+        var lv = null;
+        try { lv = qe.project.getVideoEffectList(); }
+        catch (e1) { return JSON.stringify({ ok: false, hata: "getVideoEffectList: " + e1.toString() }); }
+        if (!lv) return JSON.stringify({ ok: false, hata: "liste bos dondu" });
+        var ad = [], i, x, s;
+        for (i = 0; i < lv.length; i++) {
+            s = "";
+            /* Liste bazi surumlerde duz string, bazilarinda .name'li nesne dondurur. */
+            try { x = lv[i]; s = (x && x.name) ? String(x.name) : String(x); } catch (e2) { s = ""; }
+            ad.push(s);   // BOSLARI DA KORU: sira numarasi ham listeyle birebir kalmali
+        }
+        /* SIRALAMA YOK — bilerek. Panel efekti ADIYLA degil SIRA NUMARASIYLA istiyor
+           (evalScript string literaline Turkce karakter/tirnak gommemek icin), o yuzden
+           buradaki sira ham getVideoEffectList() sirasiyla ayni kalmak ZORUNDA.
+           Gorunum sirasini panel kendi tarafinda yapiyor. */
+        return JSON.stringify({ ok: true, efektler: ad });
+    } catch (e) { return JSON.stringify({ ok: false, hata: e.toString() }); }
+}
+
+/* DOM'daki secili klibin QE karsiligini bul. QE'de "secili" bilgisi YOK, bu yuzden
+   AYNI TRACK + AYNI BASLANGIC ZAMANI ile eslestiriliyor.
+   EMIN OLAMAZSA null DONER — yanlis klibe efekt uygulamaktansa hata vermek yegdir;
+   yanlis klip sessizce bozulur ve kullanici ancak videoyu izlerken fark eder. */
+/* Zaman nesnesinden saniye. QE ve normal DOM ayni alan adini kullanmiyor (.secs / .seconds),
+   surumden surume de degisebiliyor — hepsini dene, biri tutsun. */
+function _zamanSn(x) {
+    var s = NaN, tk;
+    if (x === null || x === undefined) return NaN;
+    try { s = parseFloat(x.secs); } catch (e0) {}
+    if (isNaN(s)) { try { s = parseFloat(x.seconds); } catch (e1) {} }
+    /* ticks YEDEGI: `secs`/`seconds` her surumde/nesnede olmayabiliyor. ticks Premiere'in
+       kanonik zaman alani (1 sn = 254016000000 tick) ve string olarak geliyor. Bu yedek
+       olmadan okunamayan keyframe SESSIZCE atlaniyordu. */
+    if (isNaN(s)) {
+        try { tk = parseFloat(x.ticks); if (!isNaN(tk)) s = tk / TICK_SN; } catch (e2) {}
+    }
+    if (isNaN(s)) { try { s = parseFloat(String(x)); } catch (e3) {} }
+    return s;
+}
+function _qeKlipBul(qs, domItem) {
+    var ti = -1, bas = NaN, ad = "";
+    try { ti = parseInt(domItem.parentTrackIndex, 10); } catch (e0) { return null; }
+    if (isNaN(ti)) return null;
+    bas = _zamanSn(domItem.start);
+    try { ad = String(domItem.name); } catch (e1) { ad = ""; }
+    var qt = null;
+    try { qt = qs.getVideoTrackAt(ti); } catch (e2) { return null; }
+    if (!qt) return null;
+    /* TAVAN 500 DEGIL 20000 — ve IKI GECIS.
+       ESKI HALI: yalniz ilk 500 klibe bakiliyordu. AutoCut'tan gecen 20 dakikalik videoda
+       bir kanalda 500'den fazla klip oluyor ve videonun IKINCI YARISINDAKI klipler
+       "QE karsiligi bulunamadi" veriyordu — kullaniciya tamamen rastgele gorunen bir
+       davranis ("basinda calisiyor, sonunda calismiyor"). Ustelik eslesme bulunsa bile
+       dongu 500 tur donuyordu; 20 kliplik secimde 10.000 gereksiz cagri.
+       1. GECIS (hizli): QE ogeleri zaman sirasinda geldigi icin hedefi 0.05 sn'den fazla
+          GECINCE dur. Tipik olarak birkac tur.
+       2. GECIS (yedek): yalniz 1. gecis bulamazsa ad eslesmesi icin tam tarama. */
+    var k, it, s, adAday = null, adSayi = 0, TAVAN = 20000;
+    /* 1) Zaman eslesmesi. Tolerans BIR KAREDEN biraz genis (0.05 sn): QE ve DOM
+       zamanlari tam ayni tick'e yuvarlanmayabiliyor ve 0.002 sn'lik eski tolerans
+       eslesmeyi kacirip efektin hic eklenmemesine yol aciyordu. */
+    if (!isNaN(bas)) {
+        for (k = 0; k < TAVAN; k++) {
+            it = null;
+            try { it = qt.getItemAt(k); } catch (e3) { break; }
+            if (!it) break;
+            s = _zamanSn(it.start);
+            if (isNaN(s)) continue;
+            if (Math.abs(s - bas) < 0.05) return it;
+            if (s > bas + 0.05) break;      // zaman sirasi: bundan sonrasi hep daha ileride
+        }
+    }
+    // 2) Yedek: ayni track'te ayni adli TEK klip varsa o. Birden coksa kullanma.
+    if (!ad) return null;
+    for (k = 0; k < TAVAN; k++) {
+        it = null;
+        try { it = qt.getItemAt(k); } catch (e5) { break; }
+        if (!it) break;
+        var qad = ""; try { qad = String(it.name); } catch (e4) {}
+        if (qad === ad) { adAday = it; adSayi++; if (adSayi > 1) return null; }
+    }
+    return (adSayi === 1) ? adAday : null;
+}
+
+/* Efekti/preseti SECILI kliplere uygular (QE addVideoEffect).
+   PARAMETRE AD DEGIL SIRA NUMARASI: evalScript string literaline gomulen Turkce
+   karakter/tirnak/ters bolu kirilgan (panelin her yerinde ayni kural). Panel yalniz
+   sayi gonderiyor, adi host kendi tarafinda okuyor — kodlama riski sifir. */
+function efektUygula(sira) {
+    // Undo grubu: cok klip secildiyse tek Ctrl+Z hepsini geri alsin.
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Efekt"); _ug = true; } catch (eug) {}
+    try {
+        var i = parseInt(sira, 10);
+        if (isNaN(i) || i < 0) return "err:Gecersiz preset numarasi";
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var sec = null;
+        try { sec = seq.getSelection(); } catch (eS) { return "err:Secim okunamadi: " + eS.toString(); }
+        if (!sec || !sec.length) return "err:Timeline'da klip secili degil. Bir klip sec ve tekrar bas.";
+        if (typeof app.enableQE !== "function") return "err:QE bu surumde yok";
+        app.enableQE();
+
+        var lv = null;
+        try { lv = qe.project.getVideoEffectList(); } catch (eL) {}
+        if (!lv || i >= lv.length) return "err:Preset listede yok — liste degismis olabilir, 'Listeyi Yenile'ye bas";
+        var ham = lv[i], ef = null, efAd = "";
+        try { efAd = (ham && ham.name) ? String(ham.name) : String(ham); } catch (eN0) {}
+        // Liste ogesi zaten efekt nesnesi olabilir; degilse adiyla cozulur.
+        if (ham && typeof ham === "object" && ham.name) ef = ham;
+        if (!ef) { try { ef = qe.project.getVideoEffectByName(efAd); } catch (eE) {} }
+        if (!ef) return "err:'" + efAd + "' cozulemedi (getVideoEffectByName bulamadi)";
+
+        var qs = qe.project.getActiveSequence();
+        var ok = 0, hata = [], i, qc, ad, sesAtlandi = 0;
+        for (i = 0; i < sec.length; i++) {
+            // Bagli ses klibi secime giriyor (Linked Selection) — video efekti alamaz, ATLA.
+            if (_sesKlibiMi(sec[i])) { sesAtlandi++; continue; }
+            ad = "?"; try { ad = String(sec[i].name); } catch (eN) {}
+            qc = _qeKlipBul(qs, sec[i]);
+            if (!qc) { hata.push(ad + " -> QE karsiligi bulunamadi (ses klibi ya da eslesmeyen zaman)"); continue; }
+            try { qc.addVideoEffect(ef); ok++; }
+            catch (eA) { hata.push(ad + " -> " + eA.toString()); }
+        }
+        if (!ok) return "err:" + (hata[0] || (sesAtlandi ? "yalniz ses klibi secili — video klibi sec" : "uygulanamadi"));
+        return "ok:" + ok + " klibe '" + efAd + "' uygulandi" +
+               (hata.length ? " | " + hata.length + " klipte OLMADI: " + hata.join(" ; ") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
+}
+
+/* ================= PRESET ÖĞREN / TEKRARLA =================
+   NEDEN BU YOL: kullanicinin preset dosyalari script'e GORUNMUYOR (olculdu — 148 ogenin
+   hepsi yerlesik efekt, kullanicinin 8 preset'i hicbirinde yok). Panel Effects panelinden
+   surukleme de YAPAMAZ (CEP'te UI otomasyonu yok).
+   AMA: preset bir klibe ELLE uygulandiktan sonra o klibin efekt yigini TAMAMEN okunabiliyor
+   (components -> properties -> isTimeVarying/getKeys/getValueAtKey/getValue) ve baska
+   kliplere yazilabiliyor. Yani preset'i bir kez surukle, panel ogrensin, sonra sinirsiz
+   tekrarlasin. Premiere'in "Paste Attributes"i ile ayni fikir; farki, yigin panelde
+   SAKLANIYOR — dugmeye baglanip sonraki videolarda da kullanilabiliyor.
+   ZAMAN: keyframe'ler KAYNAK KLIBIN BASINA GORE saklanir (t - klipBas), yazarken HEDEF
+   klibin basi eklenir. Sekans zamani dogrudan kopyalanirsa animasyon baska bir klipte
+   tamamen yanlis yere duser (bu hata bir kez yasandi, bkz. _klipBas). */
+/* ================= EGRI ORNEKLEME (baking) =================
+   SORUN: keyframe'in ease/bezier TUTAMAKLARINI Premiere script'e ne okutuyor ne yazdiriyor
+   (getInterpolationTypeAtKey YOK — Adobe calisani dogruladi; tutamak/velocity API'si de yok).
+   Yani "yumusaklik" kaynaktan TARIF olarak alinamiyor. Kor "hepsi Bezier" denendi: tutamaklar
+   duz geldigi icin her keyframe'de hiz sifira dustu (kullanici olctu: kaynak 22,6/sn, kopya
+   0,0/sn — dur-kalk).
+   COZUM: sekli TARIF etmek yerine SEKLIN KENDISINI tasi. getValueAtTime(t) iki keyframe
+   arasinda Premiere'in KENDI interpolasyonunu uygulayip deger donduruyor (Adobe belgesi),
+   yani egri OLCULEBILIR. Yogun ornek al -> sadelestir -> hedefe o noktalari yaz. Aradaki
+   parcalar lineer olsa da nokta sikligi yavaslama/hizlanmayi gozle ayirt edilemez tasir.
+   MALIYET: hedefte keyframe SAYISI kaynaktakinden fazla olur (sadelestirmeyle ~10-30).
+   Bilincli takas: kullanici "her seyi alabilmeli" dedi, gorsel sadakat > keyframe sayisi. */
+var ORNEK_MAX = 300;    // guvenlik tavani: cok uzun animasyonda ornek patlamasin
+/* Sekansin kare hizi. Ornekleme siklig'i buna baglanir (bkz. _egriOrnekle). Okunamazsa
+   30'a duser — makul ve guvenli (fazla siklik zarar veriyordu, azlik yalniz hassasiyet). */
+function _sekansFps() {
+    var f = 0;
+    try { f = TICK_SN / parseFloat(app.project.activeSequence.timebase); } catch (e) {}
+    if (!(f > 0) || f > 120) f = 30;
+    return f;
+}
+/* Iki degerin ayni olup olmadigi (sayi / sayi dizisi / metin). Ornekleme bicimini
+   OLCERKEN kullanilir: bir keyframe zamaninda alinan ornek, o keyframe'in degerine
+   esit CIKMALI — cikmiyorsa zaman bicimi yanlistir. */
+function _degerAyniMi(a, b, tol) {
+    var i, na, nb;
+    if (_dizimi(a) && _dizimi(b)) {
+        if (a.length !== b.length) return false;
+        for (i = 0; i < a.length; i++) {
+            if (Math.abs(Number(a[i]) - Number(b[i])) > tol) return false;
+        }
+        return true;
+    }
+    if (_dizimi(a) || _dizimi(b)) return false;
+    na = Number(a); nb = Number(b);
+    if (isNaN(na) || isNaN(nb)) return String(a) === String(b);
+    return Math.abs(na - nb) <= tol;
+}
+function _degerZamanda(pr, sn, bicim) {
+    var z = (bicim === "time") ? _zamanNesnesi(sn) : sn;
+    if (z === null || z === undefined) return null;
+    var v = null;
+    try { v = pr.getValueAtTime(z); } catch (e) { return null; }
+    return (v === undefined) ? null : v;
+}
+/* ZAMAN BICIMI OLCUMU — tahmin degil, ve IKI NOKTADA.
+   getValueAtTime saniye mi Time nesnesi mi bekliyor belgelenmemis. TEK keyframe'de
+   dogrulamak YETMIYOR (denetimde yakalandi): sayi bazi surumlerde TICK olarak yorumlanıyor
+   (bkz. _keyEkleDEski notu) ve ilk keyframe t≈0 ise tick yorumu da t=0'a denk gelip
+   "tuttu" sanilir. Sonra BUTUN ornekler ≈0 aninda alinir, hepsi ayni deger cikar, egri
+   DUZ olur — ve panel "egri alindi" diye BASARILI raporlar (animasyon tamamen kaybolur).
+   Bu yuzden DEGERI FARKLI ikinci bir keyframe'de de dogrulanir: tick yanilgisi ikinci
+   noktayi tutturamaz. */
+function _ornekBicimOlc(pr, klist) {
+    var i, a = klist[0], b = null, bic = ["sayi", "time"], f, v1, v2;
+    for (i = 1; i < klist.length; i++) {
+        if (!_degerAyniMi(klist[i].v, a.v, 0.02)) { b = klist[i]; break; }
+    }
+    if (!b) return "";      // hepsi ayni deger: orneklenecek egri YOK
+    for (f = 0; f < bic.length; f++) {
+        v1 = _degerZamanda(pr, a.t, bic[f]);
+        if (v1 === null || !_degerAyniMi(v1, a.v, 0.02)) continue;
+        v2 = _degerZamanda(pr, b.t, bic[f]);
+        if (v2 !== null && _degerAyniMi(v2, b.v, 0.02)) return bic[f];
+    }
+    return "";
+}
+function _ornDeger(o, ix) { return _dizimi(o.v) ? Number(o.v[ix]) : Number(o.v); }
+/* SADELESTIRME (Douglas-Peucker, yigin tabanli — ES3'te ozyineleme yerine dongu).
+   Lineer yaklasimdan sapmasi esigin altinda kalan ornekler ATILIR. Boylece duz bolumler
+   2 noktaya iner, kivrimli bolumlerde nokta sikligi korunur: egri ayni, keyframe sayisi
+   makul. Esik deger ARALIGINDAN turetilir (Scale %0-112 ile Position 1920px ayni esigi
+   kullanamaz). */
+function _ornekSadelestir(ham) {
+    var n = ham.length;
+    if (n <= 2) return ham;
+    var boyut = _dizimi(ham[0].v) ? ham[0].v.length : 1;
+    var i, c, mn, mx, d, aralik = 0;
+    for (c = 0; c < boyut; c++) {
+        mn = _ornDeger(ham[0], c); mx = mn;
+        for (i = 1; i < n; i++) { d = _ornDeger(ham[i], c); if (d < mn) mn = d; if (d > mx) mx = d; }
+        if (mx - mn > aralik) aralik = mx - mn;
+    }
+    if (!(aralik > 0)) return [ham[0], ham[n - 1]];   // deger hic degismiyor: iki uc yeter
+    /* ESIK ARALIGA GORE — MUTLAK TABAN YOK. Sabit 0.05 tabani vardi ve 0..1 araliginda
+       calisan parametrelerde (bircok efektin Amount/Mix'i, normalize Position) esik
+       araligin %5'ine denk gelip ease egrisini 2-4 noktaya indiriyordu: ozelligin varlik
+       sebebi olan yumusaklik tam da orada olurdu. */
+    var tol = aralik * 0.004;
+    /* UC NOKTALAR HER ZAMAN KORUNUR (tut[0], tut[n-1]) — DEGISMEZ:
+       presetOkuJSON'daki kmin/relMin/capa hesaplari orneklerin keyframe'lerle AYNI araligi
+       kapsadigina guveniyor. Burasi degistirilirse orasi da gozden gecirilmeli. */
+    var tut = [], yig = [[0, n - 1]], par, a, b, enIx, enSap, sap, oran, pay;
+    for (i = 0; i < n; i++) tut.push(false);
+    tut[0] = true; tut[n - 1] = true;
+    while (yig.length) {
+        par = yig.pop(); a = par[0]; b = par[1];
+        if (b - a < 2) continue;
+        enIx = -1; enSap = 0;
+        pay = ham[b].t - ham[a].t;
+        for (i = a + 1; i < b; i++) {
+            oran = (pay > 0) ? (ham[i].t - ham[a].t) / pay : 0;
+            sap = 0;
+            for (c = 0; c < boyut; c++) {
+                d = Math.abs(_ornDeger(ham[i], c) -
+                             (_ornDeger(ham[a], c) +
+                              (_ornDeger(ham[b], c) - _ornDeger(ham[a], c)) * oran));
+                if (d > sap) sap = d;
+            }
+            if (sap > enSap) { enSap = sap; enIx = i; }
+        }
+        if (enIx > 0 && enSap > tol) {
+            tut[enIx] = true;
+            yig.push([a, enIx]); yig.push([enIx, b]);
+        }
+    }
+    var out = [];
+    for (i = 0; i < n; i++) if (tut[i]) out.push(ham[i]);
+    return out;
+}
+/* klist: HAM zamanli keyframe listesi. Donus: [{t,v}] ornekler (HAM zaman) ya da null.
+   null = ornekleme yapilamadi -> cagiran taraf seyrek keyframe'lere duser (eski davranis). */
+function _egriOrnekle(pr, klist) {
+    if (!klist || klist.length < 2) return null;
+    /* SAYISAL OLMAYAN parametre (enum/metin) ORNEKLENMEZ: _ornekSadelestir Number() ile
+       calisiyor, NaN'da butun sapmalar 0 cikiyor ve cok basamakli bir hold animasyonu
+       iki uc noktaya coker (basamaklar kaybolur) — seyrek keyframe BIREBIR dogru. */
+    var ilkV = _dizimi(klist[0].v) ? klist[0].v[0] : klist[0].v;
+    if (isNaN(Number(ilkV))) return null;
+
+    var i, t0 = klist[0].t, t1 = klist[0].t;
+    for (i = 1; i < klist.length; i++) {   // getKeys sirali gelmeyebilir
+        if (klist[i].t < t0) t0 = klist[i].t;
+        if (klist[i].t > t1) t1 = klist[i].t;
+    }
+    var sure = t1 - t0;
+    if (!(sure > 0.0001)) return null;
+    var bicim = _ornekBicimOlc(pr, klist);
+    if (!bicim) return null;                        // olculemedi: RISK ALMA
+
+    /* ORNEK SIKLIGI = SEKANSIN KARE HIZI. Premiere zaten yalniz kare sinirlarinda
+       degerlendiriyor; kare hizinin USTUNDE orneklemek gorsel sadakat KAZANDIRMIYOR, buna
+       karsilik ornekler arasi mesafeyi _yazVeSay'in eslestirme toleransinin altina dusurup
+       yanlis eslesme ve gereksiz keyframe uretiyordu. */
+    var hz = _sekansFps();
+    var adet = Math.round(sure * hz);
+    if (adet < 4) adet = 4;
+    if (adet > ORNEK_MAX) adet = ORNEK_MAX;
+    var ham = [], t, v;
+    for (i = 0; i <= adet; i++) {
+        t = t0 + sure * i / adet;
+        if (i === adet) t = t1;                     // yuvarlanma son ornegi disari tasimasin
+        v = _degerZamanda(pr, t, bicim);
+        /* Tek bir okunamayan ornek egriyi bozar (o an duz cizgi olur) — hepsi ya da hicbiri. */
+        if (v === null) return null;
+        ham.push({ t: t, v: v });
+    }
+    /* DUZ CIZGI FRENI: kaynakta deger DEGISIYORKEN ornekler sabit ciktiysa olcum yalan
+       soyluyor demektir (or. zaman tick olarak yorumlanip hepsi ayni ana denk geldi).
+       Boyle bir "egri" hedefe yazilirsa animasyon TAMAMEN kaybolur ve panel basarili der. */
+    var kaynakDegisiyor = false, ornDegisiyor = false;
+    for (i = 1; i < klist.length; i++) {
+        if (!_degerAyniMi(klist[i].v, klist[0].v, 0.02)) { kaynakDegisiyor = true; break; }
+    }
+    for (i = 1; i < ham.length; i++) {
+        if (!_degerAyniMi(ham[i].v, ham[0].v, 0.02)) { ornDegisiyor = true; break; }
+    }
+    if (kaynakDegisiyor && !ornDegisiyor) return null;   // seyrek keyframe'e dus
+    return _ornekSadelestir(ham);
+}
+/* Keyframe VE ornek zamanlarini birlikte kaydir — ikisi ayni zaman ekseninde olmali. */
+function _zamanKaydir(po, ofs) {
+    var listeler = [po.k, po.s], q, l, i;
+    for (q = 0; q < listeler.length; q++) {
+        l = listeler[q];
+        if (!l) continue;
+        for (i = 0; i < l.length; i++) l[i].t = l[i].t - ofs;
+    }
+}
+
+var _okunamayanKey = 0;   // presetOkuJSON: zamani cozulemeyen keyframe sayaci
+function presetOkuJSON() {
+    _okunamayanKey = 0;
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({ ok: false, hata: "Aktif sekans yok" });
+        var sec = null;
+        try { sec = seq.getSelection(); } catch (eS) {}
+        if (!sec || !sec.length) return JSON.stringify({ ok: false, hata: "Once preset'in UYGULANDIGI klibi sec" });
+
+        /* SECIMDEKI ILK VIDEO KLIBI — sec[0] DEGIL. Linked Selection acikken kullanici
+           video klibine tiklasa da secimin ilk ogesi SES olabiliyor ve panel bos bir ses
+           klibinden ogrenip "keyframe yok" diyordu. */
+        var ti = null, si;
+        for (si = 0; si < sec.length; si++) {
+            if (!_sesKlibiMi(sec[si])) { ti = sec[si]; break; }
+        }
+        if (!ti) return JSON.stringify({ ok: false, hata: "Yalniz ses klibi secili — preset'in uygulandigi VIDEO klibini sec" });
+
+        var t0 = _klipBas(ti), c = ti.components, out = [], i, j, m, hizAtlandi = 0;
+        for (i = 0; i < c.numItems; i++) {
+            var cm = null; try { cm = c[i]; } catch (e0) { continue; }
+            var comp = { match: "", ad: "", p: [], enabled: true };
+            try { comp.match = String(cm.matchName); } catch (e1) {}
+            try { comp.ad = String(cm.displayName); } catch (e2) {}
+            /* HIZ RAMPASI KAYDEDILMEZ: hizlandirilmis bir klipten ogretilen preset
+               uygulandigi HER klibi agir cekim/hizli yapiyordu. */
+            if (_hizRampasiMi(comp.ad, comp.match)) { hizAtlandi++; continue; }
+            /* fx ac/kapa durumu: kaynakta bilerek KAPATILMIS efekt hedefte de kapali gelsin.
+               Okunamazsa varsayilan ACIK (eski kayitlarla geriye uyumlu). */
+            try { comp.enabled = (cm.enabled === false) ? false : true; } catch (eEn) {}
+            var ps = null; try { ps = cm.properties; } catch (e3) { ps = null; }
+            if (ps) {
+                for (j = 0; j < ps.numItems; j++) {
+                    var pr = null; try { pr = ps[j]; } catch (e4) { continue; }
+                    var po = { ad: "", kf: false, ix: j };
+                    /* ix = ozellik INDEKSI. Adi BOS olan parametreler var (kullanicinin
+                       "Pop In RGB" preset'indeki VR bileseninde iki tane) ve _paramBul
+                       ada gore aradigi icin ikisi de AYNI ozellige esleniyor: ikinci kayit
+                       birincinin uzerine yaziyordu. Ad bossa indeks kullanilir. */
+                    try { po.ad = String(pr.displayName); } catch (e5) {}
+                    try { po.kf = !!pr.isTimeVarying(); } catch (e6) {}
+                    if (po.kf) {
+                        po.k = [];
+                        var keys = null; try { keys = pr.getKeys(); } catch (e7) { keys = null; }
+                        if (keys) {
+                            for (m = 0; m < keys.length; m++) {
+                                /* ZAMAN OKUMASI _zamanSn ILE — .secs / .seconds / String,
+                                   hepsi denenir. Eskiden yalniz .seconds deneniyordu ve
+                                   tutmadiginda keyframe SESSIZCE atlaniyordu: preset
+                                   "ogrenildi" gorunuyor ama icinde tek keyframe olmuyordu. */
+                                var ts = _zamanSn(keys[m]), dv = null;
+                                try { dv = pr.getValueAtKey(keys[m]); } catch (eA) { dv = null; }
+                                // HAM zaman saklanir; taban asagida OLCULUP normalize edilir.
+                                // Okunamayan keyframe SAYILIR — sessizce kaybolmasin.
+                                /* DEGERI okunamayan keyframe de kaydedilmez: v=null olarak
+                                   saklanip yazma tarafinda TypeError atiyor ve TUM
+                                   presetYaz'i dusuruyordu. Zaman gibi deger de sarttir. */
+                                if (isNaN(ts) || dv === null || dv === undefined) _okunamayanKey++;
+                                else po.k.push({ t: ts, v: dv });
+                            }
+                        }
+                        // Keyframe'i olan ama okunamayan parametre sessiz gecmesin
+                        if (!po.k.length) po.kf = false;
+                        /* ZAMAN SIRASINA DIZ: getKeys sirali dondurmeyebiliyor ve yazma
+                           tarafi "ilk/son keyframe" ile capa/taban seciyor, _yazVeSay de
+                           tek imlecle sirali eslestiriyor. Ornekler zaten sirali; .k'nin
+                           sirasiz kalmasi iki yolu birbirinden ayirirdi. */
+                        if (po.k.length > 1) {
+                            po.k.sort(function (x, y) { return x.t - y.t; });
+                        }
+                        /* EGRIYI ORNEKLE: ease/yavaslama sekli ancak boyle tasinir
+                           (tutamak API'si yok — bkz. _egriOrnekle). Basarisiz olursa
+                           po.s hic olusmaz ve yazma tarafi seyrek keyframe'e duser. */
+                        if (po.k.length >= 2) {
+                            var orn = null;
+                            try { orn = _egriOrnekle(pr, po.k); } catch (eOrn) { orn = null; }
+                            if (orn && orn.length >= 2) po.s = orn;
+                        }
+                    }
+                    if (!po.kf) { try { po.v = pr.getValue(); } catch (eB) { po.v = null; } }
+                    comp.p.push(po);
+                }
+            }
+            out.push(comp);
+        }
+        /* ZAMAN TABANI — TAHMIN DEGIL OLCUM.
+           getKeys() sekans zamani mi klip-yerel zaman mi donduruyor, belgelenmemis ve
+           surumden surume degisebilir. Kaynak klip t0'da basliyorsa:
+             · keyler t0 civarindaysa  -> SEKANS zamani (t0 cikarilir)
+             · keyler 0 civarindaysa   -> KLIP-YEREL zaman (oldugu gibi kalir)
+           Yanlis tahminin bedeli: hedef klip baska bir zamandaysa keyframe'ler klibin
+           DISINA dusuyor ve "uygulandi" denmesine ragmen hicbir sey gorunmuyor. */
+        var kmin = NaN, keySayi = 0, stSayi = 0, ornSayi = 0, egrili = 0, ci, pi, ki, klist, icsel;
+        for (ci = 0; ci < out.length; ci++) {
+            icsel = _icselMi(out[ci].ad, out[ci].match);
+            for (pi = 0; pi < out[ci].p.length; pi++) {
+                if (out[ci].p[pi].s && out[ci].p[pi].s.length) {
+                    ornSayi += out[ci].p[pi].s.length; egrili++;
+                }
+                klist = out[ci].p[pi].k || [];
+                if (klist.length) {
+                    for (ki = 0; ki < klist.length; ki++) {
+                        keySayi++;   // TOPLAM keyframe: okuma eksikse tek bakista gorulsun
+                        if (isNaN(kmin) || klist[ki].t < kmin) kmin = klist[ki].t;
+                    }
+                } else if (!icsel && out[ci].p[pi].v !== null && out[ci].p[pi].v !== undefined) {
+                    /* UYGULANABILIR STATIK: yalniz dis (preset'in ekledigi) bilesen statigi.
+                       Icsel Motion/Opacity statikleri (klip kendi durusu) SAYILMAZ — statik-only
+                       preset esiginde 'basarili ama bos' tuzagi acmasin. */
+                    stSayi++;
+                }
+            }
+        }
+        /* UC ADAYA MESAFE OLC — esik yerine "en yakin taban".
+           Eski kural (`t0 > 0.5 && kmin < t0*0.5`) iki delik birakiyordu: 0 < t0 <= 0.5
+           penceresinde olcum hic yapilmadan "sekans" varsayiliyor ama t0 yine de
+           cikariliyordu (keyler NEGATIF olup hedefte klip oncesine dusuyordu), ve
+           t0*0.5 <= kmin < t0 araligi da kaciriliyordu. Ayrica KAYNAK MEDYA tabani
+           (inPoint) hic degerlendirilmiyordu — Adobe belgelerinin isaret ettigi taban o. */
+        var t0Kaynak = _klipKaynakBas(ti);
+        var taban = "sekans", tabanOfs = t0;
+        if (!isNaN(kmin)) {
+            var dSekans = Math.abs(kmin - t0);
+            var dKaynak = Math.abs(kmin - t0Kaynak);
+            var dKlip   = Math.abs(kmin - 0);
+            if (dKaynak <= dSekans && dKaynak <= dKlip)      { taban = "kaynak"; tabanOfs = t0Kaynak; }
+            else if (dKlip <= dSekans && dKlip <= dKaynak)   { taban = "klip";   tabanOfs = 0; }
+            else                                             { taban = "sekans"; tabanOfs = t0; }
+        }
+        // Butun zamanlari KLIP-YEREL hale getir (klibin basindan itibaren saniye).
+        for (ci = 0; ci < out.length; ci++) {
+            for (pi = 0; pi < out[ci].p.length; pi++) _zamanKaydir(out[ci].p[pi], tabanOfs);
+        }
+
+        /* CIPA — animasyon klibin BASINA mi SONUNA mi yapissin?
+           Kullanicinin kurali: "Pop In neye atarsam atayim BASINDA baslamali", Out olanlar
+           ise sonda. Bunu ada bakarak tahmin etmek kirilgan olurdu (preset adlari degisir);
+           OLCULUYOR: keyframe'ler klibin ilk yarisindaysa basa, son yarisindaysa sona
+           yapisir. Sona yapisanlarda zamanlar klip SONUNA gore (negatif) saklanir. */
+        var t1 = _zamanSn(ti.end);
+        var sure = (!isNaN(t1) && t1 > t0) ? (t1 - t0) : 0;
+        var relMin = NaN;
+        for (ci = 0; ci < out.length; ci++) {
+            for (pi = 0; pi < out[ci].p.length; pi++) {
+                klist = out[ci].p[pi].k || [];
+                for (ki = 0; ki < klist.length; ki++) {
+                    if (isNaN(relMin) || klist[ki].t < relMin) relMin = klist[ki].t;
+                }
+            }
+        }
+        var capa = "bas";
+        if (sure > 0 && !isNaN(relMin) && relMin > sure * 0.5) capa = "son";
+        if (capa === "son") {
+            for (ci = 0; ci < out.length; ci++) {
+                for (pi = 0; pi < out[ci].p.length; pi++) _zamanKaydir(out[ci].p[pi], sure);
+            }
+        }
+
+        /* NEGATIF kalan zaman = olcum tutmadi. Boyle bir kayit hedefte klip oncesine
+           duser ve sessizce hicbir sey yapmaz — KAYDETME, sebebini soyle. */
+        if (capa === "bas" && !isNaN(relMin) && relMin < -0.001) {
+            return JSON.stringify({ ok: false, hata: "Zaman tabani olculemedi (ilkKey=" + kmin +
+                " klipBas=" + t0 + " kaynakBas=" + t0Kaynak + "). Preset'in uygulandigi, " +
+                "timeline'in basinda OLMAYAN bir klip secip tekrar dene." });
+        }
+        var ad = "?"; try { ad = String(ti.name); } catch (eC) {}
+        return JSON.stringify({ ok: true, kaynak: ad, taban: taban, capa: capa,
+                                keySayi: keySayi, stSay: stSayi, okunamayan: _okunamayanKey,
+                                egrili: egrili, ornSay: ornSayi, hizAtlandi: hizAtlandi,
+                                olcum: "ilkKey=" + kmin + " klipBas=" + t0 + " kaynakBas=" + t0Kaynak +
+                                       " sure=" + sure + " -> " + taban + "/" + capa +
+                                       (_okunamayanKey ? (" | OKUNAMAYAN KEY: " + _okunamayanKey) : ""),
+                                bilesenler: out });
+    } catch (e) { return JSON.stringify({ ok: false, hata: e.toString() }); }
+}
+
+/* Bileseni once matchName (dile bagimsiz), tutmazsa displayName ile ara.
+   displayName yedegi sart: QE ile eklenen efektin matchName'i kaynaktakiyle birebir
+   ayni olmayabiliyor. */
+function _sadeAd(s) { return String(s).replace(/\s*\([^()]*\)\s*$/, ""); }
+/* Bilesen INDEKSI dondurur (-1 = yok). Indeks sart: ayni klipte AYNI efektten iki tane
+   olabiliyor (kullanicinin klibinde "Transform" + "Transform (Pop In 1)" vardi) ve ikisi
+   de ayni matchName'i tasiyor. Nesne dondurulunce iki kayit ayni hedefe eslesiyor,
+   ikincisinin parametreleri yanlis bilesende aranıp "param-yok" cikiyordu.
+   `atla` = daha once kullanilmis indeksler. */
+function _bilesenIndexAra(ti, match, ad, atla) {
+    var c = null, i, mn, dn, k, gec;
+    try { c = ti.components; } catch (e0) { return -1; }
+    if (!c) return -1;
+    function kullanildi(ix) {
+        if (!atla) return false;
+        for (k = 0; k < atla.length; k++) if (atla[k] === ix) return true;
+        return false;
+    }
+    var matchVar = false;
+    for (i = 0; i < c.numItems; i++) {
+        mn = ""; try { mn = String(c[i].matchName); } catch (e1) {}
+        if (match && mn === match) {
+            matchVar = true;                 // bu turden bilesen KLIPTE VAR
+            if (!kullanildi(i)) return i;
+        }
+    }
+    /* matchName ile eslesen bir bilesen VAR ama hepsi kullanilmissa BURADA DUR.
+       Ada gore aramaya devam etmek, kaydi BASKA turden bir bilesene yazdiriyordu
+       (or. Motion kaydinin Transform'a gitmesi) — yanlis yere yazmaktansa bildirmek yeg. */
+    if (matchVar) return -1;
+    for (i = 0; i < c.numItems; i++) {
+        if (kullanildi(i)) continue;
+        dn = ""; try { dn = String(c[i].displayName); } catch (e2) {}
+        if (ad && dn === ad) return i;
+    }
+    /* Son care: parantezli eki atarak karsilastir. Kaynakta "Transform (Pop In 1)",
+       hedefe eklenen ise duz "Transform" oluyor — ikisi ayni efekt. */
+    if (ad) {
+        gec = _sadeAd(ad);
+        if (gec && gec !== ad) {
+            for (i = 0; i < c.numItems; i++) {
+                if (kullanildi(i)) continue;
+                dn = ""; try { dn = _sadeAd(c[i].displayName); } catch (e3) {}
+                if (dn === gec) return i;
+            }
+        }
+    }
+    return -1;
+}
+function _bilesenAraGenis(ti, match, ad) {
+    var ix = _bilesenIndexAra(ti, match, ad, null);
+    if (ix < 0) return null;
+    try { return ti.components[ix]; } catch (e) { return null; }
+}
+
+/* Klibi SIFIRDAN al: aktif sekans yeniden okunur, klip track + nodeId ile bulunur.
+   OLCULDU: getSelection() (ve _tazeKlip) BAYAT nesne donduruyor — QE ile efekt
+   eklendikten sonra o nesnenin components'inde yeni efekt GORUNMUYOR ("eklendi ama
+   okunamadi" hatasi tam olarak buydu). Sekans->track->clips zinciri taze veri veriyor. */
+function _klipYenidenBul(trackIdx, nodeId, basSn) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return null;
+        var ti = parseInt(trackIdx, 10);
+        if (isNaN(ti) || ti < 0 || ti >= seq.videoTracks.numTracks) return null;
+        var tr = seq.videoTracks[ti], i, c, nid, s;
+        if (nodeId) {
+            for (i = 0; i < tr.clips.numItems; i++) {
+                c = tr.clips[i];
+                nid = ""; try { nid = String(c.nodeId); } catch (e0) {}
+                if (nid === nodeId) return c;
+            }
+        }
+        /* nodeId tutmazsa baslangic zamanina dus (bir kareden genis tolerans).
+           TEK ADAY SARTI: ayni track'te 0.05 sn icinde birden fazla klip baslangici varsa
+           (cok kisa AutoCut kliplerinde mumkun) hangisi oldugu belirsizdir — YANLIS klibe
+           yazmaktansa null donmek yegdir (yanlis klip sessizce bozulur). */
+        var aday = null, adaySayi = 0;
+        for (i = 0; i < tr.clips.numItems; i++) {
+            c = tr.clips[i];
+            s = _zamanSn(c.start);
+            if (!isNaN(s) && !isNaN(basSn) && Math.abs(s - basSn) < 0.05) { aday = c; adaySayi++; }
+        }
+        if (adaySayi === 1) return aday;
+    } catch (e) {}
+    return null;
+}
+/* Hedef klipte olmayan efekti QE ile ekle (yalniz YERLESIK efektler icin calisir —
+   preset zaten yerlesik efektlerden kuruludur, o yuzden bu yeterli).
+   DONUS: "" = basarili, aksi halde SEBEP metni. Eskiden boolean donuyordu ve uc ayri
+   hatayi (efekt katalogda yok / QE klibi bulunamadi / ekleme patladi) ayirt edilemez
+   kiliyordu — kullaniciya "eklenemedi" deyip nedenini soylememek teshisi imkansizlastiriyor. */
+function _qeEfektEkle(ti, efektAdi) {
+    if (!efektAdi) return "efekt adi bos";
+    try {
+        if (typeof app.enableQE !== "function") return "QE bu surumde yok";
+        app.enableQE();
+        var ef = null;
+        try { ef = qe.project.getVideoEffectByName(String(efektAdi)); } catch (e0) {}
+        /* Preset uygulanmis efektin ORNEK adi "Transform (Pop In 1)" gibi olabiliyor —
+           Premiere efekt ornegine preset adini ekliyor. Katalogda boyle bir efekt YOK;
+           sondaki parantezli eki atip gercek efekt adiyla ("Transform") tekrar dene. */
+        if (!ef) {
+            var sade = String(efektAdi).replace(/\s*\([^()]*\)\s*$/, "");
+            if (sade && sade !== String(efektAdi)) {
+                try { ef = qe.project.getVideoEffectByName(sade); } catch (e1) {}
+            }
+        }
+        if (!ef) return "Premiere efekt katalogunda yok";
+        var qs = qe.project.getActiveSequence();
+        var qc = _qeKlipBul(qs, ti);
+        if (!qc) return "klibin QE karsiligi bulunamadi";
+        qc.addVideoEffect(ef);
+        return "";
+    } catch (e) { return e.toString(); }
+}
+
+/* NOT: burada _tazeKlip vardi — klibi getSelection()'dan yeniden alan fonksiyon.
+   KALDIRILDI, ise yaramadi: getSelection() de ayni bayat nesneleri donduruyor ve efekt
+   eklendikten sonra components hala eski goruntuyu veriyordu. Yerine _klipYenidenBul
+   geldi (sekans -> videoTracks -> clips zinciri). */
+function _dizimi(v) {
+    return !!(v && typeof v !== "string" && typeof v.length === "number");
+}
+
+/* PARAMETRE ADI ESDEGERLERI — OLCULDU (6 Agustos 2026, kullanicinin klibi).
+   Ayni kavram bilesene gore FARKLI adlaniyor:
+     · Motion    -> "Scale"
+     · Transform -> "Scale Height" + "Scale Width"  (Uniform Scale acikken Effect Controls
+       ikisini tek "Scale" satiri olarak GOSTERIYOR ama gercek parametre adlari bunlar)
+   Birebir ad eslestirmesi bu yuzden "Scale yok" diyordu. Turkce arayuz ihtimaline karsi
+   yerellestirilmis adlar da listede. */
+var _PARAM_ESDEGER = {
+    "Scale":        ["Scale", "Scale Height", "Ölçek", "Olcek"],
+    "Scale Height": ["Scale Height", "Scale", "Ölçek", "Olcek"],
+    "Scale Width":  ["Scale Width", "Scale"],
+    "Opacity":      ["Opacity", "Opaklık", "Opaklik"],
+    "Position":     ["Position", "Konum"],
+    "Anchor Point": ["Anchor Point", "Sabit Nokta"],
+    "Rotation":     ["Rotation", "Döndürme", "Dondurme"]
+};
+function _paramBul(ps, ad) {
+    var adaylar = _PARAM_ESDEGER[ad] || [ad], k, i, dn;
+    for (k = 0; k < adaylar.length; k++) {
+        for (i = 0; i < ps.numItems; i++) {
+            dn = ""; try { dn = String(ps[i].displayName); } catch (e) {}
+            if (dn === adaylar[k]) return ps[i];
+        }
+    }
+    return null;
+}
+/* HEDEFIN DINLENME DEGERI — animasyon bittiginde durdugu deger.
+   `getValue()` parametre ZATEN animasyonluysa OYNATMA KAFASININ oldugu andaki degeri
+   donduruyor. Bunun bedeli olculdu: ayni preset ikinci kez uygulaninca sonuc kafanin
+   nerede durduguna gore DEGISIYOR ve klip her denemede biraz daha kayiyordu (klasik
+   "bazen oluyor bazen olmuyor"). Animasyonluysa deger keyframe'lerden okunur: giris
+   (capa='bas') animasyonunda SON key, cikis ('son') ILK key dinlenme noktasidir. */
+function _dinlenmeDegeri(pr, capa) {
+    var kk = null, i, t, enIx = -1, enT = NaN, tv = false;
+    try { tv = !!pr.isTimeVarying(); } catch (e0) { tv = false; }
+    if (!tv) { try { return pr.getValue(); } catch (e1) { return null; } }
+    try { kk = pr.getKeys(); } catch (e2) { kk = null; }
+    if (!kk || !kk.length) { try { return pr.getValue(); } catch (e3) { return null; } }
+    for (i = 0; i < kk.length; i++) {
+        t = _zamanSn(kk[i]);
+        if (isNaN(t)) continue;
+        if (enIx < 0) { enIx = i; enT = t; continue; }
+        if (capa === "son") { if (t < enT) { enIx = i; enT = t; } }
+        else { if (t > enT) { enIx = i; enT = t; } }
+    }
+    if (enIx >= 0) { try { return pr.getValueAtKey(kk[enIx]); } catch (e4) {} }
+    try { return pr.getValue(); } catch (e5) { return null; }
+}
+/* ESKI KEYFRAME TEMIZLIGI — yalniz BASARILI yazimdan sonra.
+   "Uyguladim, begenmedim, baskasini denedim" en sik yapilan sey. Eski keyframe'ler
+   silinmedigi icin iki animasyonun key'leri IC ICE kaliyor ve kaynakta HIC olmayan bir
+   hareket cikiyordu. Silme SONRA yapilir: once silinseydi basarisiz denemede geri
+   getirilemezdi. Yalniz YAZDIGIMIZ ARALIKTA ve bizim zamanlarimizdan hicbirine denk
+   gelmeyen key'ler silinir — aralik DISINA DOKUNULMAZ (kullanicinin kendi keyframe'leri
+   orada olabilir). */
+function _yabanciKeyTemizle(pr, hedefler, tol) {
+    if (!hedefler || hedefler.length < 2) return 0;
+    var alt = hedefler[0], ust = hedefler[hedefler.length - 1], silinen = 0;
+    var tur, kk, i, s, j, yakin, sildi;
+    if (!(ust > alt)) return 0;
+    for (tur = 0; tur < ORNEK_MAX + 64; tur++) {
+        kk = null; try { kk = pr.getKeys(); } catch (e0) { return silinen; }
+        if (!kk || !kk.length) return silinen;
+        sildi = false;
+        for (i = 0; i < kk.length; i++) {
+            s = _zamanSn(kk[i]);
+            if (isNaN(s) || s < alt - 0.001 || s > ust + 0.001) continue;   // ARALIK DISI: DOKUNMA
+            yakin = false;
+            for (j = 0; j < hedefler.length; j++) {
+                if (Math.abs(hedefler[j] - s) <= tol) { yakin = true; break; }
+            }
+            if (yakin) continue;
+            // removeKey'e getKeys'ten gelen NESNE gecilir (bkz. _keyGeriAl notu).
+            try { pr.removeKey(kk[i]); silinen++; sildi = true; } catch (e1) {}
+            break;   // silme listeyi bozuyor: yeniden oku
+        }
+        if (!sildi) return silinen;
+    }
+    return silinen;
+}
+/* rapor: bos dizi verilirse BASARISIZLIK SEBEPLERI buraya yazilir. Sebep bildirmeyen bir
+   "yazilamadi" mesaji her seferinde yeni bir olcum turu gerektiriyordu. */
+/* ICSEL BILESEN MI? Motion / Opacity / Time Remapping her klipte hazir gelir ve KLIBIN
+   KENDI DURUSUNU tutar. Bunlarin statik degerlerini kopyalamak, ogretilen klibin konumunu
+   hedefe tasiyip klibi yerinden oynatiyordu (kullanici bildirdi).
+   Preset'in EKLEDIGI efektlerde (Transform vb.) ise statik degerler preset'in ta kendisi:
+   Anchor Point, Uniform Scale, Shutter Angle... bunlar kopyalanmazsa animasyon farkli
+   merkezden ve farkli ayarla oynuyor (kullanici iki ekran goruntusuyle gosterdi). */
+/* TAM ESLESME — "baslıyor/iceriyor" DEGIL.
+   Eski hali `a.indexOf("motion") === 0` idi ve "Motion Tile" / "Motion Blur" gibi GERCEK
+   efektleri de icsel sayiyordu: o efektlerin statik parametreleri hic yazilmiyor, preset
+   onlar icin sessizce hicbir sey yapmiyordu. Icsel bilesenlerin adi tam olarak bunlardir. */
+function _icselMi(ad, match) {
+    var a = String(ad || "").toLowerCase(), m = String(match || "").toLowerCase(), i;
+    var adlar = ["motion", "opacity", "time remapping", "hareket", "opaklık", "opaklik",
+                 "zaman yeniden eşleme", "zaman yeniden esleme"];
+    for (i = 0; i < adlar.length; i++) if (a === adlar[i]) return true;
+    /* matchName SONEK ile eslesir — TAM esitlik ISE YARAMIYORDU: gercek deger
+       "AE.ADBE Motion" (olculdu, kullanicinin klibi), yani "adbe motion" ile tam esit
+       degil ve bu satirlar OLU KODDU. Dile bagimsiz koruma yalniz boyle calisiyor.
+       Sonek "AE.ADBE Motion Tile"i YAKALAMAZ — ilk duzeltmenin amaci korunur. */
+    var mler = ["adbe motion", "adbe opacity", "adbe time remapping"];
+    for (i = 0; i < mler.length; i++) {
+        if (m.length >= mler[i].length &&
+            m.substring(m.length - mler[i].length) === mler[i]) return true;
+    }
+    return false;
+}
+/* BLEND MODE kopyalama KALDIRILDI (gercek testte BOZUK cikti — kullanici, 6 Agustos 2026).
+   Kaynak "Normal" iken hedefte "Color" oluyordu: Opacity'nin statik enum'unu setValue ile
+   yazmak guvenilmez — getValue/setValue enum eslesmesi TUTMUYOR (ve dile bagimli). Boylece
+   Opacity yeniden TAM icsel: statikleri (Blend Mode dahil) hic yazilmiyor, kaynak neyse o
+   kaliyor. Kullanicinin preset'leri (Pop In/Zoom) zaten Normal blend kullaniyor. Gerekirse
+   enum degerleri reflect ile OLCULUP dogru eklenmeli — kor kopyalama ARAMA. */
+/* SPATIAL (konum) parametresi mi? Position/Anchor Point hedefe FARK olarak yazilir (klibi
+   kaynagin koordinatina sicratmamak icin). Renk de [r,g,b,a] dizi doner ama MUTLAK yazilmali
+   — yoksa hedefin mevcut rengine gore kayip bozulur. Ayrimi bu fonksiyon yapar: SADECE
+   asagidakiler fark-yolu; diger tum dizi degerler (renk dahil) mutlak. */
+function _spatialMi(ad) {
+    var a = String(ad || "");
+    return a === "Position" || a === "Konum" ||
+           a === "Anchor Point" || a === "Sabit Nokta";
+}
+/* SES KLIBI MI? — Premiere'de "Linked Selection" varsayilan ACIK: kullanici bir video
+   klibine tiklayinca BAGLI SES parcasi da secime giriyor. Panel onu ayri bir klip sanip
+   AYNI goruntuye efekti IKINCI KEZ ekliyordu (pop iki kat, sebebi gorunmez). Ses klipleri
+   video efekti de alamaz. Bu yuzden secimden SUZULUR. */
+function _sesKlibiMi(ti) {
+    var mt = "";
+    try { mt = String(ti.mediaType); } catch (e) { return false; }   // okunamazsa eski davranis
+    return mt === "Audio";
+}
+/* HIZ RAMPASI (Time Remapping) preset'e GIRMEZ — ne okunur ne yazilir.
+   Hizlandirilmis bir klipten preset ogretilirse hiz egrisi de kaydediliyor ve uygulanan
+   HER klip agir cekim/hizli oluyordu. Kullanici "animasyon" ogretiyor, "hiz" degil. */
+function _hizRampasiMi(ad, match) {
+    var a = String(ad || "").toLowerCase(), m = String(match || "").toLowerCase();
+    return a.indexOf("time remapping") !== -1 || a.indexOf("zaman yeniden") !== -1 ||
+           m.indexOf("timeremap") !== -1;
+}
+/* Parametrenin VARSAYILAN varis degeri (klip "normal" durumdayken). null = boyle bir
+   varsayilan yok. D10: preset varisi bu degere esitse hedefin kendi durusuna ORANLANIR. */
+function _varsayilanVaris(ad) {
+    var a = String(ad || "");
+    if (a === "Scale" || a === "Scale Height" || a === "Scale Width" ||
+        a === "Ölçek" || a === "Olcek" || a === "Opacity" || a === "Opaklık" || a === "Opaklik") return 100;
+    if (a === "Rotation" || a === "Döndürme" || a === "Dondurme") return 0;
+    return null;
+}
+/* setValue SESSIZCE hicbir sey yapabiliyor (salt-okunur/tip uyusmazligi). Statik deger
+   artik basari olcutu olabildigi (statik-only preset) icin geri okunur. Bazi parametreler
+   geri OKUNAMAZ — o zaman TUTTU say (dokunma), yoksa gecerli yazimlar reddedilir. */
+function _statikTuttu(pr, beklenen) {
+    var v = null, i, nv;
+    try { v = pr.getValue(); } catch (e) { return true; }      // okunamiyorsa engelleme
+    if (v === null || v === undefined) return true;
+    if (_dizimi(beklenen) && _dizimi(v)) {
+        if (v.length !== beklenen.length) return false;
+        /* Dizi (cogunlukla RENK [r,g,b,a], 0..1) toleransi GEVSEK: setValue(...,true) UI
+           guncellemesinde 8-bit yeniden nicemleme yapabiliyor (0.5 -> 0.502, ~1/255=0.004).
+           0.001 sikiligi gecerli renk yazimini "tutmadi" sanip statik-only renk preset'inde
+           yanlis-negatif ("HICBIR AYAR YAZILAMADI") uretirdi. 0.02 nicemlemeyi tolere eder,
+           gercek basarisizlik (deger hic degismez) bundan cok daha buyuk fark birakir. */
+        for (i = 0; i < v.length; i++) {
+            if (Math.abs(Number(v[i]) - Number(beklenen[i])) > 0.02) return false;
+        }
+        return true;
+    }
+    if (typeof beklenen === "number") {
+        nv = Number(v);
+        if (isNaN(nv)) return true;                            // enum/string olabilir
+        return Math.abs(nv - beklenen) < 0.001;
+    }
+    return String(v) === String(beklenen);
+}
+/* adaylar : [{baz, arAlt, arUst, ad}] — denenecek zaman tabanlari (kaynak/sekans/klip)
+   sayac   : { kf, st, strateji } — KEYFRAME ve STATIK AYRI sayilir. Eskiden statik
+             setValue de "keyframe" sayilip "8 keyframe yazildi" yalanini uretiyordu. */
+function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa) {
+    var ps = null, i, j;
+    try { ps = hedefBilesen.properties; } catch (e) { if (rapor) rapor.push("properties-yok"); return 0; }
+    if (!ps) { if (rapor) rapor.push("properties-bos"); return 0; }
+    for (i = 0; i < plist.length; i++) {
+        var kayit = plist[i], pr = null;
+        /* ADI BOS parametrede INDEKSE dus (bkz. presetOkuJSON'daki `ix` notu): ada gore
+           arama iki adsiz parametreyi ayni ozellige esliyor ve ikincisi birincinin
+           uzerine yaziyordu. Eski kayitlarda `ix` yok -> eski davranis. */
+        if (!kayit.ad && typeof kayit.ix === "number") {
+            try { if (kayit.ix >= 0 && kayit.ix < ps.numItems) pr = ps[kayit.ix]; } catch (eIx) { pr = null; }
+        }
+        if (!pr) pr = _paramBul(ps, kayit.ad);
+        if (!pr) {
+            /* Yalniz "param-yok" demek yetmiyordu: hangi bilesende arandigini ve o bilesende
+               NE OLDUGUNU da yaz — yanlis bilesene eslesme bu sayede tek bakista gorulur. */
+            if (rapor && kayit.kf && kayit.k && kayit.k.length) {
+                var hAd = "?"; try { hAd = String(hedefBilesen.displayName); } catch (eH) {}
+                var varOlan = [];
+                for (j = 0; j < ps.numItems; j++) { try { varOlan.push(String(ps[j].displayName)); } catch (eV) {} }
+                /* KAYNAK bileseni de yaz: kayit yanlis hedefe eslestiyse ("Motion" kaydi
+                   "Transform"a gitmis gibi) tek bakista gorulsun. */
+                rapor.push(kayit.ad + " yok [kaynak: " + (kaynakAd || "?") +
+                           " -> hedef: " + hAd + " (" + varOlan.join("/") + ")]");
+            }
+            continue;
+        }
+
+        /* STATIK DEGER: preset'in EKLEDIGI efektlerde (statikYaz) VE her zaman Blend Mode'da.
+           Icsel bilesenlerin (Motion/Opacity) statikleri klibin kendi durusudur — yazilmaz
+           ama artik GORUNUR atlanir (sessiz kayip yok). setValue sessizce basarisiz
+           olabildigi ve statik artik basari olcutu olabildigi icin GERI OKUNUR. */
+        if (!(kayit.kf && kayit.k && kayit.k.length)) {
+            if (statikYaz && kayit.v !== null && kayit.v !== undefined) {
+                /* YALNIZ SAYI ve SAYI DIZISI yazilir. Metin/enum degerler ATLANIR:
+                   enum kopyalama olculdu ve BOZUK cikti (Blend Mode "Normal" -> "Color",
+                   bkz. _blendModeMu notu), MOGRT/baslik klibinden ogrenilen preset ise
+                   hedef basligin YAZISINI eziyordu (Source Text bir metin parametresi). */
+                /* TIP kontrolu — Number() donusumune GUVENME: Number("") === 0 ve isNaN(0)
+                   false oldugu icin BOS bir metin (Source Text) "sayisal" sayilip yaziliyor
+                   ve hedef basligin YAZISINI siliyordu.
+                   BOOLEAN DE YAZILIR: kullanicinin gercek kayitlarinda Uniform Scale,
+                   "Use Composition's Shutter Angle" ve Crop>Zoom BOOLEAN. Uniform Scale
+                   tam olarak CLAUDE.md'de "kopyalanmadigi icin klip dikeyde eziliyordu"
+                   diye yazili parametre — disarida birakmak o hatayi geri getirir.
+                   Yasak olan yalniz METIN/enum (bkz. Blend Mode olcumu). */
+                var sv = kayit.v;
+                var tv0 = _dizimi(sv) ? (typeof sv[0]) : (typeof sv);
+                var sayisal = (tv0 === "number" || tv0 === "boolean");
+                if (!sayisal) {
+                    if (rapor) rapor.push(kayit.ad + " (metin/liste ayari, atlandi)");
+                } else {
+                    try {
+                        pr.setValue(sv, true);
+                        if (_statikTuttu(pr, sv)) sayac.st++;
+                        else if (rapor) rapor.push(kayit.ad + ":statik yazildi ama tutmadi");
+                    } catch (eSv) { if (rapor) rapor.push(kayit.ad + ":setValue " + String(eSv)); }
+                }
+            } else if (!statikYaz && kayit.v !== null && kayit.v !== undefined && rapor) {
+                rapor.push(kayit.ad + " (klip kendi ayari, atlandi)");
+            }
+            continue;
+        }
+
+        /* KONUM GIBI DIZI DEGERLI parametreler (Position, Anchor Point) MUTLAK kopyalanamaz:
+           kaynak klibin koordinatlari hedefe yazilirsa klip kaynagin yerine sicrar.
+           Cozum: keyframe'ler SON keyframe'e (varis noktasi) gore FARK olarak uygulanir ve
+           farklar hedefin KENDI mevcut degerine eklenir. Animasyon ayni, varis hedefin
+           kendi yeri. Tek sayili degerlerde (Scale, Opacity, Rotation) mutlak dogru olan
+           davranistir — %0'dan %100'e pop, hedefte de %0'dan %100'e olmali. */
+        /* DIZI-FARK yolu YALNIZ konum (Position/Anchor) icin — renk de dizi doner ama MUTLAK
+           yazilmali (bkz. _spatialMi), yoksa hedefin mevcut rengine gore kayip bozulur.
+           Konum farkinda varis noktasi hedefin mevcut yerine oturur: capa='son' (cikis) ise
+           varis ILK keyframe, 'bas' (giris) ise SON keyframe'dir. */
+        /* YAZILACAK LISTE: ORNEKLER varsa onlar (kaynagin ease/hiz egrisini tasiyan tek yol,
+           bkz. _egriOrnekle); yoksa seyrek keyframe'lere dus (eski kayitlar + olcum
+           yapilamayan parametreler). */
+        var kw = (kayit.s && kayit.s.length >= 2) ? kayit.s : kayit.k;
+
+        var dizi = _dizimi(kw[0].v) && _spatialMi(kayit.ad);
+        var taban = null, mevcut = null, kutu = { ilkHata: "", temizlenen: 0 };
+        if (dizi) {
+            taban = (capa === "son") ? kw[0].v : kw[kw.length - 1].v;
+            // DINLENME degeri — setTimeVarying'den ONCE (keyframe acilinca deger degisebiliyor)
+            mevcut = _dinlenmeDegeri(pr, capa);
+            /* taban NULL olabilir (getValueAtKey okunamamis key). _dizimi(taban)
+               kontrolu OLMADAN taban.length TypeError atip tum presetYaz'i dusuruyordu. */
+            if (!_dizimi(taban) || !_dizimi(mevcut) || mevcut.length !== taban.length) dizi = false;
+        }
+
+        /* ORANSAL YAZIM (D10) — KUCULTULMUS/YARI SAYDAM/EGIK klipte sicramayi onler.
+           Olcek ve opaklik oldugu gibi kopyalaniyordu: preset %100'de bir klipten
+           ogrenildigi icin varis degeri 100. Onu %35'e kucultulmus bir overlay'e
+           (Ates.webp gibi) uygulayinca animasyon bitince klip BIRDEN tam ekran oluyordu.
+           KURAL DAR — pazarlik konusu degil: yalniz preset'in varisi VARSAYILAN deger ise
+           (Scale/Opacity 100, Rotation 0) hedefin kendi durusuna oranlanir. Varis 100 DEGILSE
+           (bilerek %50'de biten bir 'look' preset'i) hicbir sey degismez, mutlak yazilir.
+           Hedef zaten 100/0 ise formul birebir ayni sonucu verir — yaygin durumda etkisiz. */
+        var olcek = null;
+        if (!dizi && !_dizimi(kw[0].v)) {
+            var varsD = _varsayilanVaris(kayit.ad);
+            if (varsD !== null) {
+                var varis = Number((capa === "son") ? kw[0].v : kw[kw.length - 1].v);
+                if (!isNaN(varis) && Math.abs(varis - varsD) < 0.5) {
+                    var hd = Number(_dinlenmeDegeri(pr, capa));
+                    if (!isNaN(hd)) {
+                        if (varsD === 100 && hd > 0 && Math.abs(hd - 100) > 0.5) olcek = { oran: hd / 100, ek: 0 };
+                        else if (varsD === 0 && Math.abs(hd) > 0.5) olcek = { oran: 0, ek: hd };
+                    }
+                }
+            }
+        }
+
+        /* TEK HEDEF — bilerek.
+           Bir ara "Scale" kaydi hem Scale Height hem Scale Width'e yaziliyordu: Uniform
+           Scale statik degeri kopyalanmadigi icin klip dikeyde eziliyordu ve bu bir
+           telafiydi. Uniform Scale artik dogru kopyalandigindan (bkz. statikYaz) gereksiz,
+           dahasi zararli: kullanici o kutuyu kaldirirsa Width'teki fazladan keyframe'ler
+           kaynakta OLMAYAN bir animasyon uretir. Kaynakta ne varsa o yazilir. */
+        var tvHata = "";
+        var tvOnce = false; try { tvOnce = !!pr.isTimeVarying(); } catch (eTv) {}
+        try { pr.setTimeVarying(true); } catch (e3) { tvHata = String(e3); }
+        var snap = _keySnapshot(pr);
+
+        /* Strateji (zaman bicimi + taban) klip basina BIR KEZ olculur; sonra butun
+           parametrelerde ayni strateji kullanilir. Olcum yapilamazsa adaylar tek tek
+           denenir (asagida). Probe ofseti: gercek keyframe'lerin ORTASI. */
+        if (strateji && !strateji.olculdu) {
+            strateji.olculdu = true;
+            var tIlk = kw[0].t, tSon = kw[kw.length - 1].t;
+            var pofs = (tIlk + tSon) / 2;
+            if (!pofs) pofs = (tIlk < 0) ? -0.01 : 0.25;
+            var s0 = _stratejiOlc(pr, adaylar, pofs);
+            if (s0) { strateji.baz = s0.baz; strateji.bicim = s0.bicim; strateji.ad = s0.ad; }
+        }
+
+        /* Denenecek sira: olculen strateji varsa once o, sonra kalan adaylar.
+           Her denemeden ONCE onceki denemenin cop keyframe'leri geri alinir — yoksa
+           yanlis tabandaki kirpilmis keyler klipte kalip "tek keyframe" uretiyordu. */
+        var gercek = 0, bi, aday, kullanilanAd = "";
+        if (strateji && strateji.bicim) {
+            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, strateji.baz, strateji.bicim, kutu, olcek);
+            if (gercek) kullanilanAd = strateji.bicim + "/" + (strateji.ad || "?");
+        }
+        for (bi = 0; bi < adaylar.length && !gercek; bi++) {
+            aday = adaylar[bi];
+            if (!aday || (strateji && strateji.bicim && aday.baz === strateji.baz)) continue;
+            _keyGeriAl(pr, snap);
+            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, aday.baz,
+                               (strateji && strateji.bicim) ? strateji.bicim : null, kutu, olcek);
+            if (gercek) kullanilanAd = ((strateji && strateji.bicim) ? strateji.bicim : "oto") + "/" + aday.ad;
+        }
+
+        if (gercek) {
+            sayac.kf += gercek;
+            if (kutu.temizlenen) sayac.temiz += kutu.temizlenen;
+            if (!sayac.strateji && kullanilanAd) sayac.strateji = kullanilanAd;
+            // Kismi basari da bildirilmeli: 13 key'in 1'i kondugunda animasyon yine olmuyor.
+            if (rapor && gercek < kw.length) {
+                rapor.push(kayit.ad + ": " + gercek + "/" + kw.length + " keyframe kondu" +
+                           (kutu.ilkHata ? " [" + kutu.ilkHata + "]" : ""));
+            }
+        } else {
+            _keyGeriAl(pr, snap);                       // hicbiri tutmadi: COP BIRAKMA
+            /* Kronometreyi de geri al — ama YALNIZ girise gore kapaliydiysa ve key
+               listesi okunabiliyorsa. Okunamiyorsa dokunma: yazilmis ama dogrulanamamis
+               keyframe'leri silmis olabiliriz. */
+            if (!tvOnce && snap !== null) { try { pr.setTimeVarying(false); } catch (eT2) {} }
+            if (rapor) {
+                rapor.push(kayit.ad + ":keyframe KONMADI [" + (kutu.ilkHata || "sessiz") + "]" +
+                           (tvHata ? " setTimeVarying(" + tvHata + ")" : ""));
+            }
+        }
+    }
+    return sayac.kf;
+}
+
+/* DOSYA DUZEYINDE — bilerek. Bu fonksiyon _paramlariYaz'in for govdesinin ICINDE
+   tanimliydi; ES3'te blok ici function deklarasyonu TANIMSIZ DAVRANIS ve her turda
+   yeniden baglanan closure (kayit/dizi/taban/mevcut/pr) kirilgandi.
+   Donus: GERCEKTEN olusan keyframe sayisi. Iki sart birden aranir:
+     1. _keyEkleD hatasiz dondu (addKey + setValueAtKey ikisi de tuttu)
+     2. Geri okumada hedef zamanda key VAR ve klip araliginda
+   Eslesen key TUKETILIR (kk[w] = null): 40 ms'den yakin iki kaynak key ayni gercek key'le
+   eslesip sayiyi ikiye katliyordu. */
+function _yazVeSay(pr, klist, dizi, taban, mevcut, bazZaman, bicim, kutu, olcek) {
+    var y = 0, q, w, kk, sz, hedefZ, vv, na, mm, sonuc = [], hedefler = [];
+    for (q = 0; q < klist.length; q++) {
+        vv = klist[q].v;
+        /* NULL DEGER KORUMASI: getValueAtKey okunamadiginda kayitta v=null kaliyor.
+           Korumasiz birakildiginda vv[mm] TypeError atip TUM presetYaz'i dusuruyordu. */
+        if (vv === null || vv === undefined) {
+            if (!kutu.ilkHata) kutu.ilkHata = "okunamamis keyframe degeri (null)";
+            /* hedefler[] `sonuc[]` ile AYNI INDEKSTE kalmak ZORUNDA — atlanan dalda da
+               push yapilir. Eskiden atlanip sikisiyordu ve asagidaki dogrulama dongusu
+               hedefler[q] ile yanlis zamani okuyup tek imleci gercek key'lerin otesine
+               itiyordu: sayim 0'a dusuyor, _keyGeriAl DOGRU yazilmis key'leri siliyor ve
+               kullanici "HIC KEYFRAME KONMADI" goruyordu (v=null iceren ESKI kayitlarda). */
+            hedefler.push(null); sonuc.push("deger-yok"); continue;
+        }
+        if (dizi) {
+            if (!_dizimi(vv) || vv.length !== taban.length) {
+                if (!kutu.ilkHata) kutu.ilkHata = "keyframe degeri beklenen dizi degil";
+                hedefler.push(null); sonuc.push("tip-uyusmaz"); continue;   // indeks hizasi SART
+            }
+            na = [];
+            for (mm = 0; mm < taban.length; mm++) na.push(mevcut[mm] + (vv[mm] - taban[mm]));
+            vv = na;
+        } else if (olcek) {
+            /* ORANSAL/TOPLAMSAL yazim (bkz. _paramlariYaz'daki olcek notu): kucultulmus
+               ya da yari saydam klipte animasyon hedefin KENDI durusuna gore olceklenir. */
+            var nv = Number(vv);
+            if (!isNaN(nv)) vv = olcek.oran ? (nv * olcek.oran) : (nv + olcek.ek);
+        }
+        hedefZ = bazZaman + klist[q].t;
+        hedefler.push(hedefZ);
+        sonuc.push(_keyEkleD(pr, hedefZ, vv, bicim, klist[q].it));
+        if (sonuc[q] !== "" && !kutu.ilkHata) kutu.ilkHata = sonuc[q];
+    }
+    kk = null; try { kk = pr.getKeys(); } catch (eG) { kk = null; }
+    if (!kk) return 0;
+    /* TOLERANS VERIDEN TURETILIR — sabit 0.02 ARTIK YANLIS.
+       Ornekleme (baking) ile keyframe'ler birbirine cok yakin olabiliyor (kare hizinda:
+       30 fps'te 0.033 sn). Sabit 0.02 tolerans ornek araligini asarsa bir ornek KOMSU
+       ornegin key'iyle eslesir: sayim yanilir, "N/M keyframe kondu" hayalet uyarisi cikar
+       ve setValueAtKey patlayip geride kalan YANLIS DEGERLI key "kondu" diye sayilir.
+       Kural: tolerans < ornek araligi / 2. */
+    var tol = 0.02, dt, minAr = 0;
+    for (q = 1; q < klist.length; q++) {
+        dt = Math.abs(klist[q].t - klist[q - 1].t);
+        if (dt > 0 && (minAr === 0 || dt < minAr)) minAr = dt;
+    }
+    if (minAr > 0 && minAr * 0.45 < tol) tol = minAr * 0.45;
+    if (tol < 0.002) tol = 0.002;    // tick cozunurlugu + yuvarlama payi
+    /* Zamanlar BIR KEZ okunur ve siralanir: eskiden her hedef icin butun key listesi
+       _zamanSn ile yeniden taraniyordu (N=300'de ~90.000 cagri, ExtendScript'te saniyeler).
+       Iki liste de sirali oldugu icin tek imlecle (p) ilerlemek yeterli. */
+    var sk = [];
+    for (w = 0; w < kk.length; w++) {
+        sz = _zamanSn(kk[w]);
+        if (!isNaN(sz)) sk.push(sz);
+    }
+    sk.sort(function (a, b) { return a - b; });
+    var p = 0;
+    for (q = 0; q < klist.length; q++) {
+        if (sonuc[q] !== "") continue;                       // SART 1
+        hedefZ = hedefler[q];
+        if (hedefZ === null) continue;
+        while (p < sk.length && sk[p] < hedefZ - tol) p++;   // gerideki key'leri tuket
+        if (p < sk.length && Math.abs(sk[p] - hedefZ) <= tol) { y++; p++; }   // SART 2
+    }
+    /* BASARILI yazimdan sonra eski/yabanci keyframe'leri temizle (bkz. _yabanciKeyTemizle).
+       y === 0 ise cagiran taraf zaten _keyGeriAl ile her seyi geri aliyor — orada temizlik
+       YAPILMAZ, yoksa basarisiz bir denemede kullanicinin kendi key'leri silinirdi.
+       BASARISIZ yazimlarin zamanlari da listede KALIR (null'lar haric): addKey tutup
+       setValueAtKey patlamis olabilir — orada YANLIS DEGERLI bir key durur, onu da
+       "bizim" sayip korumak dogru degil ama silmek de degil; zaman listesinde tutmak
+       temizligin o noktayi yabanci sanip silmesini onler. */
+    if (y > 0) {
+        var tmzList = [], tq;
+        for (tq = 0; tq < hedefler.length; tq++) if (hedefler[tq] !== null) tmzList.push(hedefler[tq]);
+        var tmz = _yabanciKeyTemizle(pr, tmzList, tol);
+        if (tmz && kutu) kutu.temizlenen = (kutu.temizlenen || 0) + tmz;
+    }
+    return y;
+}
+/* Panelin yazdigi JSON dosyasindan okur ve SECILI kliplere uygular.
+   Metin DOSYADAN geciyor, evalScript string literalinden DEGIL — proje geneli kural. */
+/* Animasyonun CIPADAN ITIBAREN uzanimi (klip-yerel).
+   YAYILIM (mx-mn) DEGIL: sigdirma icin gereken sey, capanin oldugu noktadan animasyonun
+   ne kadar UZAGA gittigidir. Cipadan uzakta baslayan bir preset'te (or. keyler 0.5..1.5)
+   yayilim 1.0 ama gercek ihtiyac 1.5 — yayilima bakan bir esik sigdirmayi hic
+   tetiklemiyor ve son keyframe klip disina dusuyordu.
+     capa='bas' -> 0'dan ileriye  : max(mx, 0)
+     capa='son' -> 0'dan geriye   : -min(mn, 0)   (o kayitta zamanlar negatif) */
+function _yiginSure(veri) {
+    var mn = NaN, mx = NaN, bi, pi, ki, plist, l, q;
+    for (bi = 0; bi < veri.bilesenler.length; bi++) {
+        plist = veri.bilesenler[bi].p || [];
+        for (pi = 0; pi < plist.length; pi++) {
+            for (q = 0; q < 2; q++) {
+                l = q ? plist[pi].s : plist[pi].k;
+                if (!l) continue;
+                for (ki = 0; ki < l.length; ki++) {
+                    if (isNaN(mn) || l[ki].t < mn) mn = l[ki].t;
+                    if (isNaN(mx) || l[ki].t > mx) mx = l[ki].t;
+                }
+            }
+        }
+    }
+    if (isNaN(mn) || isNaN(mx)) return 0;
+    return (veri.capa === "son") ? Math.max(-mn, 0) : Math.max(mx, 0);
+}
+/* Butun keyframe/ornek zamanlarini K katiyla olcekle (kisa klibe sigdirma). */
+function _yiginOlcekle(veri, k) {
+    var bi, pi, ki, plist, l, q;
+    for (bi = 0; bi < veri.bilesenler.length; bi++) {
+        plist = veri.bilesenler[bi].p || [];
+        for (pi = 0; pi < plist.length; pi++) {
+            for (q = 0; q < 2; q++) {
+                l = q ? plist[pi].s : plist[pi].k;
+                if (!l) continue;
+                for (ki = 0; ki < l.length; ki++) l[ki].t = l[ki].t * k;
+            }
+        }
+    }
+}
+/* kafaKullan "1" ise animasyon OYNATMA KAFASININ oldugu ana yapisir (klibin basi/sonu
+   yerine). Kafa zamanini host KENDISI okur — panelden sayi gecirmek (ondalik bicim,
+   evalScript string'i) gereksiz risk. Verilmezse eski davranis aynen korunur. */
+function presetYaz(jsonYol, kafaKullan) {
+    /* UNDO GRUBU: bir preset onlarca keyframe yaziyor. Grup olmadan Ctrl+Z bunlari TEK TEK
+       geri aliyor ve kullanicinin 30-40 kez basmasi gerekiyordu. finally ile kapatiliyor —
+       arada hata olursa grup ACIK kalir ve kullanicinin sonraki her duzenlemesi ayni gruba
+       yazilir; tek Ctrl+Z saatlerce suren isi geri alirdi (bkz. autoCut'taki ayni not). */
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Preset"); _ug = true; } catch (eug) {}
+    try {
+        var veri = null;
+        try { veri = JSON.parse(_readFileUTF8(jsonYol)); } catch (eR) { return "err:Kayitli preset okunamadi: " + eR.toString(); }
+        if (!veri || !veri.bilesenler || !veri.bilesenler.length) return "err:Kayitli preset bos";
+        /* Yiginda HIC keyframe yoksa uygulamanin anlami yok — ve dogru mesaj "yeniden ogret".
+           Statik degerler artik yazilmadigi icin boyle bir yigin sessizce hicbir sey yapar
+           ve kullanici sebebini "hicbir parametre yazilamadi" diye gorurdu. */
+        var kfSay = 0, stSay = 0, bi, pi, plist, bIc;
+        for (bi = 0; bi < veri.bilesenler.length; bi++) {
+            plist = veri.bilesenler[bi].p || [];
+            bIc = _icselMi(veri.bilesenler[bi].ad, veri.bilesenler[bi].match);
+            for (pi = 0; pi < plist.length; pi++) {
+                if (plist[pi].kf && plist[pi].k && plist[pi].k.length) kfSay++;
+                else if (!bIc && plist[pi].v !== null && plist[pi].v !== undefined) stSay++;   // uygulanabilir statik (dis bilesen)
+            }
+        }
+        /* Statik-only preset (animasyonsuz look/renk/blur/crop) ARTIK desteklenir: keyframe
+           yoksa bile uygulanabilir statik varsa devam. Ikisi de yoksa gercekten yapacak sey
+           yok — dogru mesaj 'yeniden ogret'. */
+        if (!kfSay && !stSay) return "err:Kayitli preset'te uygulanacak hicbir sey yok (ne keyframe ne statik ayar) — preset'in uygulandigi bir klibi secip YENIDEN OGRET";
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var sec = null;
+        try { sec = seq.getSelection(); } catch (eS) {}
+        if (!sec || !sec.length) return "err:Timeline'da klip secili degil";
+
+        /* HIZ RAMPASI eski kayitlarda olabilir — uygulama aninda da suzulur (bkz.
+           _hizRampasiMi). Aksi halde eski bir kayit her klibi agir cekim yapardi. */
+        var animSure = _yiginSure(veri);
+        var kafaVar = (String(kafaKullan) === "1"), kafaSn = 0;
+        if (kafaVar) {
+            try { kafaSn = _zamanSn(seq.getPlayerPosition()); } catch (eKf) { kafaSn = NaN; }
+            if (isNaN(kafaSn)) return "err:Oynatma kafasinin yeri okunamadi";
+        }
+
+        var ok = 0, toplamYaz = 0, toplamStatik = 0, toplamTemiz = 0, hata = [], i, j, sonStrateji = "";
+        var sesAtlandi = 0, sigdirildi = 0, kafaDisi = 0, denenen = 0;
+        for (i = 0; i < sec.length; i++) {
+            // Bagli ses klibi (Linked Selection) — video efekti alamaz, ATLA.
+            if (_sesKlibiMi(sec[i])) { sesAtlandi++; continue; }
+            denenen++;
+            var ti = sec[i], t0 = _klipBas(ti), eksik = [], nedenler = {}, rapor = [];
+            /* ZAMAN HESABI — iki ayri soru, ikisi de OGRENIRKEN olculdu:
+                 capa  : animasyon klibin BASINA mi SONUNA mi yapisik (bas | son)
+                 taban : API keyframe zamanini SEKANS mi KLIP-YEREL mi bekliyor
+               Once cipa ile klip ICINDEKI konum bulunur, sonra API tabanina cevrilir.
+               Eski kayitlarda alanlar yok -> bas/sekans varsayilir (onceki davranis). */
+            var hedefSon = _zamanSn(ti.end);
+            var hedefSure = (!isNaN(hedefSon) && hedefSon > t0) ? (hedefSon - t0) : 0;
+
+            /* KAFAYA UYGULA (istege bagli, kafaOfsSn verilirse): animasyon klibin basina
+               ya da sonuna degil OYNATMA KAFASININ oldugu ana yapisir — gameplay kaydi
+               5-20 dakikalik tek parca oldugu icin vurgu preset'leri ancak boyle
+               kullanilabiliyor. Kafa bu klibin ICINDE degilse klip ATLANIR: sessizce klip
+               basina dusmek "hepsi ayni yere kondu" surprizi olurdu. */
+            var vk = veri, capaOfs;
+            if (kafaVar) {
+                if (kafaSn < t0 - 0.001 || kafaSn > t0 + hedefSure + 0.001) { kafaDisi++; denenen--; continue; }
+                capaOfs = kafaSn - t0;                       // klip-yerel ofset
+            } else {
+                capaOfs = (veri.capa === "son" && hedefSure > 0) ? hedefSure : 0;
+            }
+
+            /* KISA KLIBE SIGDIR: AutoCut'tan cikan klipler 0.2-0.5 sn. 1 sn'lik bir pop
+               preset'inin keyframe'lerinin yarisi klip DISINA dusuyor ve Premiere onlari
+               hata vermeden klip sinirina YIGIYOR — animasyon yarida kesilip sonunda
+               ziplıyor. YALNIZ kucultme yonunde (asla uzatma). capa='son'da zamanlar
+               negatif oldugu icin ayni carpim dogru calisir.
+               Yigin PAYLASILIYOR: olceklenecekse KOPYASI alinir, yoksa sonraki klipler de
+               kuculurdu. */
+            /* Kullanilabilir alan CIPANIN YONUNE gore: 'bas' capasinda animasyon capadan
+               ILERI, 'son' capasinda GERI uzaniyor. Kafa modunda capa klibin icinde bir
+               nokta oldugu icin iki yon farkli miktarda yer birakir. */
+            var kullanSure = (veri.capa === "son") ? capaOfs : (hedefSure - capaOfs);
+            if (!(kullanSure > 0)) kullanSure = hedefSure;
+            if (animSure > 0 && kullanSure > 0.02 && animSure > kullanSure * 0.95) {
+                var kOl = (kullanSure * 0.9) / animSure;
+                try {
+                    vk = JSON.parse(JSON.stringify(veri));
+                    _yiginOlcekle(vk, kOl);
+                    sigdirildi++;
+                } catch (eKop) { vk = veri; }   // kopyalanamadiysa eski davranis
+            }
+            var t0Kaynak = _klipKaynakBas(ti);
+            /* UC ADAY. Onceden yalniz ikisi vardi (sekans, klip) ve Adobe belgelerinin
+               soyledigi KAYNAK MEDYA tabani (inPoint) hic denenmiyordu — kirpilmis
+               kliplerde ve resim ogelerinde dogru taban aday kumesinde YOKTU.
+               Her adayin klip araligi da tasiniyor: probe'un "tuttu" demesi ancak key
+               bu araliga dustuyse gecerli (yoksa geri okuma totoloji olur). */
+            var adaySekans = { baz: capaOfs + t0,       arAlt: t0,       arUst: t0 + hedefSure,       ad: "sekans" };
+            var adayKaynak = { baz: capaOfs + t0Kaynak, arAlt: t0Kaynak, arUst: t0Kaynak + hedefSure, ad: "kaynak" };
+            var adayKlip   = { baz: capaOfs,            arAlt: 0,        arUst: hedefSure,            ad: "klip"   };
+            var adaylar = (veri.taban === "klip")   ? [adayKlip, adayKaynak, adaySekans]
+                        : (veri.taban === "kaynak") ? [adayKaynak, adaySekans, adayKlip]
+                        :                             [adayKaynak, adaySekans, adayKlip];
+            // Zaman bicimi + taban KLIP BASINA BIR KEZ olculur (bkz. _stratejiOlc).
+            var strateji = { olculdu: false, baz: null, bicim: null, ad: "" };
+            var sayac = { kf: 0, st: 0, temiz: 0, strateji: "" };
+            var trIdx = -1, nid = "", basSn = _zamanSn(ti.start);
+            try { trIdx = parseInt(ti.parentTrackIndex, 10); } catch (eT) {}
+            try { nid = String(ti.nodeId); } catch (eNi) {}
+
+            /* IKI GECIS — SART.
+               1. gecis: eksik efektlerin HEPSI eklenir.
+               2. gecis: klip SIFIRDAN alinip parametreler yazilir.
+               Tek gecişte olmuyordu: QE ile eklenen efekt, elimizdeki (bayat) klip
+               nesnesinin components'inde gorunmuyor ve "eklendi ama okunamadi" cikiyordu. */
+            var varOlanIx = [];
+            for (j = 0; j < vk.bilesenler.length; j++) {
+                var b0 = vk.bilesenler[j];
+                if (_hizRampasiMi(b0.ad, b0.match)) continue;   // hiz rampasi uygulanmaz
+                /* Indeks takibi burada da sart: yigin ayni efektten IKI tane iceriyorsa
+                   (kullanicinin klibinde iki Transform vardi) hedefe de iki tane eklenmeli.
+                   Nesne karsilastirmasiyla ikincisi "zaten var" sanilip atlaniyordu. */
+                var ix0 = _bilesenIndexAra(ti, b0.match, b0.ad, varOlanIx);
+                if (ix0 >= 0) { varOlanIx.push(ix0); continue; }
+                var n0 = _qeEfektEkle(ti, b0.ad);
+                if (n0) nedenler[b0.ad || "?"] = n0;
+            }
+            var taze = _klipYenidenBul(trIdx, nid, basSn) || ti;
+
+            /* Kullanilmis bilesen indeksleri: ayni hedef bileseni iki kayit icin kullanma.
+               Klipte ayni efektten iki tane olabiliyor ve ikisi de ayni matchName'i tasiyor. */
+            var kullanilan = [];
+            for (j = 0; j < vk.bilesenler.length; j++) {
+                var b = vk.bilesenler[j];
+                if (_hizRampasiMi(b.ad, b.match)) continue;   // hiz rampasi uygulanmaz
+                var ix = _bilesenIndexAra(taze, b.match, b.ad, kullanilan);
+                if (ix < 0) {
+                    var ad0 = b.ad || "?";
+                    eksik.push(ad0 + " [" + (nedenler[ad0] || "eklendi ama okunamadi") + "]");
+                    continue;
+                }
+                kullanilan.push(ix);
+                /* fx ac/kapa: yalniz kaynakta KAPALI ise dokun (varsayilan acik; eski
+                   kayitlarda enabled tanimsiz -> geriye uyumlu). */
+                if (b.enabled === false) { try { taze.components[ix].enabled = false; } catch (eEn) {} }
+                /* capa HER ZAMAN kayittan gelir — kafa modunda da EZILMEZ.
+                   _paramlariYaz'da capa ZAMANSAL yerlesim icin DEGIL, "dinlenme/varis
+                   noktasi hangi keyframe" sorusu icin kullaniliyor (spatial taban ve D10
+                   olcek kapisi). Zamansal yerlesim zaten capaOfs ile ayri hallediliyor.
+                   Ezildiginde: cikis preset'i + kafa birlesiminde spatial taban ters
+                   seciliyor (klip kaynagin GITTIGI yere sicriyor) ve D10 kapisi hic
+                   acilmiyor (kucultulmus klip animasyon basinda %100'e firliyor). */
+                _paramlariYaz(taze.components[ix], b.p, adaylar, rapor, b.ad,
+                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa);
+            }
+            var ad = "?"; try { ad = String(ti.name); } catch (eN) {}
+            toplamYaz += sayac.kf; toplamStatik += sayac.st; toplamTemiz += sayac.temiz;
+            if (sayac.strateji) sonStrateji = sayac.strateji;
+
+            /* BASARI OLCUTU KEYFRAME — statik degil.
+               Eskiden `if (yaz)` idi ve `yaz` statikleri de sayiyordu: Transform tabanli
+               bir presette 8 statik yazilip SIFIR keyframe konsa bile klip "basarili"
+               sayiliyor, teshis dali hic calismiyor ve rapordaki "keyframe KONMADI"
+               satirlari kullaniciya HIC ulasmiyordu. */
+            /* BASARI TURE BAGLI: animasyonlu preset (kfSay>0) icin en az 1 KEYFRAME sart —
+               eski anti-maskeleme korunur (statik yazilsa bile key konmadiysa HATA, boylece
+               '8 statik yazildi, basarili' yalani uretilmez). Statik-only preset (kfSay==0)
+               icin en az 1 STATIK yeterli. */
+            var animasyonlu = (kfSay > 0);
+            var basarili = animasyonlu ? (sayac.kf > 0) : (sayac.st > 0);
+            if (basarili) {
+                ok++;
+                var uyari = [];
+                if (eksik.length) uyari.push("eklenemeyen efekt: " + eksik.join(", "));
+                // Kismi basari da gorunsun: 13 key'in 1'i kondugunda animasyon yine olmaz.
+                if (rapor.length) uyari.push(rapor.slice(0, 4).join(" ; "));
+                if (uyari.length) hata.push(ad + " -> " + uyari.join(" | "));
+            } else {
+                hata.push(ad + " -> " + (animasyonlu ? "HIC KEYFRAME KONMADI" : "HICBIR AYAR YAZILAMADI") +
+                          (sayac.st ? (" (" + sayac.st + " statik deger yazildi)") : "") +
+                          (eksik.length ? " | eksik: " + eksik.join(", ") : "") +
+                          (rapor.length ? " | SEBEP: " + rapor.slice(0, 4).join(" ; ") : ""));
+            }
+        }
+        if (!ok) {
+            if (!denenen && kafaDisi) return "err:Oynatma kafasi secili kliplerin hicbirinin uzerinde degil — kafayi klibin uzerine tasi";
+            if (!denenen && sesAtlandi) return "err:Yalniz ses klibi secili — video klibi sec";
+            return "err:" + (hata[0] || "uygulanamadi");
+        }
+        /* SAYILAR DURUST — "kacinda OLMADI" da yazilir.
+           Eskiden 20 klipten 1'i tutsa bile mesaj yesil "uygulandi" idi; kullanici eksigi
+           ancak render'dan sonra fark ediyordu (en pahali hata). Simdi orani basa koyuyoruz.
+           Sayilar GERCEK: her keyframe geri okunarak dogrulandi. Strateji etiketi de
+           yaziliyor (or. "time/kaynak") — bir daha bozulursa hangi bicim/tabanla
+           calisildigi tek bakista gorulur, tahmin turlarina donulmez. */
+        var basSat = "ok:" + ok + "/" + denenen + " klibe uygulandi";
+        if (ok < denenen) basSat += " — " + (denenen - ok) + " klipte OLMADI";
+        var notlar = [];
+        if (sesAtlandi) notlar.push(sesAtlandi + " ses klibi atlandi");
+        if (kafaDisi) notlar.push(kafaDisi + " klip kafanin disinda kaldi");
+        if (sigdirildi) notlar.push(sigdirildi + " klip kisa oldugu icin animasyon sigdirildi");
+        if (toplamTemiz) notlar.push(toplamTemiz + " eski keyframe temizlendi");
+        return basSat + " (" + toplamYaz + " keyframe" +
+               (toplamStatik ? (" + " + toplamStatik + " statik") : "") +
+               (sonStrateji ? (", " + sonStrateji) : "") + ")" +
+               (notlar.length ? " | " + notlar.join(" · ") : "") +
+               (hata.length ? " | UYARI: " + hata.join(" ; ") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
+}
+
+/* Panelden cagrilan giris noktasi. tur: simdilik yalniz "popin".
+   Yeni animasyon eklemek = yeni bir _xxx fonksiyonu + buraya bir satir. */
+function animasyonUygula(tur, sureSn) {
+    // Undo grubu: tek Ctrl+Z butun keyframe'leri geri alsin (bkz. presetYaz notu).
+    var _ug = false; try { app.beginUndoGroup("Yusufwrl Animasyon"); _ug = true; } catch (eug) {}
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var sec = null;
+        try { sec = seq.getSelection(); }
+        catch (eS) { return "err:Secim okunamadi: " + eS.toString(); }
+        if (!sec || !sec.length) return "err:Timeline'da klip secili degil. Bir klip sec ve tekrar bas.";
+
+        var sure = parseFloat(sureSn);
+        if (!(sure > 0)) sure = 0.4;
+        var ok = 0, hata = [], i, r, ad;
+        for (i = 0; i < sec.length; i++) {
+            r = "bilinmeyen animasyon: " + tur;
+            if (String(tur) === "popin") r = _popIn(sec[i], sure);
+            if (r === "ok") { ok++; continue; }
+            ad = "?";
+            try { ad = String(sec[i].name); } catch (eN) {}
+            hata.push(ad + " -> " + r);
+        }
+        if (!ok) return "err:" + (hata[0] || "uygulanamadi");
+        return "ok:" + ok + " klibe uygulandi" +
+               (hata.length ? " | " + hata.length + " klipte OLMADI: " + hata.join(" ; ") : "");
+    } catch (e) {
+        return "err:" + e.toString();
+    } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
 function _readFileUTF8(p) {
@@ -450,6 +2382,13 @@ function _dumpTrackItem(ti) {
 // TrackItem'in metnini olası her yoldan ayarlamayı dener; hangi yolun tuttuğunu döndürür.
 
 
+/* ⚠ ARTIK PANELDEN CAGRILMIYOR (v1.8.1). Oyun sesini kullanici Premiere'de ELLE tasiyor;
+   panel yalnizca yerlesim tablosunda "buraya tasi" der.
+   NEDEN: kullanicinin OBS kaydi COKLU-AKISLI (A1/A2/A3 = ayni dosyanin 1./2./3. akisi) ve
+   asagidaki 1. maddedeki kontrol bu durumda tasimayi HER SEFERINDE reddediyordu — yani
+   ozellik pratikte hic calismiyordu, sadece "Oyun sesi tasinamadi" hatasi uretiyordu.
+   SILINMEDI cunku TEK AKISLI kayitta (oyun sesi ayri dosyaya kaydedilirse) guvenle calisir;
+   kullanici OBS duzenini degistirirse app.js'ten yeniden baglanabilir. */
 /* BIR SES KANALINDAKI TUM KLIPLERI BASKA KANALA TASIR.
    Premiere'de "klibi baska kanala tasi" API'si YOKTUR; tek yol ayni projectItem'i hedef
    kanala overwriteClip ile koyup kaynaktakini silmektir. Bu bir KOPYALAMA oldugu icin

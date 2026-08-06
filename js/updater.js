@@ -30,7 +30,8 @@ function readJson(p, def) { try { return JSON.parse(stripBom(fs.readFileSync(p, 
  * Yeni bir kullanici dosyasi eklerken BESINI birden guncelle.
  */
 var KULLANICI_DOSYALARI = ["engine-root.txt", "diarize-device.txt", "sozluk.json",
-                           "kisiler.json", "assemblyai-key.txt"];
+                           "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
+                           "presetler.json", "presetler.bak.json"];
 
 /*
  * config.json listenin PARCASI DEGIL — yalnizca burada ve installer\kur.ps1'de korunur.

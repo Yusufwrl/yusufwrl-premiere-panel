@@ -104,7 +104,15 @@ html, body {
 /* ---------- FIELDS ---------- */
 .field { flex: 1; }
 .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
-.content > .field { margin-bottom: 13px; }
+/* Alanların altına boşluk — KAPSAYICIDAN BAĞIMSIZ.
+   Bu kural iki kez kırıldı: önce `.content > .field` idi, panel `.view` kapsayıcılarına
+   bölününce eşleşmez oldu; sonra `.view > .field` denendi, o da tutmadı çünkü "Süre aralığı"
+   alanı aslında `#genArea` içinde (girintiye bakıp `.view`'ün doğrudan çocuğu sanmıştım —
+   kapları saymak gerekiyormuş). Her iki turda da belirti aynıydı: "Altyazı Oluştur" düğmesi
+   üstündeki kutulara YAPIŞIK kalıyordu ve CSS eşleşmeyen kural için hata vermiyor.
+   Bu yüzden artık `>` (doğrudan çocuk) YOK: boşluk bütün `.field`lere veriliyor, yan yana
+   dizilen `.field-row` içindekilerde sıfırlanıyor (aşağıda). Kap değişirse yine çalışır. */
+.field { margin-bottom: 13px; }
 .select { position: relative; }
 .select::after { content: "▾"; position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
   color: var(--accent-2); pointer-events: none; font-size: 10px; }
@@ -254,7 +262,9 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 
 /* ---------- AUTOCUT ---------- */
 .field-row { display: flex; gap: 12px; }
-.field-row .field { flex: 1; }
+/* Satır içindeki alanlar YAN YANA — alt boşluk burada istenmiyor (satırın altında
+   fazladan aralık açardı); yatay aralığı `.field-row`un kendi `gap`i veriyor. */
+.field-row .field { flex: 1; margin-bottom: 0; }
 .ac-result { text-align: center; }
 .ac-summary { display: flex; gap: 12px; margin-bottom: 15px; }
 .ac-stat { flex: 1; background: rgba(16,13,24,.5); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 15px 10px; }
@@ -370,6 +380,47 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 
 /* ---------- SENKRON kartı ---------- */
 .grad-c { background: linear-gradient(135deg, #0ea5e9, #22d3ee); box-shadow: 0 6px 18px rgba(34,211,238,.35); }
+/* Ayarlar kartı — diğer üç araçtan görsel olarak ayrılsın diye nötr/gri ton. */
+.grad-d { background: linear-gradient(135deg, #64748b, #94a3b8); box-shadow: 0 6px 18px rgba(148,163,184,.30); }
+/* Preset kartı — diğer dördünden ayrışsın diye kendi rengi (amber). */
+.grad-e { background: linear-gradient(135deg, #f59e0b, #fbbf24); box-shadow: 0 6px 18px rgba(245,158,11,.35); }
+
+/* ---- Preset düğmeleri: kart görünümü ----
+   Sayı kadroya göre değişiyor, o yüzden sabit sütun değil auto-fill grid. */
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.preset-card {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  text-align: center; min-height: 64px; padding: 14px 24px; border-radius: 12px;
+  cursor: pointer; font-weight: 600; font-size: 13px; line-height: 1.3; color: var(--text);
+  background: linear-gradient(160deg, rgba(255,255,255,.065), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.10);
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.preset-card:hover { transform: translateY(-2px); border-color: rgba(245,158,11,.55);
+  background: linear-gradient(160deg, rgba(245,158,11,.16), rgba(245,158,11,.04)); }
+.preset-card:active { transform: translateY(0); }
+.preset-card:disabled { cursor: default; transform: none; }
+/* Henüz öğretilmemiş: kesikli çerçeve — tıklanabilir ama hazır olmadığı belli. */
+.preset-card.pc-bos { opacity: .55; border-style: dashed; }
+/* Yeniden adlandırma: kartın yerine geçen kutu — ayrı bir modal açmaya gerek yok. */
+.preset-card input.pc-ad {
+  width: 100%; background: rgba(0,0,0,.35); border: 1px solid rgba(245,158,11,.6);
+  border-radius: 8px; color: var(--text); font: inherit; text-align: center; padding: 6px;
+}
+
+/* Sağ tık menüsü (kaldır / yeniden adlandır). position:fixed — kart bir grid hücresinde
+   ve panel kaydırılabilir; absolute olsaydı kaydırınca menü karttan ayrılırdı. */
+.ctx-menu {
+  position: fixed; z-index: 999; min-width: 170px; padding: 6px;
+  background: #17171f; border: 1px solid rgba(255,255,255,.13); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.55);
+}
+.ctx-menu button {
+  display: block; width: 100%; text-align: left; padding: 8px 10px; border: 0;
+  background: transparent; color: var(--text); font-size: 13px; border-radius: 6px; cursor: pointer;
+}
+.ctx-menu button:hover { background: rgba(255,255,255,.08); }
+.ctx-menu button.tehlike:hover { background: rgba(239,68,68,.18); color: var(--bad); }
 .snk-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .snk-row:last-child { border-bottom: none; }
 .snk-kanal { flex: 0 0 34px; font-size: 12.5px; font-weight: 700; color: var(--accent-2); }

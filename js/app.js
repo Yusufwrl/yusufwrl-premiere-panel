@@ -9,6 +9,8 @@
 
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
     acRunning: false, acCancelled: false,   // AutoCut kendi bayrakları: altyazı işiyle karışmasın
+    cuesStale: false,            // AutoCut kesimi yapıldı ama altyazılar kesim ÖNCESİ zamanlarda
+
     singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "",
     dict: [], dictMap: null,     // karakter isimleri sözlüğü (Tofi/Moni/…) + arama tablosu
     channels: [],                // "ayrı kanal" modu: her ses kanalı bir kişi
@@ -201,6 +203,8 @@
   function modGorunumUygula() {
     // Kanal listesi yalnız "Herkes" kaynağında anlamlı.
     var kb = $("kanalBox"); if (kb) kb.hidden = (state.track !== "herkes");
+    // Stil satırları kaynağa bağlı: "Herkes"te karakter başına bir satır, tek kaynakta bir satır.
+    try { trackStilDoldur(); } catch (eTs) {}
     $("result").hidden = !allCues().length;
   }
   var trackBtns = document.querySelectorAll("#segTrack .seg-btn");
@@ -220,7 +224,22 @@
   // Kaydedilmiş mod/track'i geri yükle (buton tıklaması ile — panelleri de senkronlar)
   function restoreSegs() {
     // mod seçici kaldırıldı; yalnız kaynak ses hatırlanır
-    var st = lsGet("track", null); if (st) { var bt = document.querySelector('#segTrack .seg-btn[data-track="' + st + '"]'); if (bt) bt.click(); }
+    var st = lsGet("track", null);
+    var bt = st ? document.querySelector('#segTrack .seg-btn[data-track="' + st + '"]') : null;
+    /* ESKİ SEÇİM MİGRASYONU. A3 ("2") ve A1+A2 ("mix") kaldırıldı. Kayıtlı değer düğmeyi
+       bulamayınca eskiden `if (bt)` sessizce atlıyordu: panel uyarısız A1'e düşüyor, kullanıcı
+       "her zamanki ayarım duruyor" sanıp üretime basıyor ve arkadaşların sesi hiç yazıya
+       dökülmüyordu — bunu ancak 20-30 dakikalık GPU işinin SONUNDA fark ediyordu.
+       Artık değer temizlenir ve kullanıcıya ne olduğu söylenir. */
+    if (st && !bt) {
+      logLine("Kaynak Ses seçimin (" + (st === "mix" ? "A1+A2" : "A" + (parseInt(st, 10) + 1)) +
+              ") kaldırıldı — A1'e alındı. Arkadaşların da yazıya dökülsün istiyorsan “Herkes” seç.");
+      lsSet("track", "0");
+      bt = document.querySelector('#segTrack .seg-btn[data-track="0"]');
+    }
+    /* bt.click() burada isTrusted=false üretir; düğme dinleyicisindeki "Herkes'e ilk geçişte
+       otomatik tara" bloğu ev.isTrusted istediği için tetiklenmez — mevcut yarış koruması bozulmaz. */
+    if (bt) bt.click();
   }
 
   // ---------- kart menüsü navigasyonu ----------
@@ -228,12 +247,17 @@
     var all = document.querySelectorAll(".view");
     for (var i = 0; i < all.length; i++) { all[i].classList.remove("active"); all[i].setAttribute("hidden", ""); }
     var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
-           : name === "senkron" ? "viewSenkron" : "viewHome";
+           : name === "senkron" ? "viewSenkron" : name === "ayarlar" ? "viewAyarlar"
+           : name === "preset" ? "viewPreset" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
     // Süre aralığı menüleri aktif sekansın uzunluğuna göre — sekans değişmiş olabilir
     if (name === "altyazi") { try { refreshRangeOptions(); } catch (e) {} }
+    /* Preset listesi Premiere'in efekt kataloğuna bağlı: kullanıcı arada yeni preset
+       kaydetmiş olabilir, görünüm her açıldığında tazelenir. async — hata FIRLATMAZ,
+       promise'i reddeder; düz try/catch yakalamaz, o yüzden .catch ile susturuluyor. */
+    if (name === "preset") { try { efektleriYukle()["catch"](function () {}); } catch (e) {} }
     /* AutoCut kanal listesi de sekansa bağlı: görünüm her açıldığında tazelenir, yoksa
        kullanıcı Senkron'la yeni kanallar ekledikten sonra eski listeyi görüyor.
        async: hata FIRLATMAZ, promise'i reddeder — düz try/catch yakalayamaz. */
@@ -463,6 +487,616 @@
     });
   }
 
+  /* ---------- TOFI MONI VİDEO MODU (vurucu cümle seçimi) ----------
+     Kutu işaretliyken altyazı SEYRELİR: ilk 1 dakika herkesin konuşması tam yazılır (cümle
+     bitmediyse 1 dakikayı aşar), sonrasında ~20 saniyede bir yalnız o aralığın en vurucu
+     cümlesi yazılır. Seçimi js/vurucu.js yapıyor ve o modül Claude API'sine gidiyor —
+     PANELİN İNTERNETE ÇIKTIĞI TEK YER BURASI. Kutu kapalıyken hiçbir istek gönderilmez.
+     Yerel sinyallerle (ses zirvesi, ünlem, konuşma hızı) denemedik değil: kullanıcının kendi
+     kaydında ölçüldü ve zayıf çıktı — ünlemli/ünlemsiz cümlede tepe ses farkı 0.1 dB,
+     pencerelerin %39'unda hiç ünlem yok, konuşma hızı ters işaretli. */
+  var VUR = null;
+  function vurucuAcik() { var c = $("chkVurucu"); return !!(c && c.checked); }
+
+  function wireVurucu() {
+    var c = $("chkVurucu"); if (!c) return;
+    var ay = $("vurucuAyar"), not = $("vurucuAnahtarNot");
+    function gorunum() {
+      if (ay) ay.hidden = !c.checked;
+      if (!not) return;
+      var varMi = false;
+      try { varMi = !!(CEP && VUR && VUR.anahtarVarMi(extRoot)); } catch (e) { varMi = false; }
+      if (varMi) { not.textContent = "✓ Yapay zekâ anahtarı kayıtlı."; not.style.color = "var(--good)"; }
+      else {
+        not.textContent = "⚠ Yapay zekâ anahtarı yok — Ayarlar'dan ekle, yoksa bu mod çalışmaz " +
+                          "(altyazı tam hâliyle eklenir).";
+        not.style.color = "var(--warn)";
+      }
+    }
+    c.checked = (lsGet("vurucu", "0") === "1");
+    c.addEventListener("change", function () { lsSet("vurucu", c.checked ? "1" : "0"); gorunum(); });
+    gorunum();
+  }
+
+  /* API anahtarı kutusu (Ayarlar). Anahtarın KENDİSİ hiç ekrana yazılmaz — panel açıkken
+     ekranda duran bir API anahtarı gereksiz risk (ekran kaydı, omuz üstü). Yalnız "kayıtlı"
+     bilgisi ve son 4 hane gösterilir. */
+  function wireApiKey() {
+    var inp = $("apiKeyText"), sv = $("apiKeySave"), cl = $("apiKeyClear"), st = $("apiKeyStatus");
+    if (!inp || !sv) return;
+    function durum(msg, renk) { if (st) { st.textContent = msg || ""; st.style.color = renk || "var(--muted)"; } }
+    function tazele() {
+      if (!CEP || !VUR) { durum("önizleme modu"); return; }
+      var k = "";
+      try { k = VUR.anahtarOku(extRoot); } catch (e) { k = ""; }
+      if (k) { inp.placeholder = "kayıtlı (••••" + k.slice(-4) + ") — değiştirmek için yeni anahtar yaz"; durum("✓ kayıtlı", "var(--good)"); }
+      else { inp.placeholder = "sk-ant-…"; durum("anahtar yok", "var(--warn)"); }
+    }
+    sv.addEventListener("click", function () {
+      if (!CEP || !VUR) { durum("Premiere'de çalışır", "var(--warn)"); return; }
+      var v = String(inp.value || "").trim();
+      if (!v) { durum("boş — yazılmadı", "var(--warn)"); return; }
+      try { VUR.anahtarYaz(extRoot, v); inp.value = ""; tazele(); durum("✓ kaydedildi", "var(--good)"); }
+      catch (e) { durum("yazılamadı: " + (e.message || e), "var(--bad)"); }
+    });
+    if (cl) cl.addEventListener("click", function () {
+      if (!CEP || !VUR) return;
+      try { VUR.anahtarYaz(extRoot, ""); } catch (e) {}
+      inp.value = ""; tazele(); durum("silindi");
+    });
+    tazele();
+  }
+
+  /* PRESET BÖLÜMÜ — #viewPreset (host.jsx: efektListesiJSON · efektUygula · animasyonUygula).
+     İki ayrı yol var, ikisi de burada:
+       1. Premiere'in efekt/preset listesi — kullanıcı kendi preset'lerini BİR KEZ işaretler,
+          düğme olurlar. **Liste KLASÖR BİLGİSİ VERMİYOR** (`getVideoEffectList` düz bir
+          dizi), yani "yusufwrl bin'indekiler" diye otomatik süzmek MÜMKÜN DEĞİL — bin'i
+          kullanıcı bir kez seçerek söylüyor, panel `preset.secili`de hatırlıyor.
+       2. Panelin kendi yazdığı animasyon (Pop In) — preset dosyasından bağımsız,
+          keyframe'leri host.jsx üretiyor, her zaman çalışır. */
+  var _efektler = [];        // ham liste — DİZİDEKİ SIRA host'a gönderilen anahtar
+  var _presetSecili = [];    // kullanıcının düğmeye çıkardığı adlar (localStorage)
+
+  /* İLK AÇILIŞ VARSAYILANI — kullanıcının Premiere'deki "Yusufwrl" bin'indeki preset
+     adları (kullanıcı bin'in ekran görüntüsünü verdi, 6 Ağustos 2026). Bin sırası korundu.
+     Bu adlar Premiere'in efekt listesinde YOKSA düğmeler devre dışı + "(listede yok)"
+     görünür — yani preset'lerin API'ye görünüp görünmediği sorusunu da bu liste cevaplar. */
+  var PRESET_VARSAYILAN = [
+    "Aşağıya Pop Out", "Cinematic Border In", "Cinematic Border Out",
+    "Pop In 1", "Pop In RGB", "Yukarıya Pop In", "Zoom In Center", "Zoom Out Center"
+  ];
+  /* "Hiç yazılmamış" ile "boşaltılmış" AYRI: kullanıcı bütün düğmeleri kaldırdıysa
+     varsayılanlar geri gelmemeli, yoksa sildiği düğmeler her açılışta dirilir. */
+  function presetSeciliOku() {
+    var ham = lsGet("preset.secili", "");
+    if (!ham) return PRESET_VARSAYILAN.slice(0);
+    try { var a = JSON.parse(ham); return (a && a.length) ? a : []; }
+    catch (e) { return PRESET_VARSAYILAN.slice(0); }
+  }
+  function presetSeciliYaz() { lsSet("preset.secili", JSON.stringify(_presetSecili)); }
+  function efektSira(ad) {
+    for (var i = 0; i < _efektler.length; i++) if (_efektler[i] === ad) return i;
+    return -1;
+  }
+  function durumYaz(msg, renk) {
+    var st = $("animStatus");
+    if (st) { st.textContent = msg || ""; st.style.color = renk || "var(--muted)"; }
+  }
+  /* Host'tan gelen sonucu tek yerden yorumla: "ok:" ile başlamayan her şey hatadır.
+     Host kısmi başarıyı da "ok:" içinde bildiriyor ("N klipte OLMADI"), o yüzden mesajın
+     TAMAMI gösteriliyor — yarısı uygulanmış bir işi "başarılı" diye yutmak en kötüsü. */
+  function sonucGoster(etiket, r) {
+    logLine(etiket + ": " + r);
+    if (r.indexOf("ok:") !== 0) { durumYaz(r.replace(/^err:/, ""), "var(--bad)"); return; }
+    /* KISMİ BAŞARI YEŞİL DEĞİL SARI. Host "3/20 klibe uygulandı — 17 klipte OLMADI" diyor;
+       bunu yeşil göstermek, render'dan sonra fark edilen en pahalı hataya davetiye. */
+    var govde = r.slice(3);
+    var kismi = (govde.indexOf("OLMADI") !== -1) || (govde.indexOf("UYARI") !== -1) ||
+                (govde.indexOf("öğretilmiş kayıt YOK") !== -1) ||
+                /* Atlanan klipler de YEŞİL görünmemeli: host "kafanin disinda"/"atlandi"
+                   diyen klipleri paydadan düşürüyor, yani "1/1 uygulandı" yazıp 4 klibi
+                   sessizce atlayabilir. */
+                (govde.indexOf("kafanin disinda") !== -1) || (govde.indexOf("atlandi") !== -1);
+    durumYaz((kismi ? "⚠ " : "✓ ") + govde, kismi ? "var(--warn)" : "var(--good)");
+  }
+  /* PRESET ADI → PANELİN KENDİ ANİMASYONU.
+     ÖLÇÜLDÜ (6 Ağustos 2026): kullanıcının preset'leri Premiere'in script kataloglarının
+     HİÇBİRİNDE yok — `getVideoEffectList` 148 öğe döndürdü ve hepsi yerleşik efekt.
+     Yani preset dosyalarını uygulamanın yolu kapalı; kullanıcının her preset'i tek tek
+     panel animasyonu olarak host.jsx'te YENİDEN YAZILIYOR. Bu tablo o eşlemedir.
+     Yeni bir tanesini yazınca buraya bir satır eklenir. */
+  var PRESET_ANIM = { "Pop In 1": "popin" };
+
+  /* ÖĞRENİLMİŞ YIĞIN — preset'in bir klipten okunmuş hali (bileşenler + parametreler +
+     keyframe'ler). Preset dosyaları script'e görünmediği ve panel Effects panelinden
+     sürükleme yapamadığı için TEK gerçek yol bu: kullanıcı bir kez elle uygular, panel
+     klipten okur, sonra sınırsız tekrarlar. */
+  /* ÖĞRENİLMİŞ YIĞINLAR DOSYADA — localStorage'da DEĞİL.
+     Sebep: her preset için kullanıcı Premiere'de elle bir sürükleme yapıyor; bu veri
+     pahalı ve BAŞKA KAYNAĞI YOK. localStorage CEF'in önbelleğinde durur (panel klasöründe
+     değil), yani kullanıcı dosyaları korumasının dışında kalır ve Premiere sürüm
+     yükseltmesinde/önbellek temizliğinde sessizce gider. `presetler.json` ise beş listede
+     korunuyor (bkz. CLAUDE.md — Kullanıcı dosyaları). */
+  var _presetYigin = null;
+  var _presetKurtarildi = "";   // yedekten kurtarıldıysa açılışta kullanıcıya SÖYLENİR
+  function presetDosyaYolu() { return path.join(extRoot, "presetler.json"); }
+  function presetYedekYolu() { return path.join(extRoot, "presetler.bak.json"); }
+  /* Tek dosyayı oku ve DOĞRULA. null = kullanılamaz (yok/boş/bozuk/yanlış tip). */
+  function presetDosyaOku(p) {
+    try {
+      if (!fs.existsSync(p)) return null;
+      // BOM temizliği (sozluk.js/kisiler.js'te olan koruma burada eksikti)
+      var ham = String(fs.readFileSync(p, "utf8")).replace(/^﻿/, "");
+      if (!ham) return null;
+      var j = JSON.parse(ham);
+      /* TİP DOĞRULAMASI ŞART: `JSON.parse("[]") || {}` diziyi geçiriyordu. Diziye adlı
+         özellik eklemek yasal ama JSON.stringify onları ATIYOR — yazma "başarılı"
+         döner, dosyada hâlâ `[]` kalır, panel "öğrenildi" der, açılışta hiçbir şey yok. */
+      if (j && typeof j === "object" && Object.prototype.toString.call(j) !== "[object Array]") return j;
+      return null;
+    } catch (e) { return null; }
+  }
+  function presetYiginlar() {
+    if (_presetYigin) return _presetYigin;
+    _presetYigin = {};
+    if (!CEP) return _presetYigin;
+    var ana = presetDosyaOku(presetDosyaYolu());
+    if (ana) {
+      _presetYigin = ana;
+    } else {
+      /* Ana dosya yok/bozuk → YEDEKTEN kurtar. Sessizce boş başlamak, tek bir yeni
+         öğretmeyle kalan presetleri kalıcı silmek demekti. */
+      /* Kurtarma adayları sırayla: .bak → .bak.yeni → .tmp. Son ikisi yarıda kalmış bir
+         yazmadan artakalan ama SAĞLAM olabilen dosyalar (bkz. presetYiginlarYaz). */
+      var yed = presetDosyaOku(presetYedekYolu()) ||
+                presetDosyaOku(presetYedekYolu() + ".yeni") ||
+                presetDosyaOku(presetDosyaYolu() + ".tmp");
+      if (yed) {
+        _presetYigin = yed;
+        _presetKurtarildi = "presetler.json okunamadı — YEDEKTEN kurtarıldı (" +
+                            Object.keys(yed).length + " preset).";
+        logLine(_presetKurtarildi);
+      } else if (fs.existsSync(presetDosyaYolu())) {
+        logLine("presetler.json beklenen biçimde değil ve yedek de yok — sıfırdan başlanıyor.");
+      }
+    }
+    /* localStorage'da kalmış eski kayıtları BİR KEZ taşı — feature ilk sürümünde oraya
+       yazıyordu. ÖNEK TARAMASI ŞART: eskiden yalnız 8 varsayılan ad taranıyordu, oysa
+       kullanıcı serbest ad ekleyebiliyor ve varsayılanı yeniden adlandırabiliyor —
+       o kayıtlar sessizce kayboluyordu. */
+    var tasindi = 0, bozuk = 0, k, anahtar, ad, eski;
+    try {
+      for (k = 0; k < localStorage.length; k++) {
+        anahtar = localStorage.key(k);
+        if (!anahtar || anahtar.indexOf("yw.presetYigin.") !== 0) continue;
+        ad = anahtar.slice("yw.presetYigin.".length);
+        if (!ad || _presetYigin[ad]) continue;
+        eski = localStorage.getItem(anahtar);
+        if (!eski) continue;
+        try { _presetYigin[ad] = JSON.parse(eski); tasindi++; } catch (e2) { bozuk++; }
+      }
+    } catch (e3) {}
+    if (tasindi) { presetYiginlarYaz(); logLine(tasindi + " öğrenilmiş preset dosyaya taşındı."); }
+    if (bozuk) logLine(bozuk + " eski preset kaydı okunamadı (bozuk JSON).");
+    return _presetYigin;
+  }
+  function presetYiginlarYaz() {
+    if (!CEP) return false;
+    /* ATOMİK YAZMA + YEDEK. presetler.json panelin EN PAHALI verisi: her preset için
+       Premiere'de elle bir sürükleme yaptın, başka kaynağı YOK. Eskiden tek hamlede
+       üzerine yazılıyordu — yazma yarıda kalırsa (OneDrive kilidi, Premiere çökmesi)
+       dosya boşalıyor, panel hiçbir uyarı vermeden hepsini "öğretilmemiş" gösteriyor ve
+       tek bir yeni öğretme kalanları kalıcı siliyordu.
+       Sıra: önce .tmp'ye yaz → mevcut dosyayı .bak'a al → tmp'yi rename ile üzerine koy. */
+    var p = presetDosyaYolu(), tmp = p + ".tmp", bak = presetYedekYolu(), bakYeni = bak + ".yeni";
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(_presetYigin), "utf8");
+      if (fs.existsSync(p)) {
+        /* SIRA KRİTİK: eski dosyayı önce GEÇİCİ bir yedeğe al, sonra ANA dosyayı kur,
+           yedeği en son yerine koy. Böylece hiçbir anda "ne ana dosya ne yedek" durumu
+           oluşmaz. (Önceki sıralamada bak silinip rename patlarsa ikisi birden gidebiliyordu
+           — OneDrive kilidi tam bu tür kısmi başarıları üretir.) */
+        try { if (fs.existsSync(bakYeni)) fs.unlinkSync(bakYeni); } catch (eY0) {}
+        fs.renameSync(p, bakYeni);
+        fs.renameSync(tmp, p);
+        try { if (fs.existsSync(bak)) fs.unlinkSync(bak); } catch (eB0) {}
+        try { fs.renameSync(bakYeni, bak); } catch (eB1) {}
+      } else {
+        fs.renameSync(tmp, p);
+      }
+      return true;
+    } catch (e) {
+      /* GERİ AL: ana dosya taşındıktan sonra patlandıysa eskisini YERİNE KOY. Bu olmadan,
+         henüz .bak oluşmamışken (temiz kurulumdan sonraki İLK yazma) veri yalnız
+         .bak.yeni + .tmp içinde kalıyor ve panel sessizce sıfırdan başlıyordu. */
+      try { if (!fs.existsSync(p) && fs.existsSync(bakYeni)) fs.renameSync(bakYeni, p); } catch (eG) {}
+      /* tmp yalnız ana dosya SAĞLAMSA silinir — ana dosya yoksa elimizdeki en yeni
+         sağlam veri odur, silmek kalıcı kayıp olurdu. */
+      try { if (fs.existsSync(p) && fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (eT) {}
+      logLine("presetler.json YAZILAMADI: " + (e.message || e));
+      return false;
+    }
+  }
+  function presetYiginOku(ad) {
+    var y = presetYiginlar()[ad];
+    return y ? JSON.stringify(y) : "";
+  }
+  function presetOgrenilmis(ad) { return !!presetYiginlar()[ad]; }
+  /* Kartlar <div> — `disabled` özelliği yok. Çift tıkta iki kez uygulanmasın diye bayrak
+     kullanılıyor; kartın kendisi de tıklamaya kapatılıyor. */
+  var _presetMesgul = false;
+
+  async function presetOgren(ad, kart) {
+    /* ÜZERİNE YAZMA ONAYI — kayıt PAHALI (elle sürükleme) ve geri dönüşü yok.
+       Yanlış klip seçiliyken öğretmek çalışan bir preset'i sessizce siliyordu. */
+    if (presetOgrenilmis(ad)) {
+      var devam = await uiConfirm("“" + ad + "” zaten öğretilmiş.\n\nTimeline'da SEÇİLİ klipten yeniden öğrenilsin mi?\nEski kayıt silinir.", "Yeniden öğret");
+      if (!devam) { durumYaz("vazgeçildi"); return; }
+    }
+    _presetMesgul = true;
+    if (kart) kart.style.pointerEvents = "none";
+    durumYaz("“" + ad + "” öğreniliyor…");
+    /* try/FINALLY ŞART: kilit ve pointerEvents temizliği eskiden try'ın DIŞINDAYDI ve
+       aradaki bir erken `return` ikisini de atlıyordu. _presetMesgul açık kalınca
+       presetUygulaAd girişteki `if (_presetMesgul) return;` ile SESSİZCE dönüyor —
+       panel bir daha hiçbir preset uygulamıyordu ("basıyorum bir şey olmuyor"). */
+    try {
+      var d = JSON.parse(String(await evalES("presetOkuJSON()")));
+      if (!d || !d.ok) { durumYaz((d && d.hata) ? d.hata : "klip okunamadı", "var(--bad)"); return; }
+
+      /* Keyframe sayımı YAZMADAN ÖNCE. Eskiden önce diske yazılıyor, uyarı sonra
+         veriliyordu: keyframe'siz bir okuma ÇALIŞAN kaydı hem bellekte hem diskte
+         eziyordu ve geri dönüş yoktu. */
+      var kf = 0, i, j;
+      for (i = 0; i < d.bilesenler.length; i++)
+        for (j = 0; j < (d.bilesenler[i].p || []).length; j++)
+          if (d.bilesenler[i].p[j].kf) kf++;
+      var st = d.stSay || 0;   // uygulanabilir statik ayar (renk/blur/crop/blend — animasyonsuz preset)
+
+      logLine("Öğrenildi: " + ad + " ← " + d.kaynak + " · " + d.bilesenler.length +
+              " bileşen · " + kf + " animasyonlu parametre · " + st + " statik ayar · TOPLAM " +
+              (d.keySayi || 0) + " keyframe · eğri: " + (d.egrili || 0) + " parametre / " +
+              (d.ornSay || 0) + " nokta · zaman tabanı: " + (d.taban || "sekans") +
+              (d.olcum ? " (" + d.olcum + ")" : ""));
+
+      /* Hem keyframe hem statik BOŞ ise HİÇ KAYDETME (yanlış klip seçilmiş olabilir):
+         eski kayıt varsa onu korur (ezmez); yoksa boş/uygulanamaz bir yığını diske yazıp
+         "öğrenilmiş görünen ama uygulanamayan buton" bırakmaz. */
+      if (!kf && !st) {
+        durumYaz(presetOgrenilmis(ad)
+          ? "⚠ HİÇ keyframe/ayar okunamadı — ESKİ KAYIT KORUNDU. Preset'in uygulandığı klibi seç."
+          : "⚠ Bu klipte uygulanabilir keyframe/ayar yok — preset gerçekten bu klibe uygulandı mı? (Kaydedilmedi)",
+          "var(--warn)");
+        return;
+      }
+      /* `taban` ve `capa` ŞART: biri API'nin zaman tabanı ölçümü, diğeri animasyonun
+         klip başına mı sonuna mı yapışacağı (bkz. presetOkuJSON). */
+      var yiginlar = presetYiginlar(), onceki = yiginlar[ad];
+      yiginlar[ad] = { bilesenler: d.bilesenler,
+                       taban: d.taban || "sekans", capa: d.capa || "bas" };
+      if (!presetYiginlarYaz()) {
+        // Disk yazılamadıysa BELLEĞİ DE geri al — yoksa bozuk nesne sonradan diske işlenir.
+        if (onceki) yiginlar[ad] = onceki; else delete yiginlar[ad];
+        durumYaz("DİSKE YAZILAMADI — kayıt yapılmadı", "var(--bad)");
+        return;
+      }
+      var basarili = (kf || st);
+      var ozet = kf ? ((d.keySayi || 0) + " keyframe") : (st + " statik ayar");
+      var hizNot = d.hizAtlandi ? " · hız rampası kopyalanmadı (bilerek)" : "";
+      var mesaj, renk;
+      if (basarili && d.okunamayan) {
+        // Eksik yakalama artık SESSİZ değil — kullanıcı eksik preseti onlarca klibe uygulamasın.
+        mesaj = "✓ “" + ad + "” öğrenildi ama " + d.okunamayan +
+                " keyframe OKUNAMADI (eksik olabilir)" + hizNot;
+        renk = "var(--warn)";
+      } else if (basarili) {
+        /* Eğri ölçümü ayrıca yazılır: yavaşlama/hızlanma ancak örnekleme yapıldıysa taşınır
+           (bkz. host.jsx _egriOrnekle). 0 ise animasyon düz kopyalanacak demektir. */
+        mesaj = "✓ “" + ad + "” öğrenildi (" + d.kaynak + " · " + ozet +
+                (d.egrili ? (" · eğri alındı: " + d.egrili + " parametre") : " · eğri ALINAMADI (düz kopyalanır)") +
+                hizNot + ") — artık karta basıp uygulayabilirsin";
+        renk = "var(--good)";
+      } else {
+        mesaj = "⚠ “" + ad + "” kaydedildi ama uygulanacak bir şey bulunamadı — preset gerçekten o klibe uygulanmış mı?";
+        renk = "var(--warn)";
+      }
+      durumYaz(mesaj, renk);
+      presetBtnlarCiz();
+    } catch (e) {
+      durumYaz("hata: " + (e.message || e), "var(--bad)");
+    } finally {
+      _presetMesgul = false;
+      if (kart) kart.style.pointerEvents = "";
+    }
+  }
+
+  /* kafaya=true: animasyon klibin başına değil OYNATMA KAFASININ olduğu ana yapışır
+     (gameplay klibinin ortasına zoom punch). Sağ tık menüsünden geliyor. */
+  async function presetUygulaAd(ad, kart, kafaya) {
+    if (_presetMesgul) return;
+    if (!CEP) { durumYaz("Premiere'de çalışır", "var(--warn)"); return; }
+
+    var yigin = presetYiginOku(ad);
+    var sira = efektSira(ad);
+    var anim = PRESET_ANIM[ad] || "";
+    if (!yigin && sira < 0 && !anim) {
+      /* Boş karta basmak artık ÇIKMAZ değil: doğrudan öğretmeyi teklif et.
+         (Eski akışta "üstteki kutuyu işaretle" deniyordu; kutu 8 kartlık gridin altında
+         ve dar dock'ta ekran dışında kalabiliyordu.) */
+      var ogrenelim = await uiConfirm("“" + ad + "” henüz boş.\n\nTimeline'da SEÇİLİ klipten öğrenilsin mi?\n(Preset'i o klibe önce Premiere'de elle uygulamış olmalısın.)", "Öğret");
+      if (ogrenelim) await presetOgren(ad, kart);
+      else durumYaz("“" + ad + "” henüz öğretilmedi — karta sağ tık → “Bu klipten öğret”", "var(--warn)");
+      return;
+    }
+    _presetMesgul = true;
+    if (kart) kart.style.pointerEvents = "none";
+    durumYaz(ad + " uygulanıyor…");
+    var yol = "";
+    try {
+      var r;
+      if (yigin) {
+        /* Yığın DOSYADAN geçiyor, evalScript string literalinden DEĞİL: metin uzun ve
+           Türkçe karakterli, gömülürse kırılır (proje geneli kural).
+           Geçici dosya PANEL klasörüne yazılır, motorun work'üne DEĞİL: motor kurulu
+           değilse preset özelliği motorla ilgisiz bir hatayla patlıyordu. */
+        yol = path.join(extRoot, "preset_gecici.json");
+        fs.writeFileSync(yol, yigin, "utf8");
+        r = String(await evalES('presetYaz("' + esPath(yol) + '", "' + (kafaya ? "1" : "0") + '")'));
+      } else if (sira >= 0) {
+        r = String(await evalES("efektUygula(" + sira + ")"));
+        // Hangi yolun çalıştığı SÖYLENİR: öğretilmiş kayıt yokken "başarılı" demek yanıltıcı.
+        if (r.indexOf("ok:") === 0) r += " | (Premiere'in hazır efekti — öğretilmiş kayıt YOK)";
+      } else {
+        r = String(await evalES('animasyonUygula("' + anim + '", 0.4)'));
+        if (r.indexOf("ok:") === 0) r += " | (panelin kendi animasyonu — öğretilmiş kayıt YOK)";
+      }
+      sonucGoster(ad, r);
+    } catch (e) {
+      durumYaz("hata: " + (e.message || e), "var(--bad)");
+    } finally {
+      // finally ŞART — bkz. presetOgren'deki not: kilit açık kalırsa panel kilitleniyor.
+      if (yol) { try { fs.unlinkSync(yol); } catch (eU) {} }
+      _presetMesgul = false;
+      if (kart) kart.style.pointerEvents = "";
+    }
+  }
+
+  /* PRESET'İN TERSİNİ ÜRET (giriş → çıkış).
+     Bin'indeki her animasyonun iki hali var (Pop In / Pop Out, Zoom In / Zoom Out) ve şu an
+     her biri için ayrı ayrı klibe sürükleyip ayrı ayrı öğretmek gerekiyor — aynı iş iki kez.
+     Oysa çıkış, girişin zamanda tersinden başka bir şey değil.
+     host.jsx'e HİÇ dokunulmuyor; matematik zaten uyumlu: presetYaz capa="son" iken
+     capaOfs=hedefSüre kullanıyor ve _paramlariYaz spatial tabanı capa="son" iken kw[0].v'den
+     alıyor — negatiflenmiş listede kw[0] tam olarak animasyonun DURAĞAN hali.
+     Orijinalin ÜSTÜNE ASLA yazılmaz: ters yığın bozuk çıkarsa kullanıcı onu orijinal sanıp
+     uygulayabilirdi. */
+  function presetTersiUret(ad) {
+    var y = presetYiginlar()[ad];
+    if (!y) { durumYaz("“" + ad + "” önce öğretilmeli", "var(--warn)"); return; }
+    var yeniAd = ad + " (çıkış)";
+    if (_presetSecili.indexOf(yeniAd) !== -1) { durumYaz("“" + yeniAd + "” zaten var", "var(--warn)"); return; }
+    var kopya;
+    try { kopya = JSON.parse(JSON.stringify(y)); }
+    catch (e) { durumYaz("kopyalanamadı: " + (e.message || e), "var(--bad)"); return; }
+
+    var bi, pi, q, l, ki, plist, sayi = 0;
+    for (bi = 0; bi < (kopya.bilesenler || []).length; bi++) {
+      plist = kopya.bilesenler[bi].p || [];
+      for (pi = 0; pi < plist.length; pi++) {
+        for (q = 0; q < 2; q++) {
+          l = q ? plist[pi].s : plist[pi].k;
+          if (!l || !l.length) continue;
+          for (ki = 0; ki < l.length; ki++) { l[ki].t = -l[ki].t; sayi++; }
+          // Zamanlar negatiflendi → sıra TERSİNE döndü; artan zamana göre yeniden diz.
+          l.sort(function (a, b) { return a.t - b.t; });
+        }
+      }
+    }
+    if (!sayi) { durumYaz("“" + ad + "” animasyon içermiyor — tersi üretilemez", "var(--warn)"); return; }
+    kopya.capa = (y.capa === "son") ? "bas" : "son";
+
+    var yiginlar = presetYiginlar();
+    yiginlar[yeniAd] = kopya;
+    if (!presetYiginlarYaz()) { delete yiginlar[yeniAd]; durumYaz("DİSKE YAZILAMADI", "var(--bad)"); return; }
+    if (_presetSecili.indexOf(yeniAd) === -1) { _presetSecili.push(yeniAd); presetSeciliYaz(); }
+    presetBtnlarCiz();
+    durumYaz("✓ “" + yeniAd + "” üretildi — bir klipte deneyip doğrula", "var(--good)");
+  }
+
+  /* Sıralama HER ZAMAN alfabetik (Türkçe): kullanıcı kartın yerini ezberliyor, ekleme
+     yaptıkça sıra oynarsa yanlış karta basar. */
+  function presetSirala() {
+    _presetSecili.sort(function (a, b) {
+      try { return String(a).localeCompare(String(b), "tr"); }
+      catch (e) { return a < b ? -1 : (a > b ? 1 : 0); }
+    });
+  }
+
+  async function presetKaldir(ad) {
+    /* ONAY ŞART: menüde "Yeniden adlandır"ın hemen altında ve öğretilmiş yığını da siliyor
+       — o yığın elle yapılmış bir sürüklemenin tek kaydı. */
+    if (presetOgrenilmis(ad)) {
+      var em = await uiConfirm("“" + ad + "” kaldırılsın mı?\n\nÖĞRETİLMİŞ kaydı da silinir; yeniden öğretmen gerekir.", "Kaldır");
+      if (!em) { durumYaz("vazgeçildi"); return; }
+    }
+    var k = _presetSecili.indexOf(ad);
+    if (k !== -1) _presetSecili.splice(k, 1);
+    presetSeciliYaz();
+    // Öğrenilmiş yığın da gitsin — adı olmayan yığın dosyada çöp olarak birikirdi.
+    var y = presetYiginlar();
+    if (y[ad]) { delete y[ad]; presetYiginlarYaz(); }
+    presetBtnlarCiz();
+    durumYaz("“" + ad + "” kaldırıldı");
+  }
+
+  function presetAdDegistir(eski, yeni) {
+    yeni = String(yeni || "").trim();
+    if (!yeni || yeni === eski) { presetBtnlarCiz(); return; }
+    if (_presetSecili.indexOf(yeni) !== -1) {
+      durumYaz("“" + yeni + "” zaten var", "var(--warn)"); presetBtnlarCiz(); return;
+    }
+    var k = _presetSecili.indexOf(eski);
+    if (k !== -1) _presetSecili[k] = yeni;
+    presetSeciliYaz();
+    /* Öğrenilmiş yığın ADLA anahtarlanıyor — ad değişince yığın da TAŞINMALI, yoksa kart
+       yeniden "öğretilmemiş" görünür ve kullanıcının elle yaptığı sürükleme boşa gider. */
+    var y = presetYiginlar();
+    if (y[eski]) { y[yeni] = y[eski]; delete y[eski]; presetYiginlarYaz(); }
+    presetBtnlarCiz();
+    durumYaz("“" + eski + "” → “" + yeni + "”");
+  }
+
+  // Kartın yerine geçen ad kutusu — ayrı bir modal açmaya değmez.
+  function presetAdDuzenle(kart, ad) {
+    kart.innerHTML = "";
+    var inp = document.createElement("input");
+    inp.type = "text"; inp.className = "pc-ad"; inp.value = ad; inp.spellcheck = false;
+    kart.appendChild(inp);
+    inp.focus(); inp.select();
+    var bitti = false;
+    function kaydet() { if (bitti) return; bitti = true; presetAdDegistir(ad, inp.value); }
+    function vazgec() { if (bitti) return; bitti = true; presetBtnlarCiz(); }
+    inp.addEventListener("keydown", function (e) {
+      if (e.keyCode === 13) { e.preventDefault(); kaydet(); }
+      else if (e.keyCode === 27) { e.preventDefault(); vazgec(); }
+    });
+    inp.addEventListener("blur", kaydet);
+    // Kutuya tıklamak kartı "uygula" diye tetiklemesin
+    inp.addEventListener("click", function (e) { e.stopPropagation(); });
+  }
+
+  /* ---- sağ tık menüsü ---- */
+  var _ctxEl = null;
+  function ctxKapat() {
+    if (_ctxEl && _ctxEl.parentNode) _ctxEl.parentNode.removeChild(_ctxEl);
+    _ctxEl = null;
+  }
+  function ctxAc(x, y, ogeler) {
+    ctxKapat();
+    var m = document.createElement("div"); m.className = "ctx-menu";
+    ogeler.forEach(function (o) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = o.ad;
+      if (o.tehlike) b.className = "tehlike";
+      /* Menü işleyicileri async olabiliyor (uiConfirm bekliyorlar). Dönen Promise
+         yakalanmazsa hata SESSİZCE konsola düşer, kullanıcı hiçbir şey görmez ve iş
+         yarım kalır. Panelin her yerindeki "hata kullanıcıya söylenir" kuralı burada da
+         geçerli olmalı. */
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation(); ctxKapat();
+        try {
+          var pr = o.calistir();
+          if (pr && typeof pr["catch"] === "function") {
+            pr["catch"](function (e) { durumYaz("hata: " + (e && (e.message || e)), "var(--bad)"); });
+          }
+        } catch (e) { durumYaz("hata: " + (e && (e.message || e)), "var(--bad)"); }
+      });
+      m.appendChild(b);
+    });
+    document.body.appendChild(m);
+    /* Konum ancak DOM'a girdikten sonra ölçülebiliyor; ekran dışına taşmasın diye
+       yerleştirme burada yapılıyor. */
+    var g = m.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - g.width - 4)) + "px";
+    m.style.top = Math.max(4, Math.min(y, window.innerHeight - g.height - 4)) + "px";
+    _ctxEl = m;
+  }
+  document.addEventListener("click", ctxKapat);
+  // Kart dışına sağ tıklanınca da kapansın (kartın kendi işleyicisi stopPropagation yapar)
+  document.addEventListener("contextmenu", ctxKapat);
+
+  function presetBtnlarCiz() {
+    var box = $("presetBtnlar"); if (!box) return;
+    box.innerHTML = "";
+    presetSirala();
+    if (!_presetSecili.length) {
+      var p = document.createElement("p");
+      p.className = "note"; p.style.margin = "0";
+      p.textContent = "Preset yok — aşağıdan oluştur.";
+      box.appendChild(p);
+      return;
+    }
+    _presetSecili.forEach(function (ad) {
+      var kart = document.createElement("div");
+      /* "ÖĞRETİLMİŞ" GÖRÜNÜMÜ YALNIZ GERÇEK KAYDA BAĞLI.
+         Eskiden yedek yollar (Premiere'in yerleşik efekti / panelin kaba Pop In'i) da kartı
+         dolu gösteriyordu: presetler.json kaybolsa panel sessizce kaba animasyonu uygulayıp
+         "başarılı" diyor, kart hâlâ öğretilmiş görünüyordu. */
+      var ogr = presetOgrenilmis(ad);
+      var yedekVar = (efektSira(ad) >= 0 || !!PRESET_ANIM[ad]);
+      kart.className = "preset-card" + (ogr ? "" : " pc-bos");
+      kart.textContent = ad;
+      kart.title = ogr ? "Seçili klip(ler)e uygula (sağ tık: kafaya uygula / tersini oluştur)"
+                       : (yedekVar ? "Öğretilmedi — basarsan Premiere'in hazır efekti uygulanır. Sağ tık → “Bu klipten öğret”"
+                                   : "Henüz öğretilmedi — sağ tık → “Bu klipten öğret”");
+      kart.addEventListener("click", function () { presetUygulaAd(ad, kart); });
+      /* SAĞ TIK = tüm yönetim. Sol tık HER ZAMAN uygular — eski "öğretme modu" kutusu
+         kaldırıldı: kartlar iki modda da BİREBİR aynı görünüyordu ve yanlış modun bedeli
+         asimetrikti (yanlışlıkla uygulamak zararsız/Ctrl+Z, yanlışlıkla öğrenmek saatlerce
+         emeği yanlış klipten okunan bir yığınla değiştiriyordu). */
+      kart.addEventListener("contextmenu", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        var ogr = presetOgrenilmis(ad);
+        var ogeler = [
+          { ad: "Bu klipten öğret", calistir: function () { presetOgren(ad, kart); } }
+        ];
+        if (ogr) {
+          ogeler.push({ ad: "Oynatma kafasına uygula", calistir: function () { presetUygulaAd(ad, kart, true); } });
+          ogeler.push({ ad: "Tersini oluştur (çıkış)", calistir: function () { presetTersiUret(ad); } });
+        }
+        ogeler.push({ ad: "Yeniden adlandır", calistir: function () { presetAdDuzenle(kart, ad); } });
+        ogeler.push({ ad: "Kaldır", tehlike: true, calistir: function () { presetKaldir(ad); } });
+        ctxAc(e.clientX, e.clientY, ogeler);
+      });
+      box.appendChild(kart);
+    });
+  }
+
+  /* Yerleşik efekt listesi ARAYÜZDE GÖRÜNMÜYOR — yalnız sessiz bir yedek yol için okunuyor:
+     kullanıcı bir preset'e yerleşik bir efektin adını verirse (ör. "Gaussian Blur") kart
+     öğretilmeden de çalışsın. Kullanıcının kendi preset'leri bu listede YOK (ölçüldü). */
+  async function efektleriYukle() {
+    if (!CEP) return;
+    var hata = "";
+    try {
+      var d = JSON.parse(String(await evalES("efektListesiJSON()")));
+      _efektler = (d && d.ok && d.efektler) ? d.efektler : [];
+      if (d && !d.ok) hata = String(d.hata || "bilinmeyen");
+    } catch (e) { _efektler = []; hata = e.message || String(e); }
+    if (hata) logLine("Efekt listesi alınamadı: " + hata);
+    presetBtnlarCiz();
+  }
+
+  function wirePreset() {
+    _presetSecili = presetSeciliOku();
+    presetBtnlarCiz();
+
+    /* Yedekten kurtarma olduysa kullanıcı BİLMELİ (log'a gömmek yetmez): kurtarılan kayıt
+       son öğrettiğini içermiyor olabilir.
+       presetYiginlar() BURADA ZORLA çağrılır: kart listesi boşsa presetBtnlarCiz erken
+       dönüp dosyayı hiç okumuyor ve kurtarma uyarısı hiç tetiklenmiyordu. */
+    try { presetYiginlar(); } catch (ePy) {}
+    if (_presetKurtarildi) durumYaz("⚠ " + _presetKurtarildi, "var(--warn)");
+
+    var yeniAd = $("presetYeniAd"), ekle = $("btnPresetEkle");
+    function presetEkle() {
+      var ad = String((yeniAd && yeniAd.value) || "").trim();
+      if (!ad) { durumYaz("bir ad yaz", "var(--warn)"); return; }
+      if (_presetSecili.indexOf(ad) !== -1) { durumYaz("“" + ad + "” zaten var", "var(--warn)"); return; }
+      _presetSecili.push(ad);
+      presetSeciliYaz(); presetBtnlarCiz();
+      if (yeniAd) yeniAd.value = "";
+      durumYaz("“" + ad + "” eklendi — karta sağ tık → “Bu klipten öğret”", "var(--good)");
+    }
+    if (ekle) ekle.addEventListener("click", presetEkle);
+    if (yeniAd) yeniAd.addEventListener("keydown", function (e) {
+      if (e.keyCode === 13) { e.preventDefault(); presetEkle(); }
+    });
+
+    efektleriYukle();
+  }
+
   function trOpts(extra) {
     /* Model ve sansür artık panelde seçilmiyor: her zaman en doğru model (config.json'daki
        large-v3) ve tam sansür kullanılır. Seçenek sunmak fayda getirmiyordu — hızlı model
@@ -470,8 +1104,18 @@
     var o = { model: cfg.model || "large-v3", language: cfg.language, diarize: false,
       censor: "all",
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
-    // Shorts: dikey karede satır dar — kısa cue'lar (bkz. SHORTS bölümü).
-    if (shortsAcik()) { o.maxWords = SHORTS_MAX_KELIME; o.maxChars = SHORTS_MAX_KARAKTER; }
+    /* KELİME TAVANI HER ZAMAN 2 (kullanıcı isteği): ekranın altındaki Minecraft hotbar'ını
+       aşacak uzunlukta satır istenmiyor. Eskiden yalnız Shorts'ta 2'ydi, normal videoda
+       config.json'daki değer (3) geçerliydi.
+       TAVAN KODDA ZORLANIR, config.json'a GÜVENİLMEZ: updater.js configBirlestir kullanıcının
+       mevcut maxWordsPerCue değerini koruyor — config dosyasını değiştirmek kurulu panele hiç
+       ulaşmaz ve "yaptım ama değişmedi" denir.
+       DİKKAT: kelime tavanını düşürmek cue'ları kısaltır ve tek başına yapılırsa ses hizalamasını
+       KÖTÜLEŞTİRİR (ölçüldü: sessizde başlayan cue 90 → 138). pipeline.js'deki sesleHizala bu
+       yüzden aynı pakette onarıldı — cue kaydırılırken bitişi de birlikte taşınıyor. */
+    o.maxWords = 2;
+    // Shorts: dikey karede satır dar — karakter sınırı da daralır (kelime tavanı zaten 2).
+    if (shortsAcik()) { o.maxChars = SHORTS_MAX_KARAKTER; }
     if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) o[k] = extra[k];
     return o;
   }
@@ -544,42 +1188,11 @@
     logLine("[aralık] " + fmtShort(range.start) + (isFinite(range.end) ? " → " + fmtShort(range.end) : " → son"));
     return { wav: wav2, offset: range.start, cleanup: [wav, wav2], dur: Math.max(0, Math.min(clipsEnd(used), range.end) - range.start) };
   }
-  /* "A1+A2" (eski adıyla Mix): konuşma kanallarını TEK wav'da birleştirir — A3 oyun sesidir,
-     dahil edilmez. Eskiden bu seçenekte sessizce sadece A1 yazıya dökülüyordu; arkadaşların
-     altyazıya hiç girmiyordu ve uyarı da çıkmıyordu. Kanallardan biri yoksa diğeriyle devam edilir.
-     NOT: kullanıcıya görünen her metin index.html'deki düğme etiketiyle ("A1+A2") aynı olmalı —
-     "Mix" diye bir düğme artık yok, panel var olmayan bir düğmeyi tarif ediyordu. */
-  async function prepAudioMix(name) {
-    var range = getRange(), stamp = Date.now();
-    var parts = [], cleanup = [], bulunan = [], mixEnd = 0;
-    // try/catch TÜM kanal işlemini sarmalı: bir kanalın ffmpeg hatası diğerini düşürmemeli.
-    for (var t = 0; t < 2; t++) {
-      try {
-        var data = await getClips(t);
-        var used = clipsInRange(data.clips, range);
-        if (!used.length) { logLine("A1+A2: A" + (t + 1) + " seçilen aralıkta boş."); continue; }
-        var w = path.join(cfg.workDir, name + "_mix" + t + "_" + stamp + ".wav");
-        await pipeline.buildTimelineAudio(used, cfg.ffmpegExe, w, logLine, t);
-        parts.push(w); cleanup.push(w); bulunan.push("A" + (t + 1));
-        var ke = clipsEnd(used); if (ke > mixEnd) mixEnd = ke;
-      } catch (e) { logLine("A1+A2: A" + (t + 1) + " atlandı (" + friendlyError(e) + ")"); }
-    }
-    // Hata metni düğme etiketiyle aynı adı kullanır ("A1+A2"); "Mix" adlı bir düğme yok.
-    if (!parts.length) { cleanupFiles(cleanup); throw new Error("“A1+A2” seçili ama A1 ve A2 kanallarında konuşma bulunamadı."); }
-    logLine("A1+A2: " + bulunan.join(" + ") + " birleştirildi");
-    var wav = path.join(cfg.workDir, name + "_mix_" + stamp + ".wav");
-    // Bundan sonraki her hatada üretilmiş WAV'lar temizlenir (yoksa work klasöründe sızar)
-    try {
-      await pipeline.mixWavs(parts, cfg.ffmpegExe, wav);
-      cleanup.push(wav);
-      if (!range) return { wav: wav, offset: 0, cleanup: cleanup, dur: mixEnd };
-      var wav2 = path.join(cfg.workDir, name + "_mixr_" + stamp + ".wav");
-      await pipeline.trimWav(wav, wav2, range.start, range.end, cfg.ffmpegExe);
-      cleanup.push(wav2);
-    } catch (eMix) { cleanupFiles(cleanup); throw eMix; }
-    logLine("[aralık] " + fmtShort(range.start) + (isFinite(range.end) ? " → " + fmtShort(range.end) : " → son"));
-    return { wav: wav2, offset: range.start, cleanup: cleanup, dur: Math.max(0, Math.min(mixEnd, range.end) - range.start) };
-  }
+  /* prepAudioMix KALDIRILDI — "A1+A2" kaynak seçeneği kalktı (gerekçe: index.html segTrack notu).
+     Tek çağıranı runSingle'ın isMix dalıydı.
+     DİKKAT: pipeline.js'teki mixWavs SİLİNMEZ — AutoCut analizinde kanal seslerini birleştirmek
+     için hâlâ kullanılıyor. cleanupFiles'ın "single_mix0_*" deseni de duruyor ki eski
+     çalıştırmalardan kalan geçici WAV'lar temizlenebilsin. */
   function offsetCues(cues, off) {
     if (off) for (var i = 0; i < cues.length; i++) { cues[i].start += off; cues[i].end += off; }
     return cues;
@@ -619,20 +1232,14 @@
   // ---------- TEK STİL ----------
   async function runSingle() {
     state.genMode = "single";
-    var isMix = (state.track === "mix");
     setProgress(8, "Sekans okunuyor…");
     pipeline.ensureDir(cfg.workDir);
-    var prep;
-    if (isMix) {
-      setProgress(20, "Ses hazırlanıyor (A1 + A2)…");
-      prep = await prepAudioMix("single");
-    } else {
-      var trackIdx = parseInt(state.track, 10);
-      var data = await getClips(trackIdx);
-      logLine(data.sequenceName + " · " + data.clips.length + " klip");
-      setProgress(20, "Ses hazırlanıyor…");
-      prep = await prepAudio(data.clips, trackIdx, "single");
-    }
+    // Tek kaynak artık yalnız A1 ya da A2 — "A1+A2" seçeneği kalktığı için dallanma da kalktı.
+    var trackIdx = parseInt(state.track, 10);
+    var data = await getClips(trackIdx);
+    logLine(data.sequenceName + " · " + data.clips.length + " klip");
+    setProgress(20, "Ses hazırlanıyor…");
+    var prep = await prepAudio(data.clips, trackIdx, "single");
     setProgress(45, "Yazıya dökülüyor (GPU)…");
     _pg.transT0 = Date.now(); _pg.totalSec = prep.dur || 0;
     var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); }, trOpts());
@@ -666,12 +1273,99 @@
     var d; try { d = JSON.parse(raw); } catch (e) { uiAlert("Sekans okunamadı: " + raw, "Kanal tarama"); return; }
     if (d.error === "no_sequence") { uiAlert("Aktif sekans yok. Önce bir sekans aç.", "Kanal tarama"); return; }
     state.kanalTarandi = true;   // tarandı ama boş çıktı -> runChannels farklı (doğru) mesaj versin
+    await captionStilleriTara();  // stil listesi kanal satırlarındaki seçicilere gerekli
     renderChannelMap(d.tracks || [], d.videoTracks || 0);
     logLine("Kanallar: " + (d.tracks || []).map(function (t) { return "A" + (t.idx + 1) + "(" + t.clips + ")"; }).join(" ") +
             " · " + (d.videoTracks || 0) + " video kanalı");
     var secili = aktifKanallar();
     if (secili.length) logLine("Yazıya dökülecek: " + secili.map(kanalAdi).join(", "));
   }
+  /* ---------- ALTYAZI STİLLERİ (Premiere'in Track Style'ları) ----------
+     "Herkes" kaynağında her ses kanalı AYRI altyazı kanalına yazılıyor ve bir altyazı
+     kanalının stili TRACK'in ayarı (Caption Track Settings > Style). Yani kanal başına
+     farklı stil = karaktere göre renk. Liste host'tan gelir; boş gelmesi "stil yok"
+     DEĞİL "bulamadık" demektir — o yüzden seçici yine gösterilir, kullanıcı Premiere'de
+     elle de verebilir. */
+  var _captionStilleri = [];
+  async function captionStilleriTara() {
+    if (!CEP) { _captionStilleri = []; return _captionStilleri; }
+    try {
+      var d = JSON.parse(String(await evalES("captionStilleriJSON()")));
+      _captionStilleri = (d && d.stiller && d.stiller.length) ? d.stiller : [];
+      logLine("Altyazı stilleri: " + (_captionStilleri.length ? _captionStilleri.join(", ") : "bulunamadı"));
+    } catch (e) { _captionStilleri = []; }
+    return _captionStilleri;
+  }
+  /* HER KARAKTERE AYRI ALTYAZI KANALI → stil seçicileri DİNAMİK.
+     Kaç konuşan varsa o kadar satır: A1 (sen) + yazıya dökülecek her ses kanalı. Sabit iki
+     seçici (C1/C2) devri bitti; kadro videodan videoya değiştiği için satırlar her taramada
+     yeniden kuruluyor.
+     Seçim yalnızca "hangi track'e hangi stili vereceksin" talimatını üretmek için — panel
+     stili Premiere'e KENDİSİ atayamıyor (host.jsx'teki ölçüme bak: seq.captionTracks yok). */
+  var _stilSecici = { a1: null, tek: null };   // kanal seçicileri ch.stilSel'de tutulur
+  function stilSecDoldur(sel, anahtar) {
+    var secili = lsGet(anahtar, "");
+    sel.innerHTML = "";
+    var o0 = document.createElement("option");
+    o0.value = ""; o0.textContent = _captionStilleri.length ? "stil seç…" : "stil bulunamadı";
+    sel.appendChild(o0);
+    _captionStilleri.forEach(function (ad) {
+      var o = document.createElement("option"); o.value = ad; o.textContent = ad; sel.appendChild(o);
+    });
+    /* Kayıtlı stil listede yoksa yine de göster: kullanıcı stili silmiş ya da başka projede
+       olabilir — sessizce "stil seç…"e düşerse seçimini kaybettiğini fark etmez. */
+    if (secili) {
+      var varMi = false;
+      for (var k = 0; k < sel.options.length; k++) if (sel.options[k].value === secili) varMi = true;
+      if (!varMi) {
+        var ox = document.createElement("option");
+        ox.value = secili; ox.textContent = secili + " (projede yok)";
+        sel.appendChild(ox);
+      }
+      sel.value = secili;
+    }
+    // Her çağrıda YENİ select üretiliyor, dinleyici bu yüzden tek sefer bağlanıyor.
+    sel.addEventListener("change", function () { lsSet(anahtar, sel.value); });
+  }
+  // Tek satır: [ başlık / açıklama ]  [ stil seçici ] — oluşturduğu select'i döndürür.
+  function stilSatir(box, baslik, aciklama, anahtar) {
+    var row = document.createElement("div"); row.className = "sp-row";
+    var info = document.createElement("div"); info.className = "sp-info";
+    var n = document.createElement("div"); n.className = "sp-name"; n.textContent = baslik;
+    var s = document.createElement("div"); s.className = "sp-sample"; s.textContent = aciklama;
+    info.appendChild(n); info.appendChild(s); row.appendChild(info);
+    var wrap = document.createElement("div"); wrap.className = "select sm";
+    var sel = document.createElement("select");
+    wrap.appendChild(sel); row.appendChild(wrap); box.appendChild(row);
+    stilSecDoldur(sel, anahtar);
+    return sel;
+  }
+  function trackStilDoldur() {
+    var box = $("trackStilBox"); if (!box) return;
+    box.innerHTML = ""; box.hidden = false;
+    _stilSecici.a1 = null; _stilSecici.tek = null;
+    state.channels.forEach(function (c) { c.stilSel = null; });
+
+    if (state.track !== "herkes") {
+      // Tek kaynak (A1 ya da A2) → tek altyazı kanalı, tek stil.
+      _stilSecici.tek = stilSatir(box, "Altyazı", "tek kaynak seçili · tek altyazı kanalı",
+                                  "trackStil.tek");
+      return;
+    }
+    /* "Herkes": A1 + yazıya dökülecek HER kanal ayrı altyazı kanalı alır.
+       BAŞLIKLARDA C-NUMARASI YOK — bilerek. İşaretli ama konuşma çıkmayan bir kanal track
+       almıyor, dolayısıyla buradaki sıra ile gerçek track sırası kayabilir; yanlış numara
+       yazmaktansa hiç yazmamak doğru. Kesin eşleme üretim sonunda sonuç mesajında veriliyor
+       (orada sıra `basarili` dizisinden, yani GERÇEKTEN oluşan track'lerden okunuyor).
+       Stil ses kanalı numarasına göre hatırlanır — kanal adıyla (kanalAd.<idx>) aynı mantık. */
+    _stilSecici.a1 = stilSatir(box, "sen", "A1 · senin mikrofonun", "kanalStil.a1");
+    aktifKanallar().forEach(function (ch) {
+      ch.stilSel = stilSatir(box, kanalAdi(ch), "A" + (ch.idx + 1) + " · kendi altyazı kanalı",
+                             "kanalStil." + ch.idx);
+    });
+  }
+  function stilDegeri(sel) { return (sel && sel.value) ? sel.value : ""; }
+
   // list = [{idx, clips, style?, cues?}] — taramadan ya da kaydedilmiş oturumdan gelir
   function renderChannelMap(list, videoTracks) {
     var box = $("kanalRows"); if (!box) return;
@@ -680,7 +1374,8 @@
        verisinde cues alanı olmadığı için önceki cue'lar kanal numarasına göre geri bağlanır. */
     var eski = {};
     state.channels.forEach(function (c) {
-      if (c.cues && c.cues.length) eski[c.idx] = { cues: c.cues, style: c.styleSel ? c.styleSel.value : "" };
+      // Stil artık kanal başına değil (bkz. trackStilDoldur) — yalnız cue'lar korunur.
+      if (c.cues && c.cues.length) eski[c.idx] = { cues: c.cues };
     });
     box.innerHTML = ""; state.channels = [];
     var uyari = $("kanalUyari");
@@ -692,6 +1387,21 @@
       if (uyari) uyari.hidden = true;
       return;
     }
+    /* A1 (sen) SATIRI. Kanal listesi A2'den başlıyor çünkü işaret kutusu/isim yalnız arkadaş
+       kanalları için anlamlı — ama A1 de kendi altyazı kanalını alıyor, dolayısıyla kendi
+       stilini seçebilmeli. İşaret kutusu YOK: A1 her zaman yazıya dökülür. */
+    var a1Row = document.createElement("div"); a1Row.className = "sp-row";
+    var a1Info = document.createElement("div"); a1Info.className = "sp-info";
+    var a1Ad = document.createElement("div"); a1Ad.className = "kanal-ad";
+    a1Ad.textContent = "A1 — sen"; a1Ad.style.padding = "6px 0"; a1Ad.style.border = "0"; a1Ad.style.background = "transparent";
+    var a1Sm = document.createElement("div"); a1Sm.className = "sp-sample";
+    a1Sm.textContent = "senin mikrofonun · her zaman yazıya dökülür";
+    a1Info.appendChild(a1Ad); a1Info.appendChild(a1Sm); a1Row.appendChild(a1Info);
+    /* Stil seçici bu satırda DEĞİL, #trackStilBox'ta. Sebep: her karakter kendi altyazı
+       kanalını alıyor ve kullanıcı stilleri Premiere'de elle verecek — hangi track'e ne
+       vereceğini tek bir listede yan yana görmesi, satırlara dağılmasından daha kolay. */
+    box.appendChild(a1Row);
+
     dolu.forEach(function (t, i) {
       var row = document.createElement("div"); row.className = "sp-row";
       var onceki = eski[t.idx];
@@ -709,7 +1419,12 @@
       chk.checked = (t.aktif != null) ? !!t.aktif : true;
       (function (ix, c, r) {
         function yansit() { if (c.checked) r.classList.remove("kanal-pasif"); else r.classList.add("kanal-pasif"); }
-        c.addEventListener("change", function () { yansit(); });   // kaydedilmiyor, bkz. yukarıdaki not
+        c.addEventListener("change", function () {
+          yansit();                                  // kaydedilmiyor, bkz. yukarıdaki not
+          /* Stil listesi işaretli kanallardan kuruluyor: işaret kalkınca o karakterin stil
+             satırı da gitmeli, yoksa kullanıcı hiç oluşmayacak bir track'e stil seçer. */
+          try { trackStilDoldur(); } catch (eTs) {}
+        });
         yansit();
       })(t.idx, chk, row);
       row.appendChild(chk);
@@ -725,30 +1440,36 @@
       adInp.type = "text"; adInp.className = "kanal-ad"; adInp.spellcheck = false;
       adInp.placeholder = "A" + (t.idx + 1) + " — isim yaz";
       adInp.value = t.ad || lsGet("kanalAd." + t.idx, "");
-      (function (ix, el) { el.addEventListener("change", function () { lsSet("kanalAd." + ix, el.value.trim()); }); })(t.idx, adInp);
+      (function (ix, el) {
+        el.addEventListener("change", function () {
+          lsSet("kanalAd." + ix, el.value.trim());
+          // Stil satırının başlığı bu isim — "A4" yazarken "Dora" yazsın diye tazelenir.
+          try { trackStilDoldur(); } catch (eTs) {}
+        });
+      })(t.idx, adInp);
       var sm = document.createElement("div"); sm.className = "sp-sample";
       sm.textContent = "A" + (t.idx + 1) + " · " + t.clips + " klip" +
         (onceki && onceki.cues.length ? (" · " + onceki.cues.length + " altyazı hazır") : "");
       info.appendChild(adInp); info.appendChild(sm); row.appendChild(info);
 
-      // Stil seçici KALDIRILDI: altyazı Premiere'in kendi altyazı kanalına gidiyor ve
-      // o kanalın tek stili var — kanal başına renk vermek mümkün değil.
+      /* Bu satırda yalnız "yazıya dökülsün mü" işareti ve kanalın adı var; stili
+         #trackStilBox'taki eş satırdan seçiyor (bkz. trackStilDoldur). */
       box.appendChild(row);
+      /* `renk` ALANI ŞART: transkript satırlarındaki renk noktası kanal nesnesinden okunuyor
+         (`ch.renk || speakerColor(i)`). Alan hiç yazılmadığı için her kanal yedek renge
+         düşüyordu ve kanal listesindeki nokta ile transkriptteki nokta birbirini tutmuyordu. */
       state.channels.push({ idx: t.idx, clips: t.clips, aktifChk: chk, adInput: adInp,
+                            renk: renk,
                             cues: t.cues || (onceki ? onceki.cues : []) });
     });
-    /* Video kanalı bütçesi: en alt kanal senin görüntün, üstündeki bir kanal A1 altyazısı,
-       bir kanal da arkadaşlar için gerekli → en az 3. Üst üste konuşma varsa her ek katman
-       bir kanal daha ister. Yetmezse yerleştirme katmanı kırpar (silme yapmaz) ama ekranda
-       altyazılar üst üste binebilir. */
-    if (uyari) {
-      if (videoTracks && videoTracks < 3) {
-        uyari.hidden = false; uyari.style.color = "var(--warn)";
-        uyari.textContent = "⚠ Sekansta " + videoTracks + " video kanalı var; rahat çalışmak için en az 3 gerekir " +
-          "(görüntü + senin altyazın + arkadaşlar). Üst üste konuşma varsa daha fazlası gerekir. " +
-          "Premiere'de video kanalı eklemen önerilir.";
-      } else uyari.hidden = true;
-    }
+    /* VİDEO KANALI UYARISI KALDIRILDI. v1.8.0 öncesinde her altyazı bir MOGRT klibiydi ve
+       video kanalı tüketiyordu; "en az 3 video kanalı gerekir" uyarısı o dönemden kalmaydı.
+       Altyazı artık Premiere'in kendi caption track'ine yazılıyor ve video kanalına HİÇ
+       dokunmuyor — uyarı yanlış bilgi verip kullanıcıyı gereksiz kanal eklemeye yolluyordu.
+       `videoTracks` parametresi imzada KALIYOR: çağıranlar hâlâ geçiyor ve ileride gerçek bir
+       video kanalı kontrolü gerekirse buradan okunur. */
+    if (uyari) uyari.hidden = true;
+    trackStilDoldur();   // stil listesi tazelendiyse iki track seçicisi de güncellensin
   }
   // Kanalin gorunen adi: kullanici isim yazdiysa o, yoksa "A4"
   function kanalAdi(ch) {
@@ -766,10 +1487,10 @@
        düzelttiği 400 satırlık listeyi bir hata mesajı uğruna kaybediyordu. */
     if (!state.channels.length) {
       throw new Error(state.kanalTarandi
-        ? "A2 ve sonrasındaki kanallarda ses klibi yok. Bu mod her arkadaşın AYRI kanalda olmasını ister; " +
-          // Düğmenin GERÇEK etiketi "A1+A2" (index.html). "Mix" yazınca kullanıcı olmayan bir
-          // düğmeyi arıyor ve panelin bozuk olduğunu sanıyordu.
-          "tek karışık kanalın varsa “Tek Stil” sekmesinde Kaynak Ses'i “A1+A2” yap."
+        // Kullanıcıya VAR OLMAYAN bir düğme tarif etme: "A1+A2" düğmesi ve "Tek Stil" sekmesi
+        // artık yok. Kalan seçenekler: A1 · A2 · Herkes.
+        ? "A2 ve sonrasındaki kanallarda ses klibi yok. “Herkes” her arkadaşın AYRI kanalda " +
+          "olmasını ister; tek karışık kanalın varsa Kaynak Ses'i “A2” yap."
         : "Önce “Kanalları Tara” butonuna bas ve kanallara stil ata.");
     }
     var islenecek = aktifKanallar();
@@ -859,7 +1580,10 @@
           return { id: s.id, sample: s.sample, start: s.start, style: s.styleSel ? s.styleSel.value : "" };
         }),
         channels: state.channels.map(function (c) {
-          return { idx: c.idx, clips: c.clips, style: c.styleSel ? c.styleSel.value : "",
+          /* `style` alanı oturuma YAZILMIYOR: stil zaten localStorage'da kanal numarasına
+             göre duruyor (kanalStil.<idx>, kanalAd.<idx> ile aynı mantık) ve oturumdan
+             bağımsız olarak sonraki videolarda da hazır gelmeli. */
+          return { idx: c.idx, clips: c.clips,
                    ad: c.adInput ? c.adInput.value : "", aktif: c.aktifChk ? c.aktifChk.checked : true,
                    cues: c.cues };
         })
@@ -997,21 +1721,163 @@
      Sayı okunamazsa yerleştirme YAPILMAZ: yanlış tahminin bedeli, silinen görüntü.
      Dönüş: kanal sayısı (yeterliyse) ya da 0 (yetersiz — kullanıcı zaten uyarıldı). */
 
-  /* ---------- TEK YERLEŞTİRME YOLU: Premiere altyazı kanalı ----------
+  /* ---------- YERLEŞTİRME: HER SES KANALI KENDİ ALTYAZI KANALINA ----------
      Eskiden üç yol vardı (placeSingle MOGRT dalı, placeSpeaker, placeChannels) ve her
      altyazı ayrı bir MOGRT klibi oluyordu: 20 dakikalık videoda ~1000 klip, Premiere
-     kasıyordu. Artık hepsi TEK altyazı kanalına yazılıyor — video kanalı da tüketmiyor,
-     bu yüzden katman bütçesi / görüntü silme sınıfı hataların tamamı ortadan kalktı.
-     Görünüm (yazı tipi, renk, kontur, konum) Premiere'de altyazı stilinden ayarlanır. */
+     kasıyordu. O yol v1.8.0'da kalktı; altyazı artık Premiere'in kendi altyazı kanalına
+     yazılıyor ve video kanalı TÜKETMİYOR — katman bütçesi / görüntü silme sınıfı hataların
+     tamamı bu yüzden ortadan kalktı. Buraya lane/katman mantığı geri EKLEME.
+
+     NEDEN TEK DEĞİL DE KANAL BAŞINA AYRI TRACK: bir caption track'in TEK stili olur — stil
+     kliplerin değil, TRACK'in ayarıdır (Premiere: Caption Track Settings > Style). Yani tek
+     track'e yazarken "Tofi pembe / Moni siyah" imkânsızdı. Premiere birden çok caption
+     track'i destekliyor (Text panelinde kendi ifadesi: "Multiple caption tracks enabled"),
+     her birinin kendi stili olur. Bu yüzden "Herkes" kaynağında her ses kanalı AYRI bir
+     altyazı kanalına yazılır; kullanıcı sonra her track'e kendi stilini verir.
+
+     ÇAĞRI SIRASI = TRACK SIRASI. Hangi ses kanalının kaçıncı altyazı kanalına gittiği log'a
+     ve sonuç mesajına yazılır — yoksa kullanıcı hangi track'e hangi stili vereceğini bilemez.
+     Tek kaynak seçiliyken (A1 ya da A2) tek grup olur, davranış eskisiyle aynıdır. */
   async function placeCaptions(range) {
-    var cues = allCues();
-    if (range) cues = cues.filter(function (c) { return c.end > range.start && c.start < range.end; });
-    if (!cues.length) { uiAlert("Önce altyazı oluştur."); return null; }
-    // Zaman sırası ŞART: "Herkes" kaynağında kanallar ayrı ayrı dökülüyor, cue'lar karışık gelir.
-    cues = cues.slice().sort(function (a, b) { return a.start - b.start; });
-    var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + ".srt");
-    fs.writeFileSync(srtFile, pipeline.cuesToSrt(cues), "utf8");
-    return await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")');
+    /* AUTOCUT SONRASI BAYATLIK FRENİ. Boşluklar kesilince timeline kısalıyor ama elde duran
+       cue'lar eski zamanlarda kalıyor — yerleştirilirse hepsi kesilen toplam süre kadar kayar.
+       Kullanıcı kendi akışında önce kesip sonra üretiyor, yani bu yola normalde girmiyor;
+       fren yine de duruyor çünkü bedeli tek bir onay sorusu, karşılığı ise fark edilmesi zor
+       (ve videoyu çıkarana kadar görünmeyen) dakikalarca kayma. */
+    if (state.cuesStale) {
+      var devamBayat = await uiConfirm(
+        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\n" +
+        "Kesim timeline'ı kısalttığı için altyazılar kesilen toplam süre kadar KAYAR — " +
+        "dakikalarca olabilir.\n\nDoğrusu altyazıyı yeniden üretmek. Yine de ekleyeyim mi?", "Altyazı");
+      if (!devamBayat) return null;
+    }
+    /* HER KARAKTERE AYRI ALTYAZI KANALI:  C1 = videoyu çeken (A1) · sonra yazıya dökülen
+       her ses kanalı kendi track'ine (aktifKanallar() sırasıyla).
+       Bir ara sabit iki kanala (C1 = sen, C2 = arkadaşlar birleşik) indirilmişti; kullanıcı
+       karaktere göre renk istediği için geri alındı.
+       BEDELİ: panel stili ATAYAMIYOR (host.jsx ölçümü — seq.captionTracks yok), yani her
+       videoda track sayısı kadar elle Track Style vermek gerekiyor. Bunu katlanılır kılan
+       şey, sonuç mesajının "hangi track kimin" eşlemesini yazması.
+       KAZANCI: aynı anda konuşanların cue'ları artık AYRI track'lerde, yani birbirini
+       ezmiyor — birleşik C2 devrinde ölçülen ~600 çözülemeyen çakışma bu düzende doğmuyor.
+       Tek kaynak (A1/A2) seçiliyken zaten tek grup olur. */
+    var gruplar = [];
+    if (state.genMode === "channels") {
+      if (state.a1Cues && state.a1Cues.length) {
+        gruplar.push({ ad: "sen", cues: state.a1Cues, stil: stilDegeri(_stilSecici.a1) });
+      }
+      /* Konuşma çıkmayan kanal ATLANIR: boş bir caption track oluşturmak hem işe yaramaz
+         hem sonraki track'lerin C-numarasını kaydırıp stil talimatını yanıltır. */
+      aktifKanallar().forEach(function (ch) {
+        if (ch.cues && ch.cues.length) {
+          gruplar.push({ ad: kanalAdi(ch), cues: ch.cues, stil: stilDegeri(ch.stilSel) });
+        }
+      });
+    } else if (state.singleCues && state.singleCues.length) {
+      gruplar.push({ ad: "Altyazı", cues: state.singleCues, stil: stilDegeri(_stilSecici.tek) });
+    }
+
+    var isler = [];
+    gruplar.forEach(function (g) {
+      var c = g.cues;
+      if (range) c = c.filter(function (x) { return x.end > range.start && x.start < range.end; });
+      if (!c.length) return;
+      /* Zaman sırası ŞART: motor kanal içinde sırasız satır döndürebiliyor ve sesleHizala
+         cue'ları ileri itebiliyor. cuesToSrt diziyi olduğu sırayla yazdığı için sıralanmamış
+         liste, zamanı geriye giden bir SRT üretir ve Premiere böyle bir dosyayı reddedebilir. */
+      isler.push({ ad: g.ad, stil: g.stil || "",
+                   cues: c.slice().sort(function (a, b) { return a.start - b.start; }) });
+    });
+    if (!isler.length) { uiAlert("Önce altyazı oluştur."); return null; }
+
+    /* TOFI MONI VİDEO MODU — cue'ları SEYRELTİR (ilk dakika tam, sonrasında ~20 sn'de bir
+       en vurucu cümle). Seçimi Claude yapıyor; panelin internete çıktığı TEK yer burası ve
+       yalnız kutu işaretliyken çalışır.
+       YIKICI DEĞİL: cue'lar silinmiyor, işaretleniyor — mod kapatılıp yeniden basılırsa
+       25 dakikalık GPU işi tekrar edilmiyor. Hata olursa altyazı TAM hâliyle eklenir;
+       sessizce yarım iş yapmaktansa moddan vazgeçmek doğru. */
+    if (vurucuAcik() && VUR && CEP) {
+      try {
+        logLine("Vurucu cümleler seçiliyor (yapay zekâ)…");
+        var vGiris = isler.map(function (x) { return { ad: x.ad, cues: x.cues }; });
+        var vSonuc = await VUR.vurucuSec(extRoot, vGiris, { onLog: logLine });
+        for (var vi = 0; vi < isler.length; vi++) {
+          if (vSonuc && vSonuc.gruplar && vSonuc.gruplar[vi] && vSonuc.gruplar[vi].cues) {
+            isler[vi].cues = vSonuc.gruplar[vi].cues;
+          }
+        }
+      } catch (eVur) {
+        logLine("Vurucu mod atlandı: " + (eVur.message || eVur));
+        uiAlert("Vurucu mod çalışmadı:\n\n" + (eVur.message || eVur) +
+                "\n\nAltyazılar TAM hâliyle eklenecek.", "Altyazı");
+      }
+    } else if (!vurucuAcik() && VUR) {
+      // Mod kapatıldıysa eski işaretler kalmasın, yoksa SRT filtrelenmeye devam eder.
+      isler.forEach(function (x) { try { VUR.temizle(x.cues); } catch (eT) {} });
+    }
+
+    /* ÇAKIŞMA GİDER. Her track artık TEK kişinin olduğu için kişiler arası çakışma yok;
+       kalan tek kaynak aynı konuşanın kendi içinde üst üste binen cue'ları (motor damgası +
+       sesleHizala'nın ileri itmesi). Nadir ama bedava: çakışan altyazılardan birini Premiere
+       sessizce yutuyor ve panel yine "ok" dönüyor — kayıp ancak video çıkarılırken fark
+       edilir. Fonksiyon yoksa (eski pipeline.js) atlanır ama söylenir. */
+    isler.forEach(function (x) {
+      if (pipeline && typeof pipeline.cakismaGider === "function") {
+        try { pipeline.cakismaGider(x.cues, logLine); } catch (eCk) { logLine("Çakışma giderilemedi: " + (eCk.message || eCk)); }
+      } else logLine("UYARI: çakışma gidericisi yok — aynı anda konuşanların altyazısı üst üste binebilir.");
+    });
+
+    var basarili = [], hatalar = [], toplam = 0;
+    for (var i = 0; i < isler.length; i++) {
+      var is = isler[i];
+      /* Dosya adına sıra da giriyor: Date.now() aynı milisaniyede iki kez dönebiliyor ve
+         ikinci SRT birincinin üstüne yazılıp aynı metin iki track'e düşüyordu. */
+      var srtFile = path.join(cfg.workDir, "cap_" + Date.now() + "_" + i + ".srt");
+      fs.writeFileSync(srtFile, pipeline.cuesToSrt(is.cues), "utf8");
+      /* Stil adı ExtendScript'e PARAMETRE değil DOSYA ile geçiyor: evalScript'in string
+         literaline gömülen Türkçe karakter/tırnak kırılgan (panelin her yerinde aynı kural).
+         host, srtPath + ".stil" dosyasını varsa okuyup uyguluyor. */
+      if (is.stil) { try { fs.writeFileSync(srtFile + ".stil", is.stil, "utf8"); } catch (eSt) {} }
+      var r = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
+      logLine(is.ad + " → " + (basarili.length + 1) + ". altyazı kanalı (" + is.cues.length + " satır): " + r);
+      if (r.indexOf("ok:") === 0) {
+        basarili.push({ ad: is.ad, stil: is.stil, stilOk: r.indexOf("[stil: uygulandi]") !== -1 });
+        toplam += is.cues.length;
+      } else hatalar.push(is.ad + " — " + r.replace(/^[a-z_]+:/, ""));
+    }
+
+    if (!basarili.length) return "err:" + (hatalar[0] || "Altyazı kanalı oluşturulamadı");
+    /* HANGİ TRACK KİMİN — numarayla yaz. Karakter başına ayrı track düzeninde 4-5 track
+       oluşabiliyor ve Premiere'de hepsi "C1, C2, C3…" diye görünüyor; isim olmadan kullanıcı
+       hangisine hangi stili vereceğini bilemez. Sıra `basarili` dizisinden okunuyor, yani
+       GERÇEKTEN oluşan track'lerden — konuşma çıkmayan kanal atlandığı için stil kutusundaki
+       sırayla birebir aynı olmayabilir. */
+    var adlar = basarili.map(function (b, i) { return "C" + (i + 1) + " " + b.ad; });
+    var msg = "ok:" + toplam + " altyazı → " + basarili.length + " ayrı altyazı kanalı (" + adlar.join(" · ") + ")";
+    /* STİL ELLE VERİLECEKSE HANGİSİNE NE VERİLECEĞİNİ SÖYLE. Premiere ExtendScript'te caption
+       track'e erişim yok (seq.captionTracks mevcut değil), yani stil atama garantisi yok.
+       Böyle bir durumda kullanıcıyı "kendin hallet" diye bırakmak, 3-4 track arasında hangisinin
+       kim olduğunu aratır — sıra burada zaten biliniyor, yazılsın. */
+    var stilBekleyen = basarili.filter(function (b) { return b.stil && !b.stilOk; });
+    if (stilBekleyen.length) {
+      var talimat = [];
+      basarili.forEach(function (b, i) {
+        if (b.stil) talimat.push("C" + (i + 1) + " (" + b.ad + ") → " + b.stil);
+      });
+      msg += " | Stilleri Premiere'de elle ver (altyazıya tıkla → Track Style): " + talimat.join(" · ");
+    }
+    /* Stil seçilmemiş track'i SÖYLE. Karakter başına track düzeninde kolayca 4-5 satır oluyor
+       ve birine stil vermeyi atlamak, o karakterin Premiere'in varsayılan görünümüyle çıkması
+       demek — kullanıcı bunu ancak videoyu izlerken fark eder. */
+    var stilsiz = basarili.filter(function (b) { return !b.stil; });
+    if (stilsiz.length) {
+      msg += " | Stil seçilmemiş: " + stilsiz.map(function (b) { return b.ad; }).join(", ") +
+             " (varsayılan görünümle gelir)";
+    }
+    /* showResult "(\d+) hata" arıyor; kısmi başarıda yeşil ✓ yerine uyarı göstersin diye
+       sayıyı bu kalıpta yazmak ZORUNLU. */
+    if (hatalar.length) msg += " | " + hatalar.length + " hata: " + hatalar.join(" ; ");
+    return msg;
   }
   function placeCurrent(range) { return placeCaptions(range); }
 
@@ -1045,6 +1911,10 @@
       // sonuç tek altyazı kanalında birleşir. Diğer kaynaklarda tek geçiş.
       else if (state.track === "herkes") await runChannels();
       else await runSingle();
+      /* Üretim BAŞARIYLA bitti: cue'lar artık güncel timeline'a ait, AutoCut bayatlık freni
+         kalkar. Hata/iptal durumunda buraya hiç gelinmez ve bayrak bilerek AÇIK kalır —
+         yarım kalmış üretimin cue'ları da bayattır. */
+      state.cuesStale = false;
     }
     catch (e) {
       if (state.cancelled) progressFail("İptal edildi", "warn");
@@ -1357,10 +2227,12 @@
     bilinmeyen.forEach(function (d) {
       plan.push({ kanal: sonrakiKanal++, karakter: "?", dosya: d, bilinmeyen: true });
     });
-    /* OYUN SESİ EN SONDA. Panel onu taşıyamaz (Premiere'de klip taşıma API'si yok) —
-       satır yalnızca hangi kanalda olması gerektiğini söyler. */
+    /* OYUN SESİ EN SONDA. Panel onu TAŞIMAZ (Premiere'de klip taşıma API'si yok; tek yol
+       overwriteClip ve o, çoklu-akışlı OBS kaydında dosyanın 1. akışını = mikrofonu
+       yerleştiriyordu). Satır yalnızca hangi kanalda olması gerektiğini söyler; klibi
+       kullanıcı elle oraya taşır. */
     plan.push({ kanal: sonrakiKanal++, karakter: "Oyun sesi", oyun: true,
-                not: "panel oyun sesini buraya taşıyacak" });
+                not: "oyun sesini Premiere'de buraya SEN taşı — panel dokunmaz" });
     // çekenin kendi Craig dosyası — hizalama referansı (timeline'a konmaz)
     snk.cekenDosya = null;
     // _kn: cekenin kendi kaydini bulmak da ayni kurala uymali, yoksa kayit timeline'a konup ses cift cikar.
@@ -1396,7 +2268,6 @@
            (overwriteClip). Kanal sırası değiştiği için bu gerçek bir risk — tabloda ve
            onay metninde gösterilir. */
         snk.kanalKlip = b.clipCounts || [];
-        snkOyunKanalDoldur();
         snkPlanCiz();
       }
     } catch (e) {
@@ -1406,29 +2277,9 @@
     }
   }
 
-  /* Oyun sesinin ŞU ANDA bulunduğu kanal. Panel onu en alta taşıyacak; hangisi olduğunu
-     bilmesi gerek. Varsayılan A3 (kullanıcının OBS düzeni), klip içermiyorsa "yok". */
-  function snkOyunKanalDoldur() {
-    var sel = $("snkOyunKanal"); if (!sel) return;
-    var onceki = sel.value;
-    sel.innerHTML = "";
-    var o0 = document.createElement("option");
-    o0.value = ""; o0.textContent = "yok / zaten en altta";
-    sel.appendChild(o0);
-    var n = snk.sesKanalSayisi || 0, kl = snk.kanalKlip || [];
-    for (var i = 0; i < n; i++) {
-      if (i === 0) continue;                       // A1 = OBS mikrofonu, oyun sesi olamaz
-      var o = document.createElement("option");
-      o.value = String(i);
-      o.textContent = "A" + (i + 1) + (kl[i] ? (" — " + kl[i] + " klip") : " — boş");
-      sel.appendChild(o);
-    }
-    var kayitli = lsGet("snkOyunKanal", null);
-    if (onceki) sel.value = onceki;
-    else if (kayitli != null && kayitli !== "") sel.value = kayitli;
-    else if (n > 2 && kl[2]) sel.value = "2";      // varsayılan: A3
-    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
-  }
+  /* snkOyunKanalDoldur() KALDIRILDI — "Oyun sesi şu an hangi kanalda?" seçici artık yok.
+     Panel oyun sesini taşımıyor, dolayısıyla nerede olduğunu bilmesine de gerek yok:
+     yerleşim tablosu en alta "Oyun sesi" satırı koyar, kullanıcı klibi oraya elle taşır. */
 
   // ---------- 3) yerleşim tablosu ----------
   // hizala.js'in ASCII güven değerleri -> ekranda düzgün Türkçe
@@ -1451,9 +2302,26 @@
       orta.appendChild(isim);
       var alt = document.createElement("div"); alt.className = "snk-dosya";
       alt.textContent = p.dosya ? p.dosya.dosya : (p.not || "");
-      /* Oyun sesi satırı bir BİLGİ değil, panelin YAPACAĞI iş. Soluk 11px yazıda kaybolup
+      /* Oyun sesi satırı bir BİLGİ değil, KULLANICININ yapacağı iş. Soluk 11px yazıda kaybolup
          "kilitli, dokunulmayacak" gibi okunuyordu; normal renkte ve sarmalı göster. */
       if (p.oyun) { alt.style.color = "var(--text)"; alt.style.whiteSpace = "normal"; }
+      /* OYUN SESİ TAŞINDI MI? Panel artık taşımıyor, kullanıcı elle yapıyor — unutup Uygula'ya
+         basarsa oyun sesinin durduğu kanala bir kişi yazılır ve oyun sesi EZİLİR. Hedef kanalın
+         dolu/boş olması bunun tek görünür işareti, satırda söylensin. */
+      if (p.oyun && snk.kanalKlip) {
+        var od = document.createElement("div");
+        od.className = "snk-dosya"; od.style.whiteSpace = "normal";
+        if (snk.kanalKlip[p.kanal] > 0) {
+          od.style.color = "var(--good)";
+          od.textContent = "✓ A" + (p.kanal + 1) + "'de " + snk.kanalKlip[p.kanal] +
+                           " klip var — taşımışsın gibi görünüyor";
+        } else {
+          od.style.color = "var(--warn)";
+          od.textContent = "⚠ A" + (p.kanal + 1) + " boş — oyun sesini oraya taşımadıysan " +
+                           "önce taşı, sonra Uygula'ya bas";
+        }
+        orta.appendChild(od);
+      }
       /* ÜZERİNE YAZMA UYARISI: yerleştirme overwriteClip ile yapılıyor. Hedef kanalda
          zaten klip varsa (tipik durum: oyun sesi hâlâ eski yerinde duruyor) o klip EZİLİR.
          Kanal sırası değiştiği için bu artık gerçek bir risk — satırda görünsün. */
@@ -1770,6 +2638,11 @@
                  snk.cekenKontrol.toFixed(2) + " sn — uyuşmuyor.");
         }
       }
+      /* Kanal durumunu ONAYDAN HEMEN ÖNCE tazele. Oyun sesini artık kullanıcı elle taşıyor ve
+         bunu panel hizalama yaparken (dakikalar sürebilir) yapmış olabilir. Bayat veriyle
+         sorulursa "A3'ün üzerine yazılacak" uyarısı yanlış çıkar ve oyun sesi satırı taşınmış
+         olduğu hâlde "boş" görünür. */
+      await snkKanalSayisiOku();
       snkPlanCiz();   // aykırı işaretleri (tutarlılık + çapraz kontrol) tabloya yansıt
 
       // --- onay ---
@@ -1792,22 +2665,20 @@
         var say = (snk.kanalKlip && snk.kanalKlip[p.kanal]) || 0;
         if (say > 0) ezilecek.push("A" + (p.kanal + 1) + " (" + say + " klip) → " + p.karakter);
       });
-      /* OYUN SESİ TAŞIMA: kişiler yerleşmeden ÖNCE yapılmalı, yoksa oyun sesi zaten ezilmiş olur.
-         Hedef = plandaki "Oyun sesi" satırının kanalı (herkesin altı). */
-      var oyunSel = $("snkOyunKanal");
-      var oyunKaynak = oyunSel && oyunSel.value !== "" ? parseInt(oyunSel.value, 10) : -1;
+      /* OYUN SESİNİ PANEL TAŞIMAZ (v1.8.1). Premiere'de klip taşıma API'si yok; tek yol
+         overwriteClip ve o, project item'dan yerleştirdiği için çoklu-akışlı OBS kaydında
+         (A1/A2/A3 = aynı dosyanın 1./2./3. akışı) hedefe oyun sesi değil MİKROFON koyuyordu.
+         Panel bunu fark edip taşımayı reddediyordu, yani özellik zaten çalışmıyordu.
+         Artık klibi kullanıcı elle taşıyor; panelin işi yalnızca hatırlatmak: en alttaki
+         "Oyun sesi" satırının kanalı boşsa taşıma muhtemelen yapılmamıştır ve Uygula'ya
+         basılırsa oyun sesinin GERÇEKTEN durduğu kanal bir kişiyle ezilir. */
       var oyunSatir = null;
       snk.plan.forEach(function (p) { if (p.oyun) oyunSatir = p; });
-      var oyunHedef = oyunSatir ? oyunSatir.kanal : -1;
-      var oyunTasinacak = (oyunKaynak >= 0 && oyunHedef >= 0 && oyunKaynak !== oyunHedef);
-      var oyunNot = oyunTasinacak
-        ? ("\n\nOyun sesi A" + (oyunKaynak + 1) + " → A" + (oyunHedef + 1) + " taşınacak " +
-           "(kişiler yerleşmeden önce).\nNOT: taşıma kopyalama yoluyla yapılıyor — o klibe " +
-           "uyguladığın efektler ve ses seviyesi anahtar kareleri KORUNMAZ.")
-        : "";
-      // Taşınacak kanalı ezme listesinden düş: orası taşımadan sonra boşalmış olacak.
-      if (oyunTasinacak) {
-        ezilecek = ezilecek.filter(function (s) { return s.indexOf("A" + (oyunKaynak + 1) + " (") !== 0; });
+      var oyunNot = "";
+      if (oyunSatir && snk.kanalKlip && !(snk.kanalKlip[oyunSatir.kanal] > 0)) {
+        oyunNot = "\n\n⚠ A" + (oyunSatir.kanal + 1) + " (oyun sesi kanalı) BOŞ. Oyun sesini oraya " +
+                  "taşımadıysan şimdi İPTAL et, Premiere'de klibi elle en alta taşı, sonra tekrar " +
+                  "Uygula'ya bas — yoksa oyun sesinin durduğu kanal bir kişiyle ezilir.";
       }
       var ezmeNot = ezilecek.length
         ? ("\n\n⚠ ŞU KANALLARDA ZATEN KLİP VAR, ÜZERİNE YAZILACAK:\n• " + ezilecek.join("\n• "))
@@ -1843,25 +2714,9 @@
         if (!devamKayit) { snkFail("İptal edildi", "warn"); return; }
       }
 
-      /* OYUN SESİNİ TAŞI — kişiler yerleşmeden ÖNCE. Sıra kritik: sonra yapılsaydı hedef
-         kanala zaten bir kişi konmuş olurdu ve taşıma "hedef boş değil" diye reddedilirdi;
-         daha kötüsü, kaynak kanala (A3) kişi yazılıp oyun sesi çoktan ezilmiş olurdu. */
-      if (oyunTasinacak) {
-        if (snk.iptal) throw new Error("İptal edildi");
-        snkProgress(88, "Oyun sesi A" + (oyunHedef + 1) + "'e taşınıyor…");
-        var tas = String(await evalES("kanalTasi(" + oyunKaynak + "," + oyunHedef + ")"));
-        snkLog("Oyun sesi taşıma: " + tas);
-        if (tas.indexOf("ok:") !== 0) {
-          /* Taşıma başarısızsa DEVAM ETME: kişiler yerleşirse oyun sesinin durduğu kanal
-             ezilir. host hiçbir şey silmeden döndüğü için timeline hâlâ sağlam. */
-          snkFail("⚠ Oyun sesi taşınamadı — hiçbir şey yerleştirilmedi.", "warn");
-          uiAlert("Oyun sesi taşınamadı, bu yüzden yerleştirme yapılmadı (timeline'ın bozulmasın diye).\n\n" +
-                  tas.replace(/^[a-z_]+:/, "") +
-                  "\n\nOyun sesini Premiere'de elle en alt kanala taşıyıp tekrar dene, ya da " +
-                  "“Oyun sesi şu an hangi kanalda?” seçimini “yok” yap.", "Senkron");
-          return;
-        }
-      }
+      /* Oyun sesi taşıma adımı KALDIRILDI (v1.8.1) — yukarıdaki uzun nota bak. Kullanıcı
+         klibi elle taşıdığı için burada yapılacak bir iş yok; onay metnindeki uyarı
+         (oyunNot) taşımanın atlanmış olabileceğini zaten söylüyor. */
 
       /* NEGATİF KAYMA: Craig kaydı OBS'ten ÖNCE başlamışsa klip timeline'da 0'dan önceye
          düşmeliydi — bu mümkün değil. Bu yüzden dosyanın başı ffmpeg ile kırpılır ve kırpılmış
@@ -1973,10 +2828,7 @@
   // ---------- olay bağlantıları ----------
   if ($("snkKlasor")) $("snkKlasor").addEventListener("click", snkKlasorSec);
   if ($("snkUygula")) $("snkUygula").addEventListener("click", snkCalistir);
-  // Oyun sesi kanalı seçimi hatırlansın — kullanıcının düzeni videodan videoya aynı.
-  if ($("snkOyunKanal")) $("snkOyunKanal").addEventListener("change", function () {
-    lsSet("snkOyunKanal", this.value);
-  });
+  // "Oyun sesi hangi kanalda?" seçici kaldırıldı (panel oyun sesine dokunmuyor) — bağlantı da yok.
   if ($("snkCancel")) $("snkCancel").addEventListener("click", function () {
     snk.iptal = true;
     try { if (pipeline && pipeline.cancelAll) pipeline.cancelAll(); } catch (e) {}
@@ -2262,6 +3114,16 @@
            ESKİ aralıkları uyguluyordu — yani rastgele yerlerden kesiyordu. */
         acCuts = []; acLast = null;
         acAnalizGecersiz();
+        /* ELDEKİ ALTYAZILAR ARTIK BAYAT. Cue zamanları kesim ÖNCESİNE göre üretildi; kesim
+           timeline'ı kısalttığı için "Timeline'a Ekle" onları kesilen toplam süre kadar —
+           yani DAKİKALARCA — yanlış yere koyar. Panel bunu hiç fark etmiyordu; hizalama
+           tartışması 0.3 saniyelikken bu senaryo dakikalarca kaydırıyor.
+           Bayrak yerleştirmede kontrol edilir (placeCaptions). */
+        if (allCues().length) {
+          state.cuesStale = true;
+          logLine("⚠ Kesim yapıldı — ekrandaki altyazılar kesim ÖNCESİ zamanlara ait. " +
+                  "Timeline'a eklemeden önce yeniden üret.");
+        }
       } else { acFail("⚠ " + msg, "warn"); uiAlert(msg, "Sonuç"); }
     } finally { btn.disabled = false; }
   });
@@ -2307,6 +3169,11 @@
     try { cs.evalScript('$.evalFile("' + extRoot.replace(/\\/g, "/") + '/jsx/host.jsx")'); } catch (eHost) {}
     path = require("path"); fs = require("fs"); pipeline = require(path.join(extRoot, "js", "pipeline.js"));
     cfg = pipeline.loadConfig(extRoot);
+    /* Vurucu mod modülü. YÜKLENEMEZSE panel çalışmaya DEVAM EDER — o mod bir ek özellik,
+       altyazı üretimi ondan bağımsız. Yükleme hatası log'a düşer ki "kutu işaretli ama
+       hiçbir şey olmuyor" durumu sessiz kalmasın. */
+    try { VUR = require(path.join(extRoot, "js", "vurucu.js")); }
+    catch (eVurYuk) { VUR = null; logLine("Vurucu mod modülü yüklenemedi: " + (eVurYuk.message || eVurYuk)); }
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
@@ -2378,6 +3245,11 @@
     // Shorts kutusu restoreSegs'ten SONRA: mod geri yüklendikten sonra kısıtı uygulamalı
     // (kayıtlı mod "speaker" ve Shorts açıksa Tek Stil'e geçirilir).
     wireShorts();
+    /* Vurucu mod ve API anahtarı: VUR modülü initCEP'te yükleniyor, o yüzden bunlar ondan
+       SONRA bağlanmalı — anahtar durumu notu VUR.anahtarVarMi'ye bakıyor. */
+    wireVurucu();
+    wireApiKey();
+    wirePreset();
     if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
   }
 
