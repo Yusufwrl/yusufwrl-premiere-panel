@@ -145,6 +145,17 @@
                kendi stilini elle verir. Bedeli bu; karşılığı karaktere göre renk. -->
           <p class="note" style="margin-top:10px">Yazı tipi, renk ve konumu Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> seçiliyken her karakter ayrı bir altyazı kanalına gider; hangisine hangi rengi vereceğin üretim bitince yazar.</p>
 
+          <!-- STİLLERİ PROJEYE AL: Premiere'de "New caption track > Style" listesi YALNIZ
+               proje öğelerini gösteriyor; bilgisayara kurulu yerel stiller (.prtextstyle)
+               orada çıkmıyor (kullanıcı ekran görüntüsüyle gösterdi). Bu düğme onları
+               projeye aktarıyor — Adobe'nin elle yolu Style Browser'da sağ tık →
+               "Set as track style (captions)". Her projede bir kez basılır. -->
+          <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn-ghost" id="btnStilProje" type="button">Stilleri projeye ekle</button>
+            <span class="dict-status" id="stilProjeDurum"></span>
+          </div>
+          <p class="note" style="margin-top:6px">Hazır renkli stiller bilgisayarına kurulu ama Premiere'in <b>Style</b> listesinde ancak projeye eklenince görünür. Her yeni projede bir kez bas.</p>
+
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
           <label class="switch-row" style="margin-top:14px">

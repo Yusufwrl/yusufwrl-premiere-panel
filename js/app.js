@@ -1147,6 +1147,28 @@
     presetBtnlarCiz();
   }
 
+  /* "Stilleri projeye ekle" — yerel .prtextstyle dosyalarını PROJE ÖĞESİ yapar.
+     Premiere'in "New caption track > Style" listesi yalnız proje öğelerini gösteriyor;
+     bilgisayara kurulu yerel stiller orada çıkmıyor (bkz. host.jsx stilleriProjeyeAl). */
+  function wireStilProje() {
+    var b = $("btnStilProje"), d = $("stilProjeDurum");
+    if (!b) return;
+    function yaz(m, renk) { if (d) { d.textContent = m || ""; d.style.color = renk || "var(--muted)"; } }
+    b.addEventListener("click", async function () {
+      if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
+      var klasor = stilKlasoruBul();
+      if (!klasor || !fs.existsSync(klasor)) { yaz("Stil klasörü bulunamadı", "var(--bad)"); return; }
+      b.disabled = true; yaz("ekleniyor…");
+      try {
+        var r = String(await evalES('stilleriProjeyeAl("' + esPath(klasor) + '")'));
+        logLine("Stilleri projeye ekle: " + r);
+        if (r.indexOf("ok:") === 0) yaz("✓ " + r.slice(3), "var(--good)");
+        else yaz(r.replace(/^err:/, ""), "var(--bad)");
+      } catch (e) { yaz("hata: " + (e.message || e), "var(--bad)"); }
+      finally { b.disabled = false; }
+    });
+  }
+
   function wirePreset() {
     /* HAZIR İÇERİK KURULUMU — kartlar çizilmeden ÖNCE: yeni kurulumda preset'ler dolu
        gelsin, boş kart görünüp sonradan dolmasın. Kendi kaydı olanda hiçbir şey yapmaz. */
@@ -3227,6 +3249,7 @@
     wireVurucu();
     wireApiKey();
     wirePreset();
+    wireStilProje();
     if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
   }
 

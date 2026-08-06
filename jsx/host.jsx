@@ -376,6 +376,53 @@ function _stilGez(bin, out, derinlik) {
         if (ad) out.push(ad);
     }
 }
+/* STILLERI PROJEYE AL — .prtextstyle dosyalarini PROJE OGESI yapar.
+   NEDEN GEREKLI: Premiere'de iki ayri sey var ve karistirilmasi kolay —
+     · YEREL stil  : Belgeler\Adobe\Common\Assets\Text Styles\*.prtextstyle
+                     Yalniz "Style Browser"da gorunur.
+     · PROJE stili : proje ogesi. "New caption track > Style" acilir listesi YALNIZ BUNU
+                     gosterir.
+   Yerel dosyayi kurmak altyazi stili listesinde gormek icin YETMIYOR (kullanici ekran
+   goruntusuyle gosterdi: 7 yerel stil kurulu ama listede yalnizca 2 proje ogesi vardi).
+   Adobe'nin elle yolu: Style Browser'da stile sag tik > "Set as track style (captions)",
+   ya da .prtextstyle'i Project paneline surukle. importFiles o suruklemenin script hali.
+   AYNI ADLI OGE VARSA ATLANIR — her cagrida projede kopya birikmesin. */
+function stilleriProjeyeAl(klasor) {
+    try {
+        if (!app.project) return "err:Proje acik degil";
+        var kl = new Folder(klasor);
+        if (!kl.exists) return "err:Stil klasoru yok: " + klasor;
+        var dosyalar = kl.getFiles("*.prtextstyle");
+        if (!dosyalar || !dosyalar.length) return "err:Klasorde .prtextstyle yok";
+
+        var root = app.project.rootItem, i, ad, alinacak = [], zaten = 0;
+        for (i = 0; i < dosyalar.length; i++) {
+            ad = String(dosyalar[i].name).replace(/\.prtextstyle$/i, "");
+            /* decodeURI: ExtendScript File.name yolu URI-kodlu verebiliyor
+               ("K%C4%B1rm%C4%B1z%C4%B1") ve ad karsilastirmasi tutmuyordu. */
+            try { ad = decodeURI(ad); } catch (eD) {}
+            if (_projeOgesiBul(ad)) { zaten++; continue; }
+            alinacak.push(dosyalar[i].fsName);
+        }
+        if (!alinacak.length) return "ok:0 stil eklendi (" + zaten + " zaten projede)";
+
+        try { app.project.importFiles(alinacak, true, root, false); }
+        catch (eI) { return "err:Ice aktarilamadi: " + eI.toString(); }
+
+        /* GERI OKU — "hata gelmedi" yetmez: importFiles tanimadigi bir turu sessizce
+           yok sayabilir ve panel bos yere "eklendi" der. */
+        var kondu = 0;
+        for (i = 0; i < dosyalar.length; i++) {
+            ad = String(dosyalar[i].name).replace(/\.prtextstyle$/i, "");
+            try { ad = decodeURI(ad); } catch (eD2) {}
+            if (_projeOgesiBul(ad)) kondu++;
+        }
+        kondu = kondu - zaten;
+        if (kondu <= 0) return "err:Premiere bu dosyalari proje ogesi olarak kabul etmedi";
+        return "ok:" + kondu + " stil projeye eklendi" + (zaten ? (" (" + zaten + " zaten vardi)") : "");
+    } catch (e) { return "err:" + e.toString(); }
+}
+
 // Projede ada gore oge arar (stil uygulamak icin).
 function _projeOgesiBul(ad) {
     var sonuc = { it: null };
