@@ -401,23 +401,26 @@ function stilleriProjeyeAl(klasor) {
             /* decodeURI: ExtendScript File.name yolu URI-kodlu verebiliyor
                ("K%C4%B1rm%C4%B1z%C4%B1") ve ad karsilastirmasi tutmuyordu. */
             try { ad = decodeURI(ad); } catch (eD) {}
+            /* "Zaten var mi" YALNIZ BIR TAHMIN: stilin proje ogesi olarak adi DOSYA ADI
+               olmayabiliyor — stil dosyasinin ICINDE ayri bir ad tasiyor (olculdu:
+               "Siyah Text.prtextstyle" dosyasi tarayicida "Beyaz Text" gorunuyor).
+               Bu yuzden burasi yalnizca gereksiz kopyayi AZALTMAYA calisir; basarinin
+               olcusu DEGILDIR (asagida sayiyla olculuyor). */
             if (_projeOgesiBul(ad)) { zaten++; continue; }
             alinacak.push(dosyalar[i].fsName);
         }
         if (!alinacak.length) return "ok:0 stil eklendi (" + zaten + " zaten projede)";
 
+        /* DOGRULAMA ADLA DEGIL SAYIYLA. importFiles tanimadigi turu sessizce yok
+           sayabiliyor, yani "hata gelmedi" yetmez. Ada bakan bir dogrulama ise yukaridaki
+           ad uyusmazligi yuzunden CALISAN bir icermeyi "olmadi" diye raporluyordu.
+           Kok ogenin sayisi ada bagli degil — once/sonra farki kesin olcu. */
+        var once = 0; try { once = root.children.numItems; } catch (eC0) { once = -1; }
         try { app.project.importFiles(alinacak, true, root, false); }
         catch (eI) { return "err:Ice aktarilamadi: " + eI.toString(); }
+        var sonra = once; try { sonra = root.children.numItems; } catch (eC1) {}
+        var kondu = (once < 0) ? alinacak.length : (sonra - once);
 
-        /* GERI OKU — "hata gelmedi" yetmez: importFiles tanimadigi bir turu sessizce
-           yok sayabilir ve panel bos yere "eklendi" der. */
-        var kondu = 0;
-        for (i = 0; i < dosyalar.length; i++) {
-            ad = String(dosyalar[i].name).replace(/\.prtextstyle$/i, "");
-            try { ad = decodeURI(ad); } catch (eD2) {}
-            if (_projeOgesiBul(ad)) kondu++;
-        }
-        kondu = kondu - zaten;
         if (kondu <= 0) return "err:Premiere bu dosyalari proje ogesi olarak kabul etmedi";
         return "ok:" + kondu + " stil projeye eklendi" + (zaten ? (" (" + zaten + " zaten vardi)") : "");
     } catch (e) { return "err:" + e.toString(); }
