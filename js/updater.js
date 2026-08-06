@@ -126,14 +126,20 @@ function unzip(zipPath, destDir) {
   });
 }
 
-function copyDir(src, dst, skip) {
+/* skip listesi YALNIZ PANEL KÖKÜNDE geçerli (derinlik 0).
+   TUZAK: eskiden ad her derinlikte eşleşiyordu. Kullanıcı dosyalarının hepsi zaten panel
+   kökünde, ama pakete giren varsayilan\ klasöründeki hazır dosya aynı adı taşıyınca
+   sessizce kopyalanmıyordu — panel güncelleniyor, hazır içerik gelmiyordu.
+   Aynı tuzak .gitignore ve pack-panel.ps1'de de vardı; üçü de köke sabitlendi. */
+function copyDir(src, dst, skip, derinlik) {
   skip = skip || [];
+  derinlik = derinlik || 0;
   var entries = fs.readdirSync(src, { withFileTypes: true });
   for (var i = 0; i < entries.length; i++) {
     var e = entries[i];
-    if (skip.indexOf(e.name) !== -1) continue;
+    if (derinlik === 0 && skip.indexOf(e.name) !== -1) continue;
     var s = path.join(src, e.name), d = path.join(dst, e.name);
-    if (e.isDirectory()) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); copyDir(s, d, skip); }
+    if (e.isDirectory()) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); copyDir(s, d, skip, derinlik + 1); }
     else { fs.copyFileSync(s, d); }
   }
 }

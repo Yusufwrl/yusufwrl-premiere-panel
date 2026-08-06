@@ -654,7 +654,14 @@
     try {
       var hedef = presetDosyaYolu();
       if (!fs.existsSync(hedef)) {
-        var kaynak = path.join(kok, "presetler.json");
+        /* DOSYA ADI BİLEREK "presetler.json" DEĞİL — ADI DEĞİŞTİRME.
+           Korunan kullanıcı dosyalarını atlayan üç mekanizma da adı KLASÖR FARK ETMEKSİZİN
+           eşliyor (.gitignore · pack-panel.ps1 · updater.js copyDir). Aynı adı kullanınca
+           paketteki hazır dosya üçünde de sessizce eleniyor ve arkadaşın panelinde
+           preset'ler boş geliyordu. Farklı ad bu sınıfın tamamını kökten çözüyor —
+           üstelik ARKADAŞTAKİ ESKİ updater.js için de çalışır (güncellemeyi onun
+           makinesindeki eski kod yapıyor, bizim düzeltmemiz ona sonra ulaşıyor). */
+        var kaynak = path.join(kok, "preset-paketi.json");
         if (fs.existsSync(kaynak)) {
           fs.writeFileSync(hedef, fs.readFileSync(kaynak));
           _presetYigin = null;   // yeniden okunsun
