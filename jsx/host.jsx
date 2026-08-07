@@ -980,11 +980,26 @@ function stilleriProjeyeAl(klasor) {
            sayabiliyor, yani "hata gelmedi" yetmez. Ada bakan bir dogrulama ise yukaridaki
            ad uyusmazligi yuzunden CALISAN bir icermeyi "olmadi" diye raporluyordu.
            Kok ogenin sayisi ada bagli degil — once/sonra farki kesin olcu. */
+        /* ⚠ TEK TEK ICE AKTAR — HEPSINI BIRDEN DEGIL.
+           ParsMazi'nin makinesinde bu cagri PREMIERE'I COKERTTI (7 Agustos 2026). Sebep
+           kesin olarak olculemedi (baska makine), ama toplu importFiles cokerse:
+             · hangi dosyanin sorunlu oldugu ANLASILMIYOR,
+             · o ana kadar eklenenler de kayboluyor,
+             · panel hicbir sey loglayamadan Premiere kapaniyor.
+           Tek tek gidince her dosyanin adi ONCE gunluge yaziliyor; cokme yine olursa
+           gunlugun SON satiri sucluyu gosteriyor. Ayrica bir dosya kabul edilmezse
+           digerleri yine de ekleniyor.
+           NOT: cokmeyi tamamen ONLEYEMEYIZ — ExtendScript'te bir host cokusu yakalanamaz.
+           Bu duzenleme cokmeyi TESHIS EDILEBILIR ve KISMEN ZARARSIZ hale getiriyor. */
         var once = 0; try { once = root.children.numItems; } catch (eC0) { once = -1; }
-        try { app.project.importFiles(alinacak, true, root, false); }
-        catch (eI) { return "err:Ice aktarilamadi: " + eI.toString(); }
+        var hata = [], j;
+        for (j = 0; j < alinacak.length; j++) {
+            try { app.project.importFiles([alinacak[j]], true, root, false); }
+            catch (eI) { hata.push(String(alinacak[j]).replace(/^.*[\\\/]/, "") + ": " + eI.toString()); }
+        }
         var sonra = once; try { sonra = root.children.numItems; } catch (eC1) {}
-        var kondu = (once < 0) ? alinacak.length : (sonra - once);
+        var kondu = (once < 0) ? (alinacak.length - hata.length) : (sonra - once);
+        if (!kondu && hata.length) return "err:Ice aktarilamadi — " + hata[0];
 
         if (kondu <= 0) return "err:Premiere bu dosyalari proje ogesi olarak kabul etmedi";
         return "ok:" + kondu + " stil projeye eklendi" + (zaten ? (" (" + zaten + " zaten vardi)") : "");

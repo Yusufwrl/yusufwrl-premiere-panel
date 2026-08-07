@@ -705,8 +705,22 @@
           _presetYigin = null;   // yeniden okunsun
           var ad = Object.keys(presetYiginlar());
           logLine("Hazır preset'ler kuruldu (" + ad.length + "): " + ad.join(", "));
-          _presetSecili = presetSeciliOku();
-          ad.forEach(function (a) { if (_presetSecili.indexOf(a) === -1) _presetSecili.push(a); });
+          /* ⚠ İLK KURULUMDA PAKET ADLARI TEK KAYNAK — PRESET_VARSAYILAN İLE BİRLEŞTİRME.
+             Eskiden presetSeciliOku() çağrılıyordu; localStorage boşken o PRESET_VARSAYILAN
+             döndürüyor ve paket adları ONUN ÜSTÜNE ekleniyordu. PRESET_VARSAYILAN eski bir
+             TAHMİN listesi (kullanıcının bin ekran görüntüsünden yazılmıştı) ve içinde artık
+             var olmayan adlar duruyor — ParsMazi'de tam olarak bu oldu: 8 paket preset'i
+             yerine 10 kart çıktı, ikisi ("Cinematic Border Out", "Zoom Out Center") hiçbir
+             kayda karşılık gelmiyordu ve basınca boş uygulanıyordu. Kullanıcı bunu
+             "preset'ler eski gelmiş" diye bildirdi — gerçek sebep buydu.
+             Kullanıcının KENDİ seçimi varsa (localStorage dolu) ona dokunulmuyor. */
+          var seciliHam = lsGet("preset.secili", "");
+          if (!seciliHam) {
+            _presetSecili = ad.slice(0);
+          } else {
+            _presetSecili = presetSeciliOku();
+            ad.forEach(function (a) { if (_presetSecili.indexOf(a) === -1) _presetSecili.push(a); });
+          }
           presetSeciliYaz();
         }
       }
@@ -4359,6 +4373,27 @@
        görünmez bir yerde bekler ve kullanıcı "panel donmuş" sanırdı. Kilit açılana
        kadar hiçbir soru sorulmuyor. Lisans yoksa/hata varsa kapı zaten hemen açılıyor. */
     lisansKapisi().then(function () {
+      /* ⚠ HAZIR İÇERİK BURADA KURULUR — KİLİT AÇILDIKTAN SONRA.
+         Eskiden yalnız wirePreset() içinden çağrılıyordu; o da wirePersistence() üzerinden
+         lisans kapısı çözülmeden SENKRON çalışıyor. Kilitliyken içerik dağıtılmasın diye
+         oraya bir kontrol koymuştuk — doğru fikir, yanlış yer: ilk açılışta panel kilitli
+         olduğu için fonksiyon geri dönüyor, kullanıcı kodu girip paneli açıyor ama
+         varsayilanlariKur BİR DAHA ÇAĞRILMIYOR.
+         GERÇEKTEN OLDU (ParsMazi, 7 Ağustos 2026): preset'ler, emoji resimleri ve Track
+         Style'ların HİÇBİRİ kurulmadı; panel kendi sabit kart listesini gösterdiği için
+         sorun "preset'ler eski gelmiş" gibi göründü ve gerçek sebep gizlendi.
+         Buradaki çağrı wirePreset'tekini de kapsıyor (fonksiyon "varsa üzerine yazmaz",
+         iki kez çağrılması zararsız). */
+      try { varsayilanlariKur(); } catch (eVk) { logLine("Hazır içerik kurulamadı: " + (eVk.message || eVk)); }
+      /* Kartlar hazır içerikten ÖNCE çizilmişti — yeni kurulan preset'lerle yeniden çiz,
+         yoksa kullanıcı kayıt dolu olduğu hâlde boş/eksik kart görür. */
+      try { if (typeof presetBtnlarCiz === "function") presetBtnlarCiz(); } catch (ePb) {}
+      /* Emoji klasörü ayarı varsayilanlariKur içinde yazıldı; ekrandaki kutu ondan ÖNCE
+         doldurulmuştu, tazele. */
+      try {
+        var eInp = $("emojiKlasor");
+        if (eInp && !eInp.value) eInp.value = lsGet("emoji.klasor", "") || emojiKlasorVarsayilan();
+      } catch (eEi) {}
       var oturumIsi;
       try { oturumIsi = offerSessionRestore(); } catch (eSes) {}
       return Promise.resolve(oturumIsi)["catch"](function () {});
