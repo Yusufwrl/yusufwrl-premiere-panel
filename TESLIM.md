@@ -11,18 +11,22 @@ Bir de **kod** verildi. Kodu kurulumdan sonra bir kere gireceksin.
 
 ## 1. Motoru aç (önce bunu yap)
 
-`YusufwrlEngine.rar` dosyasını indir ve **`C:\` sürücüsünün köküne** aç. Sonuç şöyle olmalı:
+Gelen `.rar` dosyasını indir ve **`C:\` sürücüsünün köküne** aç. İçinden şuna benzer bir
+klasör çıkacak:
 
 ```
-C:\YusufwrlEngine\
+C:\YusufwrlEngine-teslim\
     Faster-Whisper-XXL\
     fonts\
     styles\
 ```
 
-Başka bir yere de açabilirsin (D: sürücüsü, Belgeler…) — kurulum sırasında yerini soracak.
-Yalnız **yolda Türkçe karakter olmasın** (`Masaüstü`, `Müzikler` gibi): panel o klasörleri
-okurken takılabiliyor.
+İstersen klasörün adını `YusufwrlEngine` yapabilirsin — şart değil, kurulum sırasında
+yerini zaten göstereceksin.
+
+Başka bir yere de açabilirsin (D: sürücüsü, Belgeler…). Yalnız **yolda Türkçe karakter
+olmasın** (`Masaüstü`, `Müzikler` gibi): panel o klasörleri okurken takılabiliyor.
+`C:\` kökü en güvenlisi.
 
 ## 2. Paneli kur
 
