@@ -376,6 +376,571 @@ function _stilGez(bin, out, derinlik) {
         if (ad) out.push(ad);
     }
 }
+/* ================= VIDEO KANALLARI (emoji icin) =================
+   getSequenceInfoJSON video tarafinda yalnizca KANAL SAYISI veriyor; "hangi kanal
+   TAMAMEN BOS" sorusu icin klip sayisi gerekiyor. Emoji yerlestirmenin tek guvenlik
+   kurali bu: aritmetikle kanal secmek YOK (v1.8.0 felaketi tam olarak oydu), yalnizca
+   "clips.numItems === 0" olan kanal kabul edilir. */
+function getVideoTracksJSON() {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({ error: "no_sequence" });
+        var out = [], n = 0, i, tr, kilit;
+        try { n = seq.videoTracks.numTracks; } catch (e0) { n = 0; }
+        for (i = 0; i < n; i++) {
+            tr = null; try { tr = seq.videoTracks[i]; } catch (e1) { continue; }
+            kilit = false; try { kilit = !!tr.isLocked(); } catch (e2) {}
+            out.push({ idx: i, klip: (function () { try { return tr.clips.numItems; } catch (e3) { return -1; } })(),
+                       kilit: kilit });
+        }
+        return JSON.stringify({ tracks: out });
+    } catch (e) { return JSON.stringify({ error: e.toString() }); }
+}
+
+/* ================= EMOJI YERLESTIRME =================
+   OLCULDU (kullanicinin makinesi, Premiere 26.3.0, 7 Agustos 2026 — emojiTani ciktisi):
+     · Sekans 1920x1080; overwriteClip bos video kanalina PNG koyuyor.
+     · Premiere still'i VARSAYILAN 5 SANIYE koyuyor. Bu tercih script'ten OKUNAMIYOR.
+       Bedeli: 5 sn'den yakin iki emojiden ikincisi birincinin UZERINE yazar. Bu yuzden
+       her klip konar konmaz SURESI yazilir ve bir sonraki ancak ondan sonra konur.
+     · clip.end YAZILABILIYOR (6.5 sn istendi, 6.5 okundu) — Time.ticks ile.
+     · Motion > Position NORMALIZE: [0.5,0.5] = merkez (piksel DEGIL). Yazma tuttu.
+     · Motion > Scale yuzde; yazma tuttu.
+   GUVENLIK — TEK KURAL: hedef kanal clips.numItems === 0 olmak ZORUNDA. Kanal numarasi
+   HESAPLANMAZ, panelden gelir ve burada dogrulanir. v1.8.0 felaketi (kullanicinin
+   goruntusunun silinmesi) tam olarak "kanal numarasini hesaplamaktan" cikmisti.
+   Plan satiri: yol|kanal|basSn|sureSn|xNorm|yNorm|olcek|ad */
+/* SON EMNIYET TAVANI — SERT DUVAR DEGIL. 100'du ve asilirsa activeSequence bile okunmadan
+   "err:" donuyordu: 101 satirlik planda TEK emoji bile konmuyor, odenmis API istegi ve
+   25 dakikalik GPU isi copa gidiyordu. Panel artik kendi tarafinda 300'e SEYRELTIYOR
+   (reddetmiyor) ve plani parcalara bolerek gonderiyor; buradaki sayi yalnizca panel
+   tamamen yanlis bir sey gonderirse diye duruyor. */
+var EMOJI_TAVAN = 400;
+var EMOJI_BIN = "Yusufwrl Emoji";
+
+function _emojiBinBul(root) {
+    var i, ch, t;
+    try {
+        for (i = 0; i < root.children.numItems; i++) {
+            ch = root.children[i];
+            t = -1; try { t = ch.type; } catch (e0) {}
+            if (t !== 2) continue;                       // 2 = BIN
+            var ad = ""; try { ad = String(ch.name); } catch (e1) {}
+            if (ad === EMOJI_BIN) { try { if (ch.children) return ch; } catch (e2) {} }
+        }
+    } catch (e) {}
+    return null;
+}
+/* Bin icinde MEDYA YOLUNA gore ara — ada gore degil. Ayni ada sahip iki farkli dosya
+   olabilir ve ad eslesmesi yanlis PNG'yi koydurur.
+   ⚠ ARTIK CAGRILMIYOR: emoji yolu _binYolHaritasi + _haritadaBul sozlugune gecti (asagi bak).
+   Tek seferlik/kucuk aramalar icin duruyor — sozluk kurmanin maliyeti tek arama icin fazla. */
+function _binYolBul(bin, yol) {
+    var i, ch, p, hedef = String(yol).replace(/\\/g, "/").toLowerCase();
+    try {
+        for (i = 0; i < bin.children.numItems; i++) {
+            ch = bin.children[i];
+            p = ""; try { p = String(ch.getMediaPath()); } catch (e0) { p = ""; }
+            if (p && p.replace(/\\/g, "/").toLowerCase() === hedef) return ch;
+        }
+    } catch (e) {}
+    return null;
+}
+/* Bin icindeki TUM medya yollarini bir sozluge doker (kucuk harf, "/" ayrac, "p" onekli).
+   NEDEN: _binYolBul bin cocuklarini LINEER tariyor ve plan satiri BASINA cagriliyor —
+   200 emoji x 20 PNG = 4000 getMediaPath cagrisi; kanal dogrulamasinda 312 klipli bir
+   kanalda 6000+. Sozluk bunu O(1)'e indiriyor.
+   "p" oneki ZORUNLU: "__proto__" / "constructor" gibi bir anahtar duz nesnede prototip
+   alanina carpar ve sessizce yanlis esler (ayni onek vurucu.js'te ayni sebeple var). */
+function _binYolHaritasi(bin) {
+    var h = {}, i, ch, p;
+    if (!bin) return h;
+    try {
+        for (i = 0; i < bin.children.numItems; i++) {
+            ch = bin.children[i];
+            p = ""; try { p = String(ch.getMediaPath()); } catch (e0) { p = ""; }
+            if (p) h["p" + p.replace(/\\/g, "/").toLowerCase()] = ch;
+        }
+    } catch (e) {}
+    return h;
+}
+function _haritadaBul(harita, yol) {
+    if (!yol) return null;
+    var k = "p" + String(yol).replace(/\\/g, "/").toLowerCase();
+    return harita[k] ? harita[k] : null;
+}
+
+/* HANGI VIDEO KANALI PANELIN EMOJI KATMANI?
+   Panel bunu bilemiyordu ve her calistirmada "en ustteki BOS kanal"i seciyordu: ikinci
+   basista onceki katman dolu oldugu icin BIR UST kanala IKINCI bir tam set koyuyor, her
+   emoji ekranda iki kez ciziliyordu — host uyarmiyordu cunku o kanal gercekten bostu.
+   Ustte bos kanal yoksa panel "Add Track ile ekle" diyip tuzagi kullaniciya kurduruyordu.
+   OLCULDU (kullanicinin projesi, 7 Agustos 2026): tam boyle bes katman birikmis —
+   V6:235 · V7:125 · V8:77 · V9:29 · V10:13 klip.
+
+   ⚠ EMOJI MI DEGIL MI KARARINI BIN VERMIYOR, PANEL VERIYOR — DOSYA YOLUNA gore.
+   Eski hal "Yusufwrl Emoji" adli bin'e bakiyordu ve o binde OLMAYAN her klibi kullanicinin
+   goruntusu sayiyordu. Ama emojiYerlestir'de `createBin` basarisiz olursa kod `bin = root`a
+   dusuyor ve PNG'ler proje KOKUNE import ediliyor; o zaman bin aramasi bos donuyor ve panel
+   KENDI koydugu 479 emojiyi yabanci klip saniyor. Sonuc: hem "bos kanal yok" diyor hem
+   "Emojileri Sil" o klipleri temizleyemiyor. Yol karsilastirmasi bin'den bagimsiz calisir —
+   bin tasinsa, silinse, hic olusmasa bile.
+   Donus: { tracks: [{ idx, klip, kilit, yollar: [{y, n}] }] }
+     yollar = kanaldaki TEKIL medya yollari ve her birinden kac klip oldugu (emoji katmaninda
+     20 PNG var, goruntu kanalinda 1-2 dosya — yani liste kucuk kalir, 479 klip icin bile). */
+function emojiKanallariJSON() {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({ error: "no_sequence" });
+        var out = [], n = 0, i, j, tr, kilit, say, c, p, hy, yl, k;
+        try { n = seq.videoTracks.numTracks; } catch (e0) { n = 0; }
+        for (i = 0; i < n; i++) {
+            tr = null; try { tr = seq.videoTracks[i]; } catch (e1) { continue; }
+            kilit = false; try { kilit = !!tr.isLocked(); } catch (e2) {}
+            say = -1; try { say = tr.clips.numItems; } catch (e3) { say = -1; }
+            hy = {}; yl = [];
+            for (j = 0; j < say; j++) {
+                c = null; try { c = tr.clips[j]; } catch (e4) { c = null; }
+                p = ""; try { p = String(c.projectItem.getMediaPath()); } catch (e5) { p = ""; }
+                // "p" oneki: "__proto__" gibi bir anahtar duz nesnede prototipe carpar.
+                k = "p" + p.replace(/\\/g, "/").toLowerCase();
+                if (!hy[k]) { hy[k] = { y: p, n: 0 }; yl.push(hy[k]); }
+                hy[k].n++;
+            }
+            out.push({ idx: i, klip: say, kilit: kilit, yollar: yl });
+        }
+        return JSON.stringify({ tracks: out });
+    } catch (e) { return JSON.stringify({ error: e.toString() }); }
+}
+
+function _klipBulZamanda(vt, sn) {
+    var i, c, s;
+    try {
+        for (i = 0; i < vt.clips.numItems; i++) {
+            c = vt.clips[i]; s = _zamanSn(c.start);
+            if (!isNaN(s) && Math.abs(s - sn) < 0.05) return c;
+        }
+    } catch (e) {}
+    return null;
+}
+/* devamMi === "1": bu, cok parcali bir yerlestirmenin DEVAM parcasi (bkz. app.js
+   EMOJI_PARCA). Tek cagrida 150+ emoji konarken Premiere dakikalarca DONUYOR ve panel
+   ilerleme gosteremiyor; plan parcalara bolununce 2. parca "kanal bos degil" diye
+   reddediliyordu. Bu bayrak yalnizca o kurali gevsetiyor — kullanicinin goruntusunun
+   oldugu kanal HALA reddediliyor (asagida yabanci klip aramasi). */
+function emojiYerlestir(planYol, devamMi) {
+    try {
+        var ham = _readFileUTF8(planYol);
+        var satirlar = String(ham).split(/\r?\n/), plan = [], i, p;
+        for (i = 0; i < satirlar.length; i++) {
+            if (!satirlar[i] || !satirlar[i].length) continue;
+            p = satirlar[i].split("|");
+            if (p.length < 8) continue;
+            plan.push({ yol: p[0], kanal: parseInt(p[1], 10), bas: parseFloat(p[2]),
+                        sure: parseFloat(p[3]), x: parseFloat(p[4]), y: parseFloat(p[5]),
+                        olcek: parseFloat(p[6]), ad: p[7] });
+        }
+        if (!plan.length) return "err:Plan bos";
+        if (plan.length > EMOJI_TAVAN) return "err:" + plan.length + " emoji cok fazla (tavan " + EMOJI_TAVAN + ") — sikligi azalt";
+
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var kanal = plan[0].kanal;
+        if (isNaN(kanal) || kanal < 0 || kanal >= seq.videoTracks.numTracks) return "err:V" + (kanal + 1) + " kanali yok";
+        var vt = seq.videoTracks[kanal];
+        try { if (vt.isLocked()) return "err:V" + (kanal + 1) + " KILITLI — kilidi ac"; } catch (eL) {}
+        /* Bin ONCE bulunur (yaratilmadan): asagidaki guvenlik kontrolu kanaldaki kliplerin
+           BIZIM emojilerimiz olup olmadigini bu sozlukten ogreniyor. */
+        var root = app.project.rootItem, bin = _emojiBinBul(root);
+        var harita = _binYolHaritasi(bin);
+
+        /* EMOJI KLASORLERI — plandaki PNG yollarindan turetilir. Asagidaki "devam parcasi"
+           kontrolu kanaldaki kliplerin BIZIM emojilerimiz olup olmadigini buradan da
+           ogreniyor: bin'e tek basina guvenmek yetmiyor, cunku createBin basarisiz olursa
+           PNG'ler proje KOKUNE import ediliyor ve bin aramasi bos donuyor (kullanicinin
+           projesinde tam olarak bu oldu — 479 emoji "yabanci klip" sanildi). */
+        var klasorler = {}, kk, kd;
+        for (i = 0; i < plan.length; i++) {
+            kk = String(plan[i].yol).replace(/\\/g, "/").toLowerCase();
+            kd = kk.lastIndexOf("/");
+            if (kd > 0) klasorler["k" + kk.slice(0, kd + 1)] = true;
+        }
+        function _emojiKlasorde(yol) {
+            var y = String(yol).replace(/\\/g, "/").toLowerCase(), a;
+            for (a in klasorler) {
+                if (!klasorler.hasOwnProperty(a)) continue;
+                if (y.indexOf(a.slice(1)) === 0) return true;
+            }
+            return false;
+        }
+
+        /* GUVENLIK KURALI — ILK PARCADA AYNEN ESKISI GIBI, ARITMETIK YOK.
+           devam DEGILSE: kanal BOS olmak ZORUNDA (v1.8.0 korumasi — kullanicinin
+             goruntusunun silinmesi tam olarak "kanal numarasini hesaplamaktan" cikmisti).
+           devam ISE: kanal bos YA DA icindeki HER klip Emoji bin'inden olmali. Bu gevseme
+             korumayi ZAYIFLATMIYOR: tek bir yabanci klip varsa hicbir sey yapilmiyor. */
+        var devam = (String(devamMi) === "1");
+        var mevcut = -1; try { mevcut = vt.clips.numItems; } catch (eN) {}
+        if (mevcut < 0) return "err:V" + (kanal + 1) + " kanalinin klipleri okunamadi";
+        /* ⚠ sonBitis BURADA tanimlanir ve BIR DAHA tanimlanmaz. Asagidaki yerlestirme
+           dongusunde ikinci bir "var sonBitis = -1" olsaydi burada hesaplanan deger
+           SESSIZCE ezilirdi (ES3 ikinci var'a hata vermez) ve parcalar arasi cakisma freni
+           kagit uzerinde var ama calismaz olurdu. */
+        var sonBitis = -1;
+        if (mevcut !== 0) {
+            if (!devam) return "err:V" + (kanal + 1) + " BOS DEGIL (" + mevcut + " klip var) — emoji ancak bos bir video kanalina konur";
+            var yabanci = 0, ci, cc, cp, ce;
+            for (ci = 0; ci < mevcut; ci++) {
+                cc = null; try { cc = vt.clips[ci]; } catch (eC) { cc = null; }
+                cp = ""; try { cp = String(cc.projectItem.getMediaPath()); } catch (eCp) { cp = ""; }
+                if (cp && (_haritadaBul(harita, cp) || _emojiKlasorde(cp))) {
+                    /* PARCALAR ARASI CAKISMA DEVAMLILIGI: fren kanaldaki EN GEC bitisten
+                       baslamali. Her cagrida -1'e sifirlansaydi 2. parcanin ilk emojisi
+                       1. parcanin sonuncusunun ustune biner ve overwriteClip onu kirpardi. */
+                    ce = _zamanSn(cc.end);
+                    if (!isNaN(ce) && ce > sonBitis) sonBitis = ce;
+                } else yabanci++;
+            }
+            if (yabanci) return "err:V" + (kanal + 1) + " kanalinda emoji OLMAYAN " + yabanci +
+                                " klip var — yazilmadi";
+        }
+
+        // Bin yoksa yarat. Kosulsuz createBin her calistirmada kopya uretir.
+        if (!bin) {
+            try { bin = root.createBin(EMOJI_BIN); } catch (eB) { bin = null; }
+            if (!bin) bin = root;
+        }
+
+        /* Eksik PNG'leri BIR KEZ ice aktar (medya yoluna gore). */
+        var eksik = [], gorulen = {}, j;
+        for (i = 0; i < plan.length; i++) {
+            if (gorulen[plan[i].yol]) continue;
+            gorulen[plan[i].yol] = true;
+            if (!_haritadaBul(harita, plan[i].yol)) eksik.push(plan[i].yol);
+        }
+        if (eksik.length) {
+            try { app.project.importFiles(eksik, true, bin, false); }
+            catch (eI) { return "err:Emoji resimleri ice aktarilamadi: " + eI.toString(); }
+            // Yeni ogeler haritada YOK — yenile, yoksa hepsi "resim projeye alinamadi" der.
+            harita = _binYolHaritasi(bin);
+        }
+
+        var ok = 0, hata = [];
+        for (i = 0; i < plan.length; i++) {
+            var it = plan[i];
+            /* CAKISMA FRENI: onceki emoji hala ekrandayken ustune yazma. */
+            if (sonBitis > 0 && it.bas < sonBitis - 0.001) {
+                hata.push(it.ad + " (onceki emojiyle cakisiyor, atlandi)");
+                continue;
+            }
+            var pi = _haritadaBul(harita, it.yol);
+            if (!pi) { hata.push(it.ad + " (resim projeye alinamadi)"); continue; }
+
+            var oncekiSayi = vt.clips.numItems;
+            try { vt.overwriteClip(pi, it.bas); }
+            catch (eO) { hata.push(it.ad + " (yerlestirilemedi: " + eO.toString() + ")"); continue; }
+            if (vt.clips.numItems <= oncekiSayi) { hata.push(it.ad + " (klip olusmadi)"); continue; }
+
+            /* KONAN KLIBI BUL. Plan zaman sirasinda ve sonBitis freni geriye yazmayi
+               engelledigi icin yeni klip DAIMA sonuncudur — devam parcasinda kanal dolu
+               baslasa bile, cunku o parca oncekinin bitisinden SONRA yaziyor. Zaman
+               eslesmesi yalnizca DOGRULAMA. Eskiden yalniz
+               zamana bakiliyordu ve 0.05 sn tolerans (23.976 fps'te tek kare 0.042 sn)
+               tutmazsa klip ORTADA KALIYORDU: 5 sn'lik, tam ekran, merkezde bir cop klip —
+               ustelik sonBitis guncellenmedigi icin sonraki emoji onu bilmiyordu. */
+            var ti = null;
+            try { ti = vt.clips[vt.clips.numItems - 1]; } catch (eSon) { ti = null; }
+            if (ti) {
+                var sBas = _zamanSn(ti.start);
+                if (isNaN(sBas) || Math.abs(sBas - it.bas) >= 0.05) ti = _klipBulZamanda(vt, it.bas) || ti;
+            } else ti = _klipBulZamanda(vt, it.bas);
+            if (!ti) {
+                /* Klibe hic erisemedik: 5 sn'lik cop birakma, SON klibi kaldirmayi dene. */
+                try { vt.clips[vt.clips.numItems - 1].remove(false, false); } catch (eTem) {}
+                hata.push(it.ad + " (konan klip bulunamadi, kaldirildi)");
+                continue;
+            }
+
+            /* SURE — SART. Varsayilan 5 sn birakilirsa sonraki emoji bunun ustune biner. */
+            var istenenSon = it.bas + it.sure, sureTuttu = false;
+            try {
+                var t = new Time(); t.ticks = String(Math.round(istenenSon * TICK_SN));
+                ti.end = t;
+                sureTuttu = (Math.abs(_zamanSn(ti.end) - istenenSon) < 0.05);
+            } catch (eS) { sureTuttu = false; }
+            if (!sureTuttu) {
+                /* Suresi yazilamayan klip 5 sn kalir ve sonrakini yer — BIRAKMA, SIL. */
+                try { ti.remove(false, false); } catch (eR) {}
+                hata.push(it.ad + " (suresi yazilamadi, kaldirildi)");
+                continue;
+            }
+
+            /* KONUM + BOYUT. Yazilamazsa emoji SILINMEZ (ortada durur, kullanici gorur ve
+               elle tasiyabilir) ama rapora dusler. */
+            var notlar = "";
+            var pos = _paramAraTum(ti, ["Position", "Konum"]);
+            if (pos) {
+                try {
+                    pos.setValue([it.x, it.y], true);
+                    if (!_statikTuttu(pos, [it.x, it.y])) notlar += " (konum tutmadi)";
+                } catch (eP) { notlar += " (konum yazilamadi)"; }
+            } else notlar += " (Position yok)";
+            /* OLCEK YAZILAMAZSA KLIBI SIL — konum yazilamamasiyla AYNI SEY DEGIL.
+               Konum tutmazsa emoji ortada durur (cirkin ama gorunur). Olcek tutmazsa PNG
+               kendi boyutunda gelir: 2000px'lik bir resim 1080p karede EKRANI KAPATIR ve
+               1.6 sn boyunca video gorunmez. Boyle bir klibi birakmaktansa hic koymamak
+               yegdir. */
+            var scl = _paramAraTum(ti, ["Scale", "Ölçek", "Olcek"]);
+            var olcekOk = true;
+            if (!isNaN(it.olcek)) {
+                if (!scl) olcekOk = false;
+                else {
+                    try {
+                        scl.setValue(it.olcek, true);
+                        olcekOk = _statikTuttu(scl, it.olcek);
+                    } catch (eSc) { olcekOk = false; }
+                }
+            }
+            if (!olcekOk) {
+                try { ti.remove(false, false); } catch (eR2) {}
+                hata.push(it.ad + " (olcek yazilamadi — ekrani kaplamasin diye kaldirildi)");
+                continue;
+            }
+            if (notlar) hata.push(it.ad + notlar);
+            ok++;
+            /* FRENI GERI OKUNAN BITISTEN KUR, istenenden DEGIL. Premiere bitisi KAREYE
+               yuvarliyor ve yukari yuvarlarsa gercek bitis istenenden buyuk oluyor; fren
+               istenene gore kurulursa sonraki emoji o farkin icine dusup oncekinin son
+               karesini kirpar. Emojiler seyrekken gorunmezdi; sure artik CUMLE BOYUNCA
+               oldugu ve emojiler arka arkaya gelebildigi icin her emojide olur. */
+            var gercekSon = _zamanSn(ti.end);
+            sonBitis = (!isNaN(gercekSon) && gercekSon > istenenSon) ? gercekSon : istenenSon;
+        }
+
+        if (!ok) return "err:" + (hata.length ? hata[0] : "hicbir emoji konmadi");
+        var msg = "ok:" + ok + "/" + plan.length + " emoji kondu (V" + (kanal + 1) + ")";
+        if (ok < plan.length) msg += " — " + (plan.length - ok) + " tanesi OLMADI";
+        /* HEPSI KONSA BILE UYARI VARSA SOYLE. Eskiden konum/olcek uyarilari "ok:40/40"
+           icinde kayboluyor, panel de yesil gosteriyordu (kismi-basari testi yalniz
+           "OLMADI" ariyor). 40 klibin 40'inda konum tutmamis olabilir. */
+        else if (hata.length) msg += " — " + hata.length + " UYARI";
+        if (hata.length) msg += " | " + hata.slice(0, 5).join(" ; ") +
+                                (hata.length > 5 ? (" … (+" + (hata.length - 5) + ")") : "");
+        return msg;
+    } catch (e) { return "err:" + e.toString(); }
+}
+/* Emoji kanalini TEMIZLE — "begenmedim, tekrar dene" akisi icin.
+   YALNIZ verilen kanal ve YALNIZ Emoji bin'inden gelen klipler silinir; kanalda baska bir
+   sey varsa hicbir sey yapilmaz (kullanicinin klibini silmek en pahali hata olurdu). */
+/* yolDosyasi: satir basina bir MEDYA YOLU — silinecek kliplerin dosyalari. Panel bu listeyi
+   emojiKanallariJSON'dan aldigi yollari kendi emoji klasoruyle karsilastirarak uretiyor.
+   NEDEN DOSYA: evalScript string literaline gomulen Turkce karakter kirilgan (proje geneli
+   kural) ve emoji klasoru "Masaüstü" iceriyor.
+   NEDEN BIN'E GUVENILMIYOR: emojiYerlestir'de createBin basarisiz olursa PNG'ler proje
+   KOKUNE import ediliyor; bin aramasi bos donuyor ve panel kendi koydugu emojileri yabanci
+   klip saniyor — kullanicinin projesinde tam olarak bu oldu (5 katman, 479 klip temizlenemedi).
+   Dosya verilmezse eski bin yoluna dusulur (geriye uyumluluk). */
+function emojiTemizle(kanalNo, yolDosyasi) {
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "err:Aktif sekans yok";
+        var k = parseInt(kanalNo, 10);
+        if (isNaN(k) || k < 0 || k >= seq.videoTracks.numTracks) return "err:V" + (k + 1) + " kanali yok";
+        var vt = seq.videoTracks[k];
+        var harita = null;
+        if (yolDosyasi) {
+            harita = {};
+            var ham = "", satir, si2;
+            try { ham = String(_readFileUTF8(yolDosyasi)); } catch (eF) { ham = ""; }
+            satir = ham.split(/\r?\n/);
+            for (si2 = 0; si2 < satir.length; si2++) {
+                if (!satir[si2] || !satir[si2].length) continue;
+                harita["p" + satir[si2].replace(/\\/g, "/").toLowerCase()] = true;
+            }
+        } else {
+            var bin = _emojiBinBul(app.project.rootItem);
+            if (!bin) return "ok:0 emoji silindi (Emoji bin'i yok)";
+            harita = _binYolHaritasi(bin);
+        }
+        /* Once DOGRULA: kanaldaki her klip emoji mi? Degilse HIC DOKUNMA. */
+        var i, c, p, yabanci = 0, hedefler = [];
+        for (i = 0; i < vt.clips.numItems; i++) {
+            c = vt.clips[i];
+            p = ""; try { p = String(c.projectItem.getMediaPath()); } catch (e0) { p = ""; }
+            if (p && _haritadaBul(harita, p)) hedefler.push(c); else yabanci++;
+        }
+        if (yabanci) return "err:V" + (k + 1) + " kanalinda emoji OLMAYAN " + yabanci + " klip var — silinmedi";
+        var silindi = 0;
+        for (i = hedefler.length - 1; i >= 0; i--) {
+            try { hedefler[i].remove(false, false); silindi++; } catch (e1) {}
+        }
+        return "ok:" + silindi + " emoji silindi (V" + (k + 1) + ")";
+    } catch (e) { return "err:" + e.toString(); }
+}
+
+/* ================= TANILAMA: SECILI EMOJI KLIBINE NE OLDU? =================
+   Kullanici "emoji Premiere'de solundan kesiliyor" dedi; PNG'ler olculdu ve KESIK DEGIL
+   (alfa bounding box: sol kenarda opak piksel yok). Demek ki kirpma Premiere tarafinda —
+   ama panel hangi degerin yazildigini GORMUYORDU, yalniz yaziyordu.
+   Bu fonksiyon seCili klibin GERCEK durumunu dokumler: medya cozunurlugu, Motion'in butun
+   parametreleri (Scale Width / Uniform Scale / Crop* dahil — bunlardan biri kirpiyor olabilir)
+   ve klipteki TUM bilesenler (elle eklenmis bir efekt varsa orada gorunur).
+   YIKICI DEGIL: hicbir sey yazmaz, yalniz okur. */
+function emojiKlipTani() {
+    var log = [];
+    function y(s) { log.push(String(s)); }
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "HATA: aktif sekans yok";
+        var W = 0, H = 0;
+        try { W = seq.frameSizeHorizontal; H = seq.frameSizeVertical; } catch (eF) {}
+        y("Sekans: " + W + "x" + H);
+        var sec = null;
+        try { sec = seq.getSelection(); } catch (eS) {}
+        if (!sec || !sec.length) return "HATA: timeline'da bir EMOJI klibi sec, sonra tekrar bas";
+
+        var ti = null, i;
+        for (i = 0; i < sec.length; i++) { if (!_sesKlibiMi(sec[i])) { ti = sec[i]; break; } }
+        if (!ti) return "HATA: secimde video klibi yok";
+
+        var yol = "";
+        try { yol = String(ti.projectItem.getMediaPath()); } catch (e1) {}
+        y("Klip: " + yol.replace(/^.*[\\\/]/, ""));
+        // Medyanin GERCEK cozunurlugu: panel olcegi buna gore hesapliyor (620/2000 = %31).
+        try {
+            var md = ti.projectItem.getFootageInterpretation();
+            if (md) y("Medya yorumu: pixelAspect=" + md.pixelAspectRatio + " frameRate=" + md.frameRate);
+        } catch (e2) { y("Medya yorumu okunamadi"); }
+        y("Klip suresi: " + (_zamanSn(ti.end) - _zamanSn(ti.start)).toFixed(2) + " sn");
+
+        var c = ti.components, j, ps, k, dn, dv;
+        y("--- BILESENLER (" + c.numItems + ") ---");
+        for (i = 0; i < c.numItems; i++) {
+            var bad = "?", bmatch = "";
+            try { bad = String(c[i].displayName); } catch (e3) {}
+            try { bmatch = String(c[i].matchName); } catch (e4) {}
+            y("[" + i + "] " + bad + "   (" + bmatch + ")");
+            try {
+                ps = c[i].properties;
+                for (j = 0; j < ps.numItems; j++) {
+                    dn = ""; try { dn = String(ps[j].displayName || ""); } catch (e5) { continue; }
+                    /* Yalniz kirpmayla/konumla ilgili olanlari yaz — tam dokum 60+ satir olur
+                       ve panelde okunmaz. */
+                    if (!/Position|Scale|Uniform|Anchor|Crop|Opacity|Konum|Ölçek/i.test(dn)) continue;
+                    dv = "?";
+                    try { dv = JSON.stringify(ps[j].getValue()); } catch (e6) { dv = "okunamadi"; }
+                    var kf = "";
+                    try { if (ps[j].isTimeVarying()) kf = " [KEYFRAME'LI]"; } catch (e7) {}
+                    y("     " + dn + " = " + String(dv).slice(0, 40) + kf);
+                }
+            } catch (e8) { y("     (parametreler okunamadi)"); }
+        }
+        return log.join("\n");
+    } catch (e) { return "HATA: " + e.toString() + "\n" + log.join("\n"); }
+}
+
+/* ================= OLCUM: emoji yerlestirilebiliyor mu? =================
+   TEK SEFERLIK TANILAMA (presetTani / captionStilTani deseni). Uretim yolu buna
+   GUVENMEZ; amaci, kod yazmadan once su sorulari kullanicinin makinesinde CEVAPLAMAK:
+     1. Bos bir video kanalina PNG konabiliyor mu (overwriteClip)?
+     2. Premiere still'i kac saniyelik koyuyor (script'ten okunamayan tercih)?
+     3. Klibin SURESI yazilabiliyor mu (yoksa yakin emojiler birbirini yer)?
+     4. Motion > Position/Scale yazilip GERI OKUNABILIYOR mu, deger NORMALIZE mi piksel mi?
+   YIKICI DEGIL: yalniz BOS kanala dokunur ve sonunda koydugu klibi SILER. */
+function emojiTani(pngYol) {
+    var log = [];
+    function y(s) { log.push(String(s)); }
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) return "HATA: aktif sekans yok";
+        y("Premiere: " + app.version);
+        var W = 0, H = 0;
+        try { W = seq.frameSizeHorizontal; H = seq.frameSizeVertical; } catch (eF) {}
+        y("Sekans olcusu: " + W + "x" + H);
+
+        /* BOS video kanali bul — yoksa HICBIR SEY YAPMA. */
+        var n = 0, i, tr, hedef = -1;
+        try { n = seq.videoTracks.numTracks; } catch (e0) {}
+        for (i = 0; i < n; i++) {
+            try { tr = seq.videoTracks[i]; } catch (e1) { continue; }
+            var kl = false; try { kl = !!tr.isLocked(); } catch (e2) {}
+            var ks = -1; try { ks = tr.clips.numItems; } catch (e3) {}
+            y("  V" + (i + 1) + ": " + ks + " klip" + (kl ? " (KILITLI)" : ""));
+            if (hedef < 0 && ks === 0 && !kl) hedef = i;
+        }
+        if (hedef < 0) return log.join("\n") + "\nSONUC: BOS video kanali YOK — Premiere'de bir tane ekle (kanal basligina sag tik > Add Track).";
+        y("Hedef (bos) kanal: V" + (hedef + 1));
+
+        /* PNG'yi projeye al */
+        var kokB = app.project.rootItem, oncekiSayi = 0;
+        try { oncekiSayi = kokB.children.numItems; } catch (eC) {}
+        try { app.project.importFiles([pngYol], true, kokB, false); }
+        catch (eI) { return log.join("\n") + "\nHATA: PNG ice aktarilamadi: " + eI.toString(); }
+        var sonraSayi = oncekiSayi;
+        try { sonraSayi = kokB.children.numItems; } catch (eC2) {}
+        y("Ice aktarma: proje ogesi " + oncekiSayi + " -> " + sonraSayi);
+        if (sonraSayi <= oncekiSayi) return log.join("\n") + "\nHATA: PNG proje ogesi olmadi.";
+        var pi = null;
+        try { pi = kokB.children[sonraSayi - 1]; } catch (eP) {}
+        if (!pi) return log.join("\n") + "\nHATA: proje ogesi okunamadi.";
+
+        /* Timeline'a koy */
+        var vt = seq.videoTracks[hedef], oncekiKlip = 0;
+        try { oncekiKlip = vt.clips.numItems; } catch (eK) {}
+        try { vt.overwriteClip(pi, 5); }
+        catch (eO) { return log.join("\n") + "\nHATA: overwriteClip patladi: " + eO.toString(); }
+        var sonKlip = oncekiKlip;
+        try { sonKlip = vt.clips.numItems; } catch (eK2) {}
+        y("Yerlestirme: klip " + oncekiKlip + " -> " + sonKlip);
+        if (sonKlip <= oncekiKlip) return log.join("\n") + "\nHATA: overwriteClip hata vermedi ama KLIP OLUSMADI.";
+
+        var ti = null;
+        try { ti = vt.clips[sonKlip - 1]; } catch (eT) {}
+        if (!ti) return log.join("\n") + "\nHATA: konan klip okunamadi.";
+        var b = _zamanSn(ti.start), e2s = _zamanSn(ti.end);
+        y("Klip: bas=" + b + " sn, bit=" + e2s + " sn, VARSAYILAN SURE=" + (e2s - b) + " sn");
+
+        /* SURE yazilabiliyor mu? (yakin emojiler birbirini yemesin diye sart) */
+        var yeniSon = b + 1.5, sureOk = "?";
+        try {
+            var t = new Time(); t.ticks = String(Math.round(yeniSon * TICK_SN));
+            ti.end = t;
+            var okunan = _zamanSn(ti.end);
+            sureOk = (Math.abs(okunan - yeniSon) < 0.05) ? ("EVET (" + okunan + " sn)") : ("HAYIR (istendi " + yeniSon + ", oldu " + okunan + ")");
+        } catch (eS) { sureOk = "HAYIR (" + eS.toString() + ")"; }
+        y("Sure yazilabiliyor mu: " + sureOk);
+
+        /* Position / Scale */
+        var pos = _paramAraTum(ti, ["Position", "Konum"]);
+        var scl = _paramAraTum(ti, ["Scale", "Ölçek", "Olcek"]);
+        y("Motion bulundu mu: Position=" + (pos ? "evet" : "HAYIR") + " Scale=" + (scl ? "evet" : "HAYIR"));
+        if (pos) {
+            var mevcut = null; try { mevcut = pos.getValue(); } catch (eG) {}
+            y("Position MEVCUT deger: " + (mevcut ? ("[" + mevcut.join(", ") + "]") : "okunamadi") +
+              "  (0..1 ise NORMALIZE, buyuk sayiysa PIKSEL)");
+            try {
+                pos.setValue([0.80, 0.78], true);
+                var geri = pos.getValue();
+                y("Position [0.80,0.78] yazildi -> geri okundu: [" + geri.join(", ") + "]");
+            } catch (eSp) { y("Position YAZILAMADI: " + eSp.toString()); }
+        }
+        if (scl) {
+            var sm = null; try { sm = scl.getValue(); } catch (eG2) {}
+            y("Scale MEVCUT: " + sm);
+            try { scl.setValue(25, true); y("Scale 25 yazildi -> geri okundu: " + scl.getValue()); }
+            catch (eSs) { y("Scale YAZILAMADI: " + eSs.toString()); }
+        }
+
+        /* TEMIZLIK — koydugumuz klibi sil, kanal eski haline donsun. */
+        var silindi = "?";
+        try { ti.remove(false, false); silindi = (vt.clips.numItems === oncekiKlip) ? "evet" : "HAYIR"; }
+        catch (eR) { silindi = "HAYIR (" + eR.toString() + ")"; }
+        y("Test klibi silindi mi: " + silindi);
+        y("NOT: proje panelindeki PNG ogesi duruyor, elle silebilirsin.");
+        return log.join("\n");
+    } catch (e) { return log.join("\n") + "\nHATA: " + e.toString(); }
+}
+
 /* STILLERI PROJEYE AL — .prtextstyle dosyalarini PROJE OGESI yapar.
    NEDEN GEREKLI: Premiere'de iki ayri sey var ve karistirilmasi kolay —
      · YEREL stil  : Belgeler\Adobe\Common\Assets\Text Styles\*.prtextstyle
@@ -1494,9 +2059,29 @@ function presetOkuJSON() {
         }
         var capa = "bas";
         if (sure > 0 && !isNaN(relMin) && relMin > sure * 0.5) capa = "son";
-        if (capa === "son") {
-            for (ci = 0; ci < out.length; ci++) {
-                for (pi = 0; pi < out[ci].p.length; pi++) _zamanKaydir(out[ci].p[pi], sure);
+
+        /* ⚠ CIPA PARAMETRE BASINA — YIGIN BASINA DEGIL. (Kullanici bildirdi, 7 Agustos 2026.)
+           Bir preset AYNI ANDA hem giris hem cikis animasyonu icerebiliyor: kullanicinin
+           yiginda "Transform (Pop In 1)" klibin BASINDA, "Transform (Asagiya Pop Out)"
+           klibin SONUNDA. Tek bir yigin capasi ikisine birden hizmet EDEMEZ.
+           Olan: relMin butun parametrelerin en erkeni (Pop In'inki, ~0) oldugu icin yigin
+           "bas" isaretleniyor, Pop Out'un dinlenme noktasi ILK keyframe olmasi gerekirken
+           SON keyframe aliniyor ve dizi-farki TERS isaretli cikiyordu.
+           Olculdu: kaynak Position 500,1505.8 -> hedef 500,-505.8 (500 - 1005.8).
+           Her parametre kendi keyframe'lerine gore isaretlenir; zamanlari da kendi capasina
+           gore kaydirilir. Yigin capasi (yukarida) GERIYE UYUMLULUK icin kaliyor: eski
+           kayitlarda p.capa yok, o zaman yigin capasi kullanilir. */
+        for (ci = 0; ci < out.length; ci++) {
+            for (pi = 0; pi < out[ci].p.length; pi++) {
+                var po2 = out[ci].p[pi];
+                var kl2 = po2.k || [];
+                if (!kl2.length) continue;
+                var pMin = NaN, kx;
+                for (kx = 0; kx < kl2.length; kx++) {
+                    if (isNaN(pMin) || kl2[kx].t < pMin) pMin = kl2[kx].t;
+                }
+                po2.capa = (sure > 0 && !isNaN(pMin) && pMin > sure * 0.5) ? "son" : "bas";
+                if (po2.capa === "son") _zamanKaydir(po2, sure);
             }
         }
 
@@ -1566,6 +2151,26 @@ function _bilesenIndexAra(ti, match, ad, atla) {
         }
     }
     return -1;
+}
+/* Klipte bu turden KAC bilesen var? (matchName ONCELIKLI; yoksa parantezsiz ada duser.)
+   "Bu efekt var mi" yerine "kac tane var" sorusu, ayni efektten birden coguna izin veren
+   tek dogru olcu — bkz. presetYaz'daki ekleme dongusu. */
+function _bilesenSay(ti, match, ad) {
+    var c = null, i, mn, dn, n = 0, sade = _sadeAd(ad || "");
+    try { c = ti.components; } catch (e0) { return 0; }
+    if (!c) return 0;
+    if (match) {
+        for (i = 0; i < c.numItems; i++) {
+            mn = ""; try { mn = String(c[i].matchName); } catch (e1) {}
+            if (mn === match) n++;
+        }
+        if (n) return n;          // matchName tuttuysa ad'a hic bakma
+    }
+    for (i = 0; i < c.numItems; i++) {
+        dn = ""; try { dn = _sadeAd(String(c[i].displayName)); } catch (e2) { dn = ""; }
+        if (dn && sade && dn === sade) n++;
+    }
+    return n;
 }
 function _bilesenAraGenis(ti, match, ad) {
     var ix = _bilesenIndexAra(ti, match, ad, null);
@@ -1821,7 +2426,10 @@ function _statikTuttu(pr, beklenen) {
 /* adaylar : [{baz, arAlt, arUst, ad}] — denenecek zaman tabanlari (kaynak/sekans/klip)
    sayac   : { kf, st, strateji } — KEYFRAME ve STATIK AYRI sayilir. Eskiden statik
              setValue de "keyframe" sayilip "8 keyframe yazildi" yalanini uretiyordu. */
-function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa) {
+/* capa      : YIGIN capasi (eski kayitlar icin yedek)
+   hedefSure : hedef klibin suresi — parametrenin capasi yigininkinden FARKLIYSA zaman
+               tabanini bu kadar oteleriz (bkz. asagidaki delta). */
+function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa, hedefSure) {
     var ps = null, i, j;
     try { ps = hedefBilesen.properties; } catch (e) { if (rapor) rapor.push("properties-yok"); return 0; }
     if (!ps) { if (rapor) rapor.push("properties-bos"); return 0; }
@@ -1900,12 +2508,22 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
            yapilamayan parametreler). */
         var kw = (kayit.s && kayit.s.length >= 2) ? kayit.s : kayit.k;
 
+        /* PARAMETRENIN KENDI CIPASI (bkz. presetOkuJSON'daki po.capa notu). Eski kayitlarda
+           yok -> yigin capasina duser (onceki davranis).
+           ZAMAN TABANI DELTASI: adaylar[].baz yigin capasina gore kuruldu. Parametrenin
+           capasi farkliysa taban bir klip suresi kadar otelenmeli — yoksa cikis animasyonu
+           klibin BASINA yazilir. */
+        var pCapa = kayit.capa || capa || "bas";
+        var hs = (typeof hedefSure === "number" && hedefSure > 0) ? hedefSure : 0;
+        var capaDelta = 0;
+        if (hs && pCapa !== (capa || "bas")) capaDelta = (pCapa === "son") ? hs : -hs;
+
         var dizi = _dizimi(kw[0].v) && _spatialMi(kayit.ad);
         var taban = null, mevcut = null, kutu = { ilkHata: "", temizlenen: 0 };
         if (dizi) {
-            taban = (capa === "son") ? kw[0].v : kw[kw.length - 1].v;
+            taban = (pCapa === "son") ? kw[0].v : kw[kw.length - 1].v;
             // DINLENME degeri — setTimeVarying'den ONCE (keyframe acilinca deger degisebiliyor)
-            mevcut = _dinlenmeDegeri(pr, capa);
+            mevcut = _dinlenmeDegeri(pr, pCapa);
             /* taban NULL olabilir (getValueAtKey okunamamis key). _dizimi(taban)
                kontrolu OLMADAN taban.length TypeError atip tum presetYaz'i dusuruyordu. */
             if (!_dizimi(taban) || !_dizimi(mevcut) || mevcut.length !== taban.length) dizi = false;
@@ -1923,9 +2541,9 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
         if (!dizi && !_dizimi(kw[0].v)) {
             var varsD = _varsayilanVaris(kayit.ad);
             if (varsD !== null) {
-                var varis = Number((capa === "son") ? kw[0].v : kw[kw.length - 1].v);
+                var varis = Number((pCapa === "son") ? kw[0].v : kw[kw.length - 1].v);
                 if (!isNaN(varis) && Math.abs(varis - varsD) < 0.5) {
-                    var hd = Number(_dinlenmeDegeri(pr, capa));
+                    var hd = Number(_dinlenmeDegeri(pr, pCapa));
                     if (!isNaN(hd)) {
                         if (varsD === 100 && hd > 0 && Math.abs(hd - 100) > 0.5) olcek = { oran: hd / 100, ek: 0 };
                         else if (varsD === 0 && Math.abs(hd) > 0.5) olcek = { oran: 0, ek: hd };
@@ -1962,14 +2580,14 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
            yanlis tabandaki kirpilmis keyler klipte kalip "tek keyframe" uretiyordu. */
         var gercek = 0, bi, aday, kullanilanAd = "";
         if (strateji && strateji.bicim) {
-            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, strateji.baz, strateji.bicim, kutu, olcek);
+            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, strateji.baz + capaDelta, strateji.bicim, kutu, olcek);
             if (gercek) kullanilanAd = strateji.bicim + "/" + (strateji.ad || "?");
         }
         for (bi = 0; bi < adaylar.length && !gercek; bi++) {
             aday = adaylar[bi];
             if (!aday || (strateji && strateji.bicim && aday.baz === strateji.baz)) continue;
             _keyGeriAl(pr, snap);
-            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, aday.baz,
+            gercek = _yazVeSay(pr, kw, dizi, taban, mevcut, aday.baz + capaDelta,
                                (strateji && strateji.bicim) ? strateji.bicim : null, kutu, olcek);
             if (gercek) kullanilanAd = ((strateji && strateji.bicim) ? strateji.bicim : "oto") + "/" + aday.ad;
         }
@@ -2131,7 +2749,10 @@ function _yiginOlcekle(veri, k) {
 /* kafaKullan "1" ise animasyon OYNATMA KAFASININ oldugu ana yapisir (klibin basi/sonu
    yerine). Kafa zamanini host KENDISI okur — panelden sayi gecirmek (ondalik bicim,
    evalScript string'i) gereksiz risk. Verilmezse eski davranis aynen korunur. */
-function presetYaz(jsonYol, kafaKullan) {
+/* emojiKanal (istege bagli): verilirse hedef klipler SECIMDEN degil O KANALIN TAMAMINDAN
+   alinir — emoji yerlestirmesi kendi kanalindaki butun kliplere preset uygulayabilsin diye.
+   Verilmezse davranis birebir eskisi gibi (getSelection). */
+function presetYaz(jsonYol, kafaKullan, emojiKanal) {
     /* UNDO GRUBU: bir preset onlarca keyframe yaziyor. Grup olmadan Ctrl+Z bunlari TEK TEK
        geri aliyor ve kullanicinin 30-40 kez basmasi gerekiyordu. finally ile kapatiliyor —
        arada hata olursa grup ACIK kalir ve kullanicinin sonraki her duzenlemesi ayni gruba
@@ -2159,9 +2780,26 @@ function presetYaz(jsonYol, kafaKullan) {
         if (!kfSay && !stSay) return "err:Kayitli preset'te uygulanacak hicbir sey yok (ne keyframe ne statik ayar) — preset'in uygulandigi bir klibi secip YENIDEN OGRET";
         var seq = app.project.activeSequence;
         if (!seq) return "err:Aktif sekans yok";
+        /* HEDEF KLIPLER — normalde SECIM, emoji yolunda VERILEN KANALIN TAMAMI.
+           Emoji klipleri yeni konuyor ve secili degil; kullanicinin kendi presetini
+           ("Emoji Sag Taraf": Transform pop giris + asagi kayarak cikis) her emojiye elle
+           uygulamasi 150+ tiklama olurdu.
+           ⚠ DEGISEN TEK SEY BU DIZININ NASIL KURULDUGU. Asagidaki her sey (_sesKlibiMi,
+           _klipBas, _qeKlipBul, _paramlariYaz...) TrackItem uzerinde calisiyor ve
+           vt.clips[j] ile getSelection()[i] AYNI tipte nesneler donduruyor — 5-lensli
+           denetimden gecmis cekirdege dokunulmuyor. */
         var sec = null;
-        try { sec = seq.getSelection(); } catch (eS) {}
-        if (!sec || !sec.length) return "err:Timeline'da klip secili degil";
+        if (emojiKanal !== undefined && emojiKanal !== null && String(emojiKanal) !== "") {
+            var ek = parseInt(emojiKanal, 10);
+            if (isNaN(ek) || ek < 0 || ek >= seq.videoTracks.numTracks) return "err:V" + (ek + 1) + " kanali yok";
+            var evt = seq.videoTracks[ek];
+            sec = [];
+            try { for (var eq = 0; eq < evt.clips.numItems; eq++) sec.push(evt.clips[eq]); } catch (eEq) {}
+            if (!sec.length) return "err:V" + (ek + 1) + " kanalinda klip yok";
+        } else {
+            try { sec = seq.getSelection(); } catch (eS) {}
+            if (!sec || !sec.length) return "err:Timeline'da klip secili degil";
+        }
 
         /* HIZ RAMPASI eski kayitlarda olabilir — uygulama aninda da suzulur (bkz.
            _hizRampasiMi). Aksi halde eski bir kayit her klibi agir cekim yapardi. */
@@ -2244,17 +2882,31 @@ function presetYaz(jsonYol, kafaKullan) {
                2. gecis: klip SIFIRDAN alinip parametreler yazilir.
                Tek gecişte olmuyordu: QE ile eklenen efekt, elimizdeki (bayat) klip
                nesnesinin components'inde gorunmuyor ve "eklendi ama okunamadi" cikiyordu. */
-            var varOlanIx = [];
+            /* AYNI EFEKTTEN BIRDEN COK — SAYIYLA EKLENIR, TEK TEK "VAR MI" DIYE DEGIL.
+               ⚠ Bu bir kez yanlis yazildi ve kullanici bildirdi (7 Agustos 2026): yiginda iki
+               Transform vardi (Pop In + Pop Out), hedefe YALNIZ BIRI ekleniyordu.
+               Sebep: kayitlar tek tek geziliyordu ve ikinci Transform kaydi, BIRINCI kayit
+               icin AZ ONCE EKLENEN Transform'u gorup "zaten var" diyip geciyordu. Indeks
+               takibi (varOlanIx) bunu kurtarmiyor cunku o indeks hic push edilmemis oluyor.
+               Dogru soru "bu efekt var mi" degil, "bu efektten KAC TANE gerekiyor":
+               gereken - mevcut kadar eklenir. Indeks takibine hic gerek kalmaz. */
+            var gereken = {}, turSira = [], anah, g, ek;
             for (j = 0; j < vk.bilesenler.length; j++) {
                 var b0 = vk.bilesenler[j];
-                if (_hizRampasiMi(b0.ad, b0.match)) continue;   // hiz rampasi uygulanmaz
-                /* Indeks takibi burada da sart: yigin ayni efektten IKI tane iceriyorsa
-                   (kullanicinin klibinde iki Transform vardi) hedefe de iki tane eklenmeli.
-                   Nesne karsilastirmasiyla ikincisi "zaten var" sanilip atlaniyordu. */
-                var ix0 = _bilesenIndexAra(ti, b0.match, b0.ad, varOlanIx);
-                if (ix0 >= 0) { varOlanIx.push(ix0); continue; }
-                var n0 = _qeEfektEkle(ti, b0.ad);
-                if (n0) nedenler[b0.ad || "?"] = n0;
+                if (_hizRampasiMi(b0.ad, b0.match)) continue;      // hiz rampasi uygulanmaz
+                if (_icselMi(b0.ad, b0.match)) continue;           // Motion/Opacity klipte hazir
+                // Ayirici: ad ya da matchName icinde GECMEYECEK bir dizgi olmali.
+                anah = String(b0.match || "") + " <> " + _sadeAd(b0.ad || "");
+                if (!gereken[anah]) { gereken[anah] = { sayi: 0, ad: b0.ad, match: b0.match }; turSira.push(anah); }
+                gereken[anah].sayi++;
+            }
+            for (j = 0; j < turSira.length; j++) {
+                g = gereken[turSira[j]];
+                var varOlan = _bilesenSay(ti, g.match, g.ad);
+                for (ek = varOlan; ek < g.sayi; ek++) {
+                    var n0 = _qeEfektEkle(ti, g.ad);
+                    if (n0) { nedenler[g.ad || "?"] = n0; break; }   // katalogda yoksa tekrar deneme
+                }
             }
             var taze = _klipYenidenBul(trIdx, nid, basSn) || ti;
 
@@ -2282,7 +2934,7 @@ function presetYaz(jsonYol, kafaKullan) {
                    seciliyor (klip kaynagin GITTIGI yere sicriyor) ve D10 kapisi hic
                    acilmiyor (kucultulmus klip animasyon basinda %100'e firliyor). */
                 _paramlariYaz(taze.components[ix], b.p, adaylar, rapor, b.ad,
-                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa);
+                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa, hedefSure);
             }
             var ad = "?"; try { ad = String(ti.name); } catch (eN) {}
             toplamYaz += sayac.kf; toplamStatik += sayac.st; toplamTemiz += sayac.temiz;

@@ -955,6 +955,173 @@ function cakismaGider(cues, onLog) {
   return cues;
 }
 
+/* ================= KANALLAR ARASI ÇAKIŞMA =================
+   NEDEN AYRI BİR FONKSİYON: cakismaGider TEK bir cue listesine bakıyor ve placeCaptions onu
+   HER GRUP İÇİN AYRI çağırıyor — yani kanal İÇİ çakışmayı çözüyor, kanallar ARASI çakışmayı
+   hiç görmüyor. "Ayrı caption track'te oldukları için sorun değil" gerekçesi METİN KAYBI
+   ekseninde doğruydu (aynı track'e düşen cue'yu Premiere yutuyordu) ama GÖRSEL eksende
+   YANLIŞ çıktı: kullanıcının ekran görüntüsünde birden çok caption track'inin yazısı AYNI
+   ANDA ve aynı yerde görünüyor. ÖLÇÜLDÜ (Premiere'e giden gerçek 5 SRT / 443 cue): kanal içi
+   çakışma 0 (cakismaGider işini yapıyor), kanallar ARASI 19 çift / 6.76 sn — ve örnekler
+   kullanıcının ekran görüntüsüyle birebir aynı.
+   ⚠ Bunun hangi Premiere sürümünden beri böyle olduğu ve Track Style'ın dikey konumu gerçekten
+   taşıyıp taşımadığı ÖLÇÜLMEDİ — buraya sürüm numaralı bir iddia yazma.
+
+   POLİTİKA — SIRA ÖNEMLİ, DEĞİŞTİRMEDEN ÖNCE OKU:
+     1) KIRP: önce başlayan cue'nun BİTİŞİNİ, sonrakinin başına GAP kala çek. BAŞLANGIÇ
+        ZAMANINA DOKUNULMAZ, yani senkron hiç bozulmaz ve metin kaybolmaz. Çoğu vakada bedava:
+        cue bitişlerinin %77'si konuşmanın bitişi değil, buildCues'un "bir sonraki cue'ya kadar"
+        doldurduğu YAPAY kuyruk (minDur = max(0.8, harf/17) — okunabilirlik payı).
+     2) Kırpma cue'yu TABAN'ın altına indirecekse gerçekten aynı anda konuşuluyor demektir:
+        - opts.gizle AÇIKSA kaybeden cue GİZLENİR. Cue SİLİNMEZ, `gizliCakisma` diye
+          İŞARETLENİR — çağıran onu SRT'ye yazmaz ama nesne yerinde durur.
+        - KAPALIYSA cue TABAN'a kadar kısaltılır (üst üste kalan SÜRE azalır) ve kalan
+          çakışma olduğu gibi bırakılıp SAYILIR.
+     3) İTME YOK — BURAYA İTME EKLEME. Sonraki cue'yu ileri itmek senkronu bozar, yani
+        kullanıcının şikâyet ettiği şeyin ta kendisidir. İtmemek aynı zamanda dizi zaman
+        sırasını da bozmuyor (cuesToSrt sırayla yazıyor), yani yeniden sıralama gerekmiyor.
+
+   GİZLEME CUE BAZINDA — CÜMLE BAZINDA DEĞİL. ÖLÇÜLDÜ, İKİSİ DE DENENDİ (kullanıcının gerçek
+   oturumu: 233 cue / 5 grup / 35 çakışan çift). Cümle bütünlüğünü korumak (aynı cumleId'nin
+   tamamını gizlemek) sezgisel olarak doğru görünüyor — cümlenin ortasına delik açmaz — ama
+   BEDELİ 4-5 KAT: 49-70 cue düşüyor, cue bazlıda 9-16. Sebep basit: kelime tavanı 2 olduğu
+   için bir cümle 4-5 cue ve her çakışma koca bir repliği siliyor. Cue bazlı gizlemede 7-10
+   cümlede 2 kelimelik bir boşluk kalıyor; ses zaten duyulduğu için bu, repliğin tamamen
+   kaybolmasından daha ucuz. cumleId hâlâ okunuyor ama YALNIZ raporlama için değil — hiç
+   kullanılmıyor; cümle bazına dönmek istersen önce yukarıdaki sayıyı yeniden ölç.
+
+   KURBAN SEÇİMİ — GRUP SIRASI, BAŞKA HİÇBİR ŞEY. "Kısa cümle/cue kaybetsin" kuralları
+   DENENDİ VE GERÇEK VERİDE TERS ÇALIŞTI: kullanıcı (C1) kısa cümlelerle çok konuşuyor,
+   arkadaşlar uzun cümlelerle az konuşuyor — "ağırlık" kuralında 54 gizlemenin 47'si
+   KULLANICININ KENDİ SESİ oldu. Grup sırasında C1 hiç kaybetmiyor (ölçüldü: Sage 3 · Mimi 4 ·
+   Moni 5). C1 = videoyu çeken ana anlatıcı, çakışmayı o kazanmalı. Bu sıra placeCaptions'taki
+   track sırasıyla birebir aynı, yani kullanıcı sonuç mesajındaki "C1 sen · C2 Moni"
+   eşlemesinden kimin öncelikli olduğunu okuyabilir.
+
+   gruplar: [{ad: "sen", cues: [...]}, ...]. Cue nesneleri YERİNDE değiştirilir; çağıranın
+   KOPYA vermesi beklenir (placeCaptions öyle yapıyor — bkz. oradaki kopya bloğu). */
+function kanallarArasiCakisma(gruplar, opts, onLog) {
+  opts = opts || {};
+  var GAP = (opts.gap > 0) ? opts.gap : 0.08;
+  /* TABAN = kırpmanın durduğu yer: bunun altına inecekse kırpmak yerine gizlemeye geçilir.
+     0.25 = buildCues'un MIN_GORUNUR'u ile AYNI değer ("göz fark etsin" ölçüsü) — bilinçli
+     olarak DÜŞÜK tutuldu, çünkü buradaki takas "kısa görünen altyazı mı, HİÇ görünmeyen mi":
+     kullanıcı üst üste binmesin dedi, altyazı kaybolsun demedi. ÖLÇÜLDÜ (233 cue / 5 grup):
+     taban 0.20 -> 9 gizleme · 0.25 -> 12 · 0.30 -> 13 · 0.40 -> 16. Yükseltmek doğrudan
+     metin kaybı satın alıyor, karşılığında yalnız 3-4 cue'yu 0.05 sn uzatıyor.
+     ⚠ pipeline'da artık DÖRT ayrı "en kısa süre" sabiti var, her biri BAŞKA bir soruya cevap
+     veriyor: 0.15 MIN_KLIP (Premiere klibi var saysın) · 0.25 buildCues MIN_GORUNUR + buradaki
+     TABAN (göz fark etsin) · 0.40 sesleHizala MIN_GOR (hizalarken kısaltmanın tabanı) ·
+     0.80 buildCues minDur (rahat okunsun). Birini değiştirirken diğerlerine bak. */
+  var TABAN = (opts.taban > 0) ? opts.taban : 0.25;
+  var GIZLE = !!opts.gizle;
+  var sayac = { kirpilan: 0, kismiKirpilan: 0, kirpilanSn: 0,
+                gizlenen: 0, gizlenenAd: {}, kalan: 0, gecersiz: 0 };
+  gruplar = gruplar || [];
+  /* Tek grupta "kanallar arası" diye bir şey yoktur — tek kaynak (A1/A2) modunda ve eski
+     diarizasyonlu oturum geri yüklendiğinde buraya girilir. Davranış birebir eskisi gibi
+     kalmalı, o yüzden hiç dokunmadan çık. */
+  if (gruplar.length < 2) return sayac;
+
+  /* Düz liste: her öğe hangi gruba ait olduğunu TAŞIR ama cue nesnesi kendi grubunda KALIR.
+     Böylece cue'lar track'ler arasında yer değiştirmiyor — karaktere göre renk düzeni
+     (her karakter kendi caption track'inde) olduğu gibi korunuyor. */
+  var hepsi = [], g, i, cs, c;
+  for (g = 0; g < gruplar.length; g++) {
+    cs = (gruplar[g] && gruplar[g].cues) || [];
+    for (i = 0; i < cs.length; i++) {
+      c = cs[i];
+      /* Zaman damgası sayı değilse karşılaştırma SESSİZCE "çakışma yok" derdi. Listeye hiç
+         alınmaz ve sayılır — sessiz atlama yasak (cakismaGider'deki aynı kural). */
+      if (!c || !isFinite(c.start) || !isFinite(c.end)) { sayac.gecersiz++; continue; }
+      hepsi.push({ g: g, c: c });
+    }
+  }
+  hepsi.sort(function (a, b) { return (a.c.start - b.c.start) || (a.c.end - b.c.end); });
+
+  function grupAdi(gi) {
+    return (gruplar[gi] && gruplar[gi].ad) ? String(gruplar[gi].ad) : ("C" + (gi + 1));
+  }
+  function gizle(o) {
+    if (o.c.gizliCakisma) return;
+    o.c.gizliCakisma = true;
+    sayac.gizlenen++;
+    // Karakter kırılımı: "hep Sage gizleniyor" şüphesi tahminle değil SAYIYLA karşılansın.
+    var ad = grupAdi(o.g);
+    sayac.gizlenenAd[ad] = (sayac.gizlenenAd[ad] || 0) + 1;
+  }
+
+  var a, b, A, B, yeniBitis, tabanBitis, kurban;
+  for (a = 0; a < hepsi.length; a++) {
+    if (hepsi[a].c.gizliCakisma) continue;
+    for (b = a + 1; b < hepsi.length; b++) {
+      A = hepsi[a].c; B = hepsi[b].c;
+      /* Liste başlangıca göre sıralı: B artık A'nın bitişinden sonra başlıyorsa bundan sonraki
+         hiçbir cue de A ile kesişmez. A kırpıldıkça bu kırılma ERKEN oluyor. */
+      if (B.start >= A.end) break;
+      if (B.gizliCakisma) continue;
+      if (hepsi[a].g === hepsi[b].g) continue;   // kanal İÇİ: cakismaGider'in işi, karışma
+      yeniBitis = +(B.start - GAP).toFixed(3);
+      if (yeniBitis - A.start >= TABAN) {
+        // 1) BEDAVA ÇÖZÜM: yalnız bitiş kısalıyor, başlangıç yerinde — senkron bozulmuyor.
+        sayac.kirpilanSn += (A.end - yeniBitis);
+        A.end = yeniBitis; sayac.kirpilan++;
+        continue;
+      }
+      /* Kırpmak A'yı okunamaz hale getirirdi: GERÇEKTEN aynı anda konuşuluyor. */
+      if (!GIZLE) {
+        /* Gizleme kapalı: çakışma KALACAK, ama süresini kısaltmak yine de kazanç — iki yazının
+           üst üste durduğu saniye azalır. TABAN'ın altına İNMEZ. */
+        tabanBitis = +(A.start + TABAN).toFixed(3);
+        if (tabanBitis < A.end - 0.005) {
+          sayac.kirpilanSn += (A.end - tabanBitis);
+          A.end = tabanBitis; sayac.kismiKirpilan++;
+        }
+        continue;
+      }
+      // Gizleme açık: ALT SIRADAKİ karakter kaybeder (büyük grup indeksi). C1 hiç kaybetmez.
+      kurban = (hepsi[a].g > hepsi[b].g) ? hepsi[a] : hepsi[b];
+      gizle(kurban);
+      if (kurban === hepsi[a]) break;   // A gizlendi: bu A ile devam etmenin anlamı yok
+    }
+  }
+
+  /* KALAN ÇAKIŞMAYI GERÇEKTEN SAY (gizlenenler hariç). Yukarıdaki döngü bir çifti çözerken
+     başka bir çifti çözmemiş olabilir; kullanıcıya "kaç altyazı hâlâ üst üste" diye kesin sayı
+     vermek şart — eksik sayı, sessiz başarısızlığın yumuşak hâlidir. */
+  var x, y;
+  for (x = 0; x < hepsi.length; x++) {
+    if (hepsi[x].c.gizliCakisma) continue;
+    for (y = x + 1; y < hepsi.length; y++) {
+      if (hepsi[y].c.gizliCakisma) continue;
+      if (hepsi[y].c.start >= hepsi[x].c.end) break;
+      if (hepsi[x].g === hepsi[y].g) continue;
+      sayac.kalan++;
+    }
+  }
+
+  /* RAPOR: her satır 80 karakterin ALTINDA ve AYRI bir onLog çağrısı — app.js whenLog uzun
+     satırların BAŞINI kırpıyor (s.slice(-80)), tek uzun özet bilgiyi çöpe atardı. */
+  if (onLog) {
+    if (sayac.kirpilan) onLog("[kanalcak] " + sayac.kirpilan + " altyazinin bitisi kirpildi.\n");
+    if (sayac.kismiKirpilan) onLog("[kanalcak] " + sayac.kismiKirpilan + " altyazi kismen kirpildi.\n");
+    if (sayac.gizlenen) {
+      onLog("[kanalcak] " + sayac.gizlenen + " altyazi GIZLENDI: ayni anda konusma.\n");
+      // Kırılım: hangi karakterin ne kadar kaybettiği tahmin edilmesin, GÖRÜLSÜN.
+      var dk = [], ad;
+      for (ad in sayac.gizlenenAd) if (Object.prototype.hasOwnProperty.call(sayac.gizlenenAd, ad))
+        dk.push(ad + " " + sayac.gizlenenAd[ad]);
+      if (dk.length) onLog("[kanalcak] dagilim: " + dk.join(" · ").slice(0, 62) + "\n");
+    }
+    if (sayac.kalan) {
+      onLog("[kanalcak] " + sayac.kalan + " altyazi HALA ust uste kaliyor.\n");
+      onLog("[kanalcak] cozum: her altyazi kanalina FARKLI dikey konum ver.\n");
+    }
+    if (sayac.gecersiz) onLog("[kanalcak] " + sayac.gecersiz + " cue gecersiz zaman, atlandi.\n");
+  }
+  return sayac;
+}
+
 function cuesToSrt(cues) {
   var out = [];
   for (var i = 0; i < cues.length; i++)
@@ -1069,7 +1236,21 @@ function sesleHizala(cues, wavPath, onLog) {
      kaydırılınca süresi sabit kalıyor, fren gereksizleşiyor ve daha çok cue düzeltilebiliyor.
      Kurallar aynı: ASLA geriye kaydırma yok · en fazla MAX_KAYDIR ileri · sonraki cue'nun
      başına HIZ_GAP kala durulur (üst üste binen altyazı, erken altyazıdan kötüdür). */
+  /* MIN_GOR = kısaltılan bir altyazının ekranda kalabileceği EN KISA süre. cakismaGider'deki
+     0.15 buraya KONMAZ: o "Premiere klibi var saysın" ölçüsüdür, okunabilirlik ölçüsü değil.
+     ÖLÇÜLDÜ (kullanıcının A1 kaydı, 1059 cue): 0.30 daha çok düzeltiyor (sessizde başlayan
+     234 -> 119) ama 0.30 sn altındaki cue sayısını 165'ten 186'ya çıkarıyor; 0.40'ta o sayı
+     hiç değişmiyor (165 -> 165). Kazancın büyük kısmını alıp regresyon üretmeyen değer 0.40.
+
+     ARA_PENCERE ≠ MAX_KAYDIR — İKİSİ AYRI ŞEY, BİRLEŞTİRME. Eskiden onset araması da
+     kaydırma tavanı da aynı 0.60'tı: 0.60 sn'den daha geç başlayan konuşmada cue "pencere
+     dışı" sayılıp HİÇ düzeltilmiyordu (kullanıcının işaret ettiği ~0.7 sn'lik vaka tam da bu).
+     Artık konuşma 1.20 sn'ye kadar ARANIYOR ama cue yine en fazla MAX_KAYDIR kadar kayıyor:
+     yer değiştirme üst sınırı büyümediği için "yanlış onset'e yapışma" riski de büyümüyor,
+     en kötü durumda zaten izin verilen 0.60'ı kullanmış oluruz ve cue tanım gereği
+     sessizlikte başlıyordu — 0.60 ileri gitmek nötr ya da iyi. */
   var PEN = 0.010, MAX_KAYDIR = 0.60, ONEMSIZ = 0.06, HIZ_GAP = 0.08;
+  var MIN_GOR = 0.40, ARA_PENCERE = 1.20;
   /* İKİ AYRI SEBEP, İKİ AYRI MESAJ. Eskiden `catch (e) { z = null; }` istisna metnini YUTUYOR
      ve tek bir "ses okunamadı" satırı iki bambaşka durumu birbirine karıştırıyordu:
      (a) dosya açılamadı / WAV başlığı ayrıştırılırken çöktü (istisna — yol, izin, bozuk dosya),
@@ -1117,8 +1298,10 @@ function sesleHizala(cues, wavPath, onLog) {
      tek başına işe yaramıyor: asıl soru DÜZELTİLEMEYENLERİN NEDEN düzeltilemediği.
      Sonraki her değişikliğin (kelime tavanı, pencere boyu, eşik) etkisini ölçmenin tek yolu bu. */
   var duzeltildi = 0, toplamKayma = 0, kismi = 0;
-  var yokPencere = 0;    // 0.60 sn'lik pencerede konuşma hiç başlamadı
-  var yokTavan = 0;      // sonraki cue yer bırakmadı (tavana çarptı)
+  var kisaldi = 0;       // rijit kaydırılamadı, yalnız BAŞLANGICI ilerledi (cue kısaldı)
+  var tavanaDayandi = 0; // konuşma MAX_KAYDIR'dan daha geç başlıyor — kısmen düzeldi, tam değil
+  var yokPencere = 0;    // ARA_PENCERE içinde konuşma hiç başlamadı
+  var yokSure = 0;       // cue zaten MIN_GOR kadar kısa — kısaltacak yer yok
   var yokOnset = 0;      // cue, ses zarfının dışında kalıyor (WAV o noktayı kapsamıyor)
   var dokunulmadi = 0;   // başında ses zaten var / kayma önemsiz — düzeltmeye gerek yok
   for (var c = 0; c < cues.length; c++) {
@@ -1126,36 +1309,75 @@ function sesleHizala(cues, wavPath, onLog) {
     var bas = Math.floor(cue.start / PEN);
     if (bas < 0 || bas >= N) { yokOnset++; continue; }
     if (zarf[bas] >= esik) { dokunulmadi++; continue; }     // başında ses VAR, dokunma
-    var sinir = Math.min(N, bas + Math.ceil(MAX_KAYDIR / PEN));
+    var sinir = Math.min(N, bas + Math.ceil(ARA_PENCERE / PEN));
     var onset = -1;
     for (var k = bas; k < sinir; k++) if (zarf[k] >= esik) { onset = k; break; }
     if (onset < 0) { yokPencere++; continue; }              // sınır içinde konuşma yok
     var kayma = onset * PEN - cue.start;
     if (kayma <= ONEMSIZ) { dokunulmadi++; continue; }      // zaten neredeyse aynı
-    /* Tavan: cue'nun SONU bir sonrakinin başına HIZ_GAP kala durmalı. Son cue'da sonraki yoktur;
-       orada MAX_KAYDIR'ın kendisi zaten tavandır (kayma hiçbir koşulda onu geçemez). */
-    var tavan = (c + 1 < cues.length) ? ((cues[c + 1].start - HIZ_GAP) - cue.end) : MAX_KAYDIR;
-    if (tavan <= ONEMSIZ) { yokTavan++; continue; }
-    if (kayma > tavan) { kayma = tavan; kismi++; }          // kısmen kaydırıldı: hiç yoktan iyi
-    cue.start = +(cue.start + kayma).toFixed(3);
-    cue.end = +(cue.end + kayma).toFixed(3);
-    duzeltildi++; toplamKayma += kayma;
+    /* Konuşma tavandan daha geç başlıyor: elimizden geldiği kadar yaklaş, ama SÖYLE.
+       Sessizce 0.60'a kırpıp "düzeltildi" demek, kullanıcının ekranda hâlâ kaymış gördüğü
+       altyazıyı log'da "düzeldi" diye göstermek olurdu. */
+    if (kayma > MAX_KAYDIR) { kayma = MAX_KAYDIR; tavanaDayandi++; }
+    /* TAVAN İKİ AŞAMALI — TEK KURALLI ESKİ HÂLİ HİZALAMAYI KİLİTLİYORDU.
+       Eski kural: "cue'nun SONU sonrakinin başına HIZ_GAP kala durmalı" ve cue RİJİT
+       kayıyordu (start+end birlikte). Ama buildCues zaten her cue'nun bitişini
+       `sonraki.start - MIN_GAP` değerine DAYIYOR ve MIN_GAP ile HIZ_GAP AYNI sayı (0.08),
+       yani `(sonraki.start - HIZ_GAP) - cue.end` tavanı tam SIFIR çıkıyor ve `tavan <= ONEMSIZ`
+       freni cue'ya hiç dokunmadan geçiyordu. Bu bir ayar meselesi değil, ARİTMETİK ÖZDEŞLİK:
+       buildCues'un kendi doldurması hizalayıcıyı kilitliyordu. ÖLÇÜLDÜ (kullanıcının gerçek
+       A1 kaydı, 1059 cue): cue'ların %78'inde tavan 0; sessizde başlayan 234 altyazının
+       yalnız 21'i düzeliyordu (234 -> 213), 144'ü "tavana çarptı" diye atlanıyordu.
+
+       YENİ KURAL — tek formül, üç davranışı birden veriyor:
+         sonKaydir = bitişin gidebileceği kadarı (rijit tavanla sınırlı, hiç yer yoksa 0)
+         basKaydir = başlangıcın gidebileceği kadarı (cue'ya MIN_GOR kalmak şartıyla)
+       · Yer VARSA ikisi de `kayma` olur -> cue RİJİT kayar, okuma süresi aynen korunur
+         (eski davranışla birebir aynı).
+       · Yer YOKSA sonKaydir 0 kalır, yalnız BAŞLANGIÇ ilerler ve BİTİŞ yerinde durur. Cue
+         kısalır ama kısalan kısım tanım gereği SESSİZLİKTİ (onset'e kadar konuşma yok).
+       · Arada kalan melez durumda (yer var ama yetmiyor) bitiş gidebildiği kadar gider,
+         başlangıç ondan biraz daha fazla — böylece hiçbir durumda eski koddan AZ düzeltilmez.
+       Cue'nun zaman aralığı yalnız-başlangıç dalında DARALDIĞI için kanallar arası çakışmayı
+       da azaltır; rijit dalda ise cue ileri UZAR ve yeni bir kanallar arası çakışma
+       DOĞURABİLİR — kanallarArasiCakisma bu yüzden sesleHizala'dan SONRA çalışmak zorunda. */
+    var sonrakiBas = (c + 1 < cues.length) ? cues[c + 1].start : Infinity;
+    var rijitTavan = isFinite(sonrakiBas) ? ((sonrakiBas - HIZ_GAP) - cue.end) : MAX_KAYDIR;
+    var sonKaydir = Math.min(kayma, Math.max(0, rijitTavan));
+    var basKaydir = Math.min(kayma, (cue.end + sonKaydir - MIN_GOR) - cue.start);
+    // Cue zaten MIN_GOR kadar kısa: kaydırmak onu görünmez yapardı, kazanç sıfır olurdu.
+    if (basKaydir <= ONEMSIZ) { yokSure++; continue; }
+    if (basKaydir < kayma) kismi++;                         // kısmen kaydırıldı: hiç yoktan iyi
+    cue.start = +(cue.start + basKaydir).toFixed(3);
+    if (sonKaydir > 0) cue.end = +(cue.end + sonKaydir).toFixed(3);
+    duzeltildi++; toplamKayma += basKaydir;
+    if (sonKaydir < basKaydir) kisaldi++;                   // bitiş geride kaldı -> cue kısaldı
   }
   /* ÖZET AYRI AYRI KISA SATIRLAR HÂLİNDE BASILIR. Eski tek satırlık özet 274 karakterdi;
      app.js whenLog satırı 80 karaktere kırptığı için (`s.slice(-80)`) panelde YALNIZCA sonu
      görünüyordu — "kaç düzeltildi / kaç düzeltilemedi" hiç görünmüyordu, yani bu sayaçların
      varlık sebebi boşa gidiyordu. Her satır 80 karakterin altında tutulur. */
   if (onLog) {
-    var basarisiz = yokPencere + yokTavan + yokOnset;
+    var basarisiz = yokPencere + yokSure + yokOnset;
     var sat = "[hizala] " + duzeltildi + " altyazı düzeltildi";
     if (duzeltildi) sat += " (ort. " + (toplamKayma / duzeltildi).toFixed(2) + " sn ileri)";
     onLog(sat + ".\n");
-    if (kismi) onLog("[hizala] " + kismi + " tanesi tavana takılıp kısmen kaydı.\n");
+    /* KISALANLARI SÖYLE. Yeni tavan mantığında cue'nun bitişi yerinde kalıp yalnız başlangıcı
+       ilerleyebiliyor; bu, altyazının ekranda daha kısa kalması demek. Kullanıcı bunu fark
+       edip "altyazılarım niye kısaldı?" diye sorduğunda cevabı burada bulmalı — kısalan kısım
+       sessizlikti, ama bunu söylemeden yapmak sessiz değişikliktir. */
+    if (kisaldi) onLog("[hizala] " + kisaldi + " altyazının yalnız başlangıcı ilerledi.\n");
+    if (kismi) onLog("[hizala] " + kismi + " tanesi tabana takılıp kısmen kaydı.\n");
+    /* Tavana dayananlar DÜZELTİLDİ sayılır ama tam değil: konuşma MAX_KAYDIR'dan geç
+       başlıyor, yani o altyazılar hâlâ erken görünüyor olabilir. Kullanıcı ekranda kayma
+       görmeye devam ederse cevabı bu satır. */
+    if (tavanaDayandi) onLog("[hizala] " + tavanaDayandi + " altyazı " + MAX_KAYDIR.toFixed(2) +
+      " sn tavanına dayandı, hâlâ erken olabilir.\n");
     onLog("[hizala] " + basarisiz + " düzeltilemedi · " + dokunulmadi + " zaten yerinde.\n");
     // Düzeltilemeyenlerin SEBEBİ tek tek: "neden değişmedi" sorusunun cevabı burada.
-    if (yokPencere) onLog("[hizala] " + yokPencere + " pencere dışı: " + MAX_KAYDIR.toFixed(2) +
+    if (yokPencere) onLog("[hizala] " + yokPencere + " pencere dışı: " + ARA_PENCERE.toFixed(2) +
       " sn'de konuşma başlamadı.\n");
-    if (yokTavan) onLog("[hizala] " + yokTavan + " tavana çarptı: sonraki altyazı yer bırakmadı.\n");
+    if (yokSure) onLog("[hizala] " + yokSure + " altyazı zaten çok kısa, kısaltılamadı.\n");
     if (yokOnset) onLog("[hizala] " + yokOnset + " onset yok: ses o noktayı kapsamıyor.\n");
   }
   return cues;
@@ -1401,7 +1623,7 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
-  buildCues, sesleHizala, cakismaGider, cuesToSrt, buildShortSrt, cleanPunct, flattenWords,
+  buildCues, sesleHizala, cakismaGider, kanallarArasiCakisma, cuesToSrt, buildShortSrt, cleanPunct, flattenWords,
   analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
   // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında

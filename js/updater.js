@@ -31,7 +31,11 @@ function readJson(p, def) { try { return JSON.parse(stripBom(fs.readFileSync(p, 
  */
 var KULLANICI_DOSYALARI = ["engine-root.txt", "diarize-device.txt", "sozluk.json",
                            "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
-                           "presetler.json", "presetler.bak.json"];
+                           "presetler.json", "presetler.bak.json",
+                           /* lisans.json: bu makinenin lisansi. Guncelleme ezerse arkadas
+                              sifreyi HER guncellemede yeniden girer — kullanici "bir kere
+                              girmesi yetsin" dedi, o yuzden korunanlar arasinda. */
+                           "lisans.json"];
 
 /*
  * config.json listenin PARCASI DEGIL — yalnizca burada ve installer\kur.ps1'de korunur.

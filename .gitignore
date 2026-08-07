@@ -15,6 +15,9 @@ installer/YusufwrlKur.exe
 /kisiler.json
 /presetler.json
 /presetler.bak.json
+# lisans.json = bu makinenin lisansi (sifre BIR KEZ girilsin diye). Repoya girmemeli:
+# icinde HWID karmasi var ve her makinede farkli.
+/lisans.json
 
 # Motor ASLA repoya girmez (~3 GB)
 engine/
@@ -25,3 +28,8 @@ node_modules/
 *.log
 Thumbs.db
 desktop.ini
+
+# Cloudflare wrangler onbellegi — HESAP BILGISI iceriyor (wrangler-account.json),
+# repoya girmemeli. Secret'lar zaten Cloudflare'de duruyor, dosyada degil.
+sunucu/.wrangler/
+sunucu/node_modules/

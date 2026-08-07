@@ -70,7 +70,13 @@ function iptal() {
   return n;
 }
 function iptalDamgasi() { return _iptalSayaci; }
-function iptalEdildiMi(damga) { return _iptalSayaci !== damga; }
+/* damga verilmediyse (null/undefined) iptal YOK say. Savunma: çağıran taraf damgayı
+   unutursa sayaç 0 ile karşılaştırma "0 !== null" → true verip işi daha başlamadan
+   iptal ediyordu (emoji modülünde tam olarak bu oldu). */
+function iptalEdildiMi(damga) {
+  if (damga === null || damga === undefined) return false;
+  return _iptalSayaci !== damga;
+}
 
 function _iptalHatasi() { var e = new Error("İptal edildi"); e.iptal = true; return e; }
 function _hata(mesaj, ek) {
@@ -499,17 +505,18 @@ function _tekrarBeklemesi(sonuc, deneme) {
 
 /* Tek parçayı gönderir; geçici hatalarda tekrar dener. Doner: cevabın METNİ.
    Kalıcı hatalarda (401/400) NET Türkçe mesajla reject eder — sessiz geçiş yok. */
-function _parcaGonder(anahtar, parca, opts, damga, log) {
+/* GÖVDE ÜRETİCİSİ alan genel gönderici. Tekrar deneme, 429/5xx bekleme, iptal damgası,
+   şemasız geri düşme — hepsi burada. _parcaGonder ve istekGonder bunun üstünde ince birer
+   sarmalayıcı; ikinci bir tüketici (emoji/müzik) çıktığında bu mantık KOPYALANMASIN diye
+   ayrıldı. Davranış birebir aynı, yalnız gövdenin nereden geldiği değişti. */
+function _gonderGovde(anahtar, govdeYap, opts, damga, log) {
   var deneme = _sayi(_ayar(opts, "deneme"));
   var zamanAsimi = _sayi(_ayar(opts, "zamanAsimiMs"));
   var yapisal = !!_ayar(opts, "yapisalCikti");
 
   function tur(kalanDeneme, yapisalAcik) {
     if (iptalEdildiMi(damga)) return Promise.reject(_iptalHatasi());
-    var o = {};
-    for (var k in opts) { if (Object.prototype.hasOwnProperty.call(opts, k)) o[k] = opts[k]; }
-    o.yapisalCikti = yapisalAcik;
-    return _istekAt(anahtar, _govdeKur(parca, o), zamanAsimi).then(function (sonuc) {
+    return _istekAt(anahtar, govdeYap(yapisalAcik), zamanAsimi).then(function (sonuc) {
       if (iptalEdildiMi(damga)) throw _iptalHatasi();
       var kod = sonuc.kod;
       if (kod === 200) return _metinCikar(sonuc.govde);
@@ -554,6 +561,32 @@ function _parcaGonder(anahtar, parca, opts, damga, log) {
     });
   }
   return tur(deneme, yapisal);
+}
+
+/* Vurucu modun kendi göndericisi — davranış eskisiyle BİREBİR aynı, yalnız gövdeyi
+   _gonderGovde'ye bir üretici olarak veriyor. */
+function _parcaGonder(anahtar, parca, opts, damga, log) {
+  return _gonderGovde(anahtar, function (yapisalAcik) {
+    var o = {}, k;
+    for (k in opts) { if (Object.prototype.hasOwnProperty.call(opts, k)) o[k] = opts[k]; }
+    o.yapisalCikti = yapisalAcik;
+    return _govdeKur(parca, o);
+  }, opts, damga, log);
+}
+
+/* GENEL İSTEK — başka modüller (emoji, müzik) için. Hazır bir Messages API gövdesi alır;
+   tekrar deneme, 429/5xx bekleme, iptal ve şemasız geri düşme buradan MİRAS alınır.
+   Bu katmanı kopyalamak yerine paylaşmanın sebebi: retry/iptal mantığı üç kez yazılırsa
+   üçü de ayrı ayrı bozulur. Dönüş: cevabın METNİ (ayrıştırma çağırana ait). */
+function istekGonder(anahtar, govdeNesnesi, opts, damga, log) {
+  return _gonderGovde(anahtar, function (yapisalAcik) {
+    var g = {}, k;
+    for (k in govdeNesnesi) { if (Object.prototype.hasOwnProperty.call(govdeNesnesi, k)) g[k] = govdeNesnesi[k]; }
+    /* 400 sonrası şemasız tekrar denemede output_config ÇIKARILIR — yoksa aynı hatayla
+       döner ve tekrar deneme anlamsız olur. */
+    if (!yapisalAcik && g.output_config) delete g.output_config;
+    return g;
+  }, opts, damga, log || function () {});
 }
 
 /* Messages API cevabından metni çıkarır. stop_reason "max_tokens" ise JSON yarımdır —
@@ -924,6 +957,8 @@ module.exports = {
   isaretle: isaretle, temizle: temizle, gosterilenler: gosterilenler,
   // yardımcı / önizleme
   cumleleriCikar: cumleleriCikar,
+  // genel Claude isteği (emoji/müzik modülleri kullanır — retry/iptal mantığı paylaşılsın)
+  istekGonder: istekGonder, metinCikar: _metinCikar, VARSAYILAN_OPTS: VARSAYILAN,
   // anahtar yönetimi (panel kutusu için)
   anahtarOku: anahtarOku, anahtarVarMi: anahtarVarMi, anahtarYaz: anahtarYaz, anahtarYolu: anahtarYolu,
   // sabitler

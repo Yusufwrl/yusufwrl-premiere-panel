@@ -188,6 +188,18 @@
             <!-- app.js dolduruyor: anahtar var mı, yoksa nereye konacak. -->
             <p class="note" id="vurucuAnahtarNot" style="margin-top:8px"></p>
           </div>
+
+          <!-- ASLA ÜST ÜSTE GELMESİN: her karakter kendi altyazı kanalında olduğu için
+               Premiere hepsini aynı anda ve aynı yerde çiziyor; aynı anda konuşan iki kişinin
+               yazısı üst üste biniyor (kullanıcının gerçek koşusunda 35 çift ölçüldü).
+               Panel önce altyazının BİTİŞİNİ kırpar — başlangıca dokunmadığı için senkron
+               bozulmaz ve bu tek başına çakışmanın %75'ini çözüyor. Kalan gerçek eş zamanlı
+               konuşmada bu kutu açıksa alt sıradaki karakterin o altyazısı gizlenir. -->
+          <label class="switch-row" style="margin-top:14px">
+            <span>Asla üst üste gelmesin <small>(aynı anda konuşmada birini gizle)</small></span>
+            <input type="checkbox" id="chkCakisma">
+          </label>
+          <p class="note" style="margin-top:8px">Önce altyazının <b>bitişi kırpılır</b> — başlangıç zamanına dokunulmaz, yani sesle bağı bozulmaz. Kırpmak yetmezse (iki kişi gerçekten aynı anda konuşuyorsa) <b>alt sıradaki karakterin</b> o altyazısı gizlenir; kaç tane ve kimden gizlendiği sonuçta yazar. Kutuyu kapatırsan hiçbir şey gizlenmez, üst üste binenler yalnızca sayılır.<br>Hiç altyazı kaybetmeden çözmek istersen: Premiere'de her altyazı kanalına <b>farklı dikey konum</b> ver (Track Style), sonra bu kutuyu kapat.</p>
         </div>
 
 
@@ -238,6 +250,34 @@
               </button>
               <button class="btn-ghost" id="btnExportSrt" title="Altyazı dosyası (.srt)">SRT</button>
               <button class="btn-ghost" id="btnExportTxt" title="Düz metin (.txt)">TXT</button>
+              <!-- EMOJİ: altyazı ÜRETİLDİKTEN sonra anlamlı (duygu altyazı metninden seçiliyor),
+                   o yüzden sonuç satırında. Boş bir video kanalı ister; yoksa uyarır. -->
+              <!-- Emoji Ekle + sıklık seçici BİRLİKTE kaysın (Bölümler/aralık ikilisiyle aynı desen). -->
+              <div class="chap-group">
+                <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre sağ alt köşeye tepki resmi koyar (yapay zekâ seçer)">Emoji Ekle</button>
+                <!-- SIKLIK PANELDEN AYARLANIR. "Baya emoji" görecelidir ve tek doğru sayı yok;
+                     kullanıcının 22 dk'lık videosunda ölçülen karşılıkları: Az ≈ 100 (13 sn'de
+                     bir) · Orta ≈ 155 (8,6 sn'de bir) · Bol ≈ 220 (6,1 sn'de bir). Bu seçici
+                     olmasaydı "az/çok geldi" geri bildirimi kaynak dosya düzenlemeyi ve
+                     yeniden kurmayı gerektirirdi. -->
+                <div class="select chap-select">
+                  <select id="emojiSiklik" title="Ne kadar sık emoji çıksın?">
+                    <option value="0.25">Az emoji</option>
+                    <option value="0.4" selected>Orta</option>
+                    <option value="0.6">Bol emoji</option>
+                  </select>
+                </div>
+                <!-- EMOJİ PRESET'İ: yerleştirmeden hemen sonra, emoji kanalındaki BÜTÜN
+                     kliplere uygulanır. Kullanıcının "Emoji Sağ Taraf" preset'i tam bunun
+                     için öğretilmiş (Transform ile pop giriş + aşağı kayarak çıkış).
+                     Liste app.js'te öğrenilmiş preset'lerden dolduruluyor. -->
+                <div class="select chap-select">
+                  <select id="emojiPreset" title="Emojiler konduktan sonra bu preset hepsine uygulansın">
+                    <option value="">preset yok</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn-ghost" id="btnEmojiSil" title="Panelin koyduğu emojileri siler">Emojileri Sil</button>
               <!-- "Bölümler" ile aralığı birlikte tut: satır dar panelde alt satıra kayarsa ikisi birlikte kaysın.
                    <span> DEĞİL <div>: içinde blok seviyesinde bir <div class="select"> var, <span> yalnızca
                    metin-içi içerik alabilir (geçersiz HTML). Görünüm değişmez, .chap-group zaten inline-flex. -->
@@ -258,7 +298,19 @@
                 </div>
               </div>
             </div>
+            <!-- Emoji işinin kendi durum satırı: sonuç mesajı Preset kartındaki yazıya
+                 gitmesin (o başka bir ekranda, kullanıcı göremez). -->
+            <span class="dict-status" id="emojiDurum" style="display:block;margin-top:8px"></span>
           </div>
+          <!-- KARAKTER EŞLEŞTİRME SATIRLARI. Yalnız emoji klasöründe karşılığı OLMAYAN kanal
+               adları için doldurulur; hepsi eşleşiyorsa burası boş ve gizli kalır (#trackStilBox'ın
+               7 kanallı kadroda ekranı 7 boş seçiciyle doldurma hatası tekrarlanmasın).
+               Seçim ASCII ADLA hatırlanır (emoji.esle.<ad>), KANAL NUMARASIYLA DEĞİL: kanal
+               numarasının anlamı kadroya göre değişiyor (AutoCut'ta acCh → acCh2_ göçünün sebebi
+               buydu) ve numarayla saklarsak sonraki videoda A4 başka biri olur, panel SESSİZCE
+               yanlış karakterin yüzünü koyar.
+               .result-head'in DIŞINDA: o kutu flex ve içine konan seçici satırları sağa itiliyor. -->
+          <div id="emojiEsleBox" hidden style="margin:0 0 10px"></div>
           <p class="note" id="trHint" style="margin:0 0 10px">Timeline'a eklemeden önce satırlara tıklayıp metni düzeltebilirsin. Konuşan kişi yanlışsa soldaki noktaya tıkla.</p>
           <div class="transcript" id="transcript"></div>
         </div>
@@ -342,6 +394,32 @@
         <!-- Tanılama kartları KALDIRILDI: ikisi de sorusunu cevapladı ve sonuçlar
              CLAUDE.md'ye yazıldı. Fonksiyonlar host.jsx'te duruyor (captionStilTani,
              presetTani), yeni bir Premiere sürümünde DevTools'tan tekrar çağrılabilir. -->
+
+        <!-- EMOJİ AYARLARI. Asıl düğme Altyazı ekranında (üretimden sonra basılıyor);
+             burada yalnız bir kez ayarlanan şeyler + ölçüm testi duruyor. -->
+        <div class="card">
+          <div class="card-title">Duygu Emojileri</div>
+          <p class="note" style="margin:0 0 10px">Konuşurken karakterin tepki resmini köşeye koyar. Resimler <b>“Duygu Karakter.png”</b> adında olmalı (örnek: <b>Korkmuş Dora.png</b>).</p>
+          <div class="dict-actions">
+            <input type="text" id="emojiKlasor" class="kanal-ad" style="flex:1" spellcheck="false" placeholder="emoji klasörü">
+            <button class="btn-ghost" id="btnEmojiKlasor" type="button">Klasör Seç</button>
+          </div>
+          <!-- "Senin karakterin" seçicisi KALDIRILDI (kullanıcı isteği): karakter adı artık
+               kanal listesinden geliyor — A1 satırının da isim kutusu var. Tek yerde ayarlanan
+               bir şeyi ikinci bir ekranda tekrar sormak kafa karıştırıyordu. -->
+          <p class="note" style="margin:8px 0 0">Hangi karakterin hangi emojiyi alacağı <b>kanal isimlerinden</b> gelir: Altyazı ekranındaki kanal listesinde her kanala adını yaz (<b>A1 dahil</b> — en üstteki kutu), dosya adıyla aynı olsun. Bir ad klasörde yoksa <b>Emoji Ekle</b>'ye bastığında düğmelerin altında “o ad → hangi karakter” diye tek satır çıkar; bir kez seçersin, hatırlanır. Emojisi hiç olmayan biri için “emoji yok” de.</p>
+          <div class="dict-actions" style="margin-top:8px">
+            <button class="btn-ghost" id="btnEmojiTest" type="button">Ölçüm testi</button>
+            <!-- "Emoji kesiliyor / yanlış yerde" sorusunun tek adımda cevabı: klibe NE yazıldığını
+                 okur. Panel yazdığı değeri görmüyordu, yalnız yazıyordu — kırpmanın panelden mi
+                 Premiere'den mi geldiğini ancak bu ayırır. -->
+            <button class="btn-ghost" id="btnEmojiKlipTani" type="button"
+                    title="Timeline'da bir emoji klibi seç, sonra bas: o klibe yazılmış konum/ölçek/kırpma değerlerini gösterir">Seçili emojiyi incele</button>
+          </div>
+          <span class="dict-status" id="emojiTestDurum" style="display:block;margin-top:8px"></span>
+          <textarea id="emojiTestCikti" class="dict-text" rows="10" spellcheck="false" readonly
+                    style="margin-top:8px;display:none;font-family:monospace;font-size:11px"></textarea>
+        </div>
       </div>
 
       <!-- ================= AUTOCUT ================= -->
@@ -495,6 +573,38 @@
       </div>
 
     </main>
+  </div>
+
+  <!-- ================= LİSANS KİLİDİ =================
+       TAM EKRAN kilit (kart değil): panelin hiçbir düğmesine ulaşılmamalı. Kart olsaydı
+       arkadaki kartlar tıklanabilir kalırdı.
+
+       ⚠ BAŞLANGIÇTA GİZLİ (hidden) — BİLEREK. Kilidi JS açıyor, JS kapatmıyor.
+       Tersi (baştan görünür, JS gizler) daha "güvenli" görünür ama app.js'te bir hata
+       olduğu an panel KALICI olarak kilitli kalırdı. js/lisans.js'in en üstündeki kural
+       burada da geçerli: teknik arıza kullanıcıyı dışarıda bırakmaz. -->
+  <div class="lisans-kilit" id="lisansKilit" hidden>
+    <div class="lisans-kart">
+      <div class="lisans-logo">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <div class="lisans-baslik">Yusufwrl Premiere</div>
+
+      <!-- ⚠ EKRANDA KOD KUTUSUNDAN BAŞKA HİÇBİR ŞEY YOK (kullanıcı isteği, 7 Ağustos 2026).
+           KALDIRILANLAR, geri ekleme:
+             · "Bilgisayar kimliğin" satırı ve kopyala düğmesi — kimlik arka planda üretilip
+               yalnız sunucuya gidiyor, kullanıcıya gösterilmesinin bir işlevi yok.
+             · "Şifreyi Yusuf verir" / "bir kere girilir" açıklamaları — kullanıcı bunları
+               istemiyor; kutunun kendisi zaten ne yapılacağını anlatıyor.
+           Teşhis bilgisi (kilit sebebi, sürüm) Ayrıntılar log'una yazılıyor. -->
+      <input class="lisans-input" id="lisansSifre" type="password" autocomplete="off"
+             spellcheck="false" placeholder="Kod" aria-label="Kod" />
+      <button class="btn-primary lisans-btn" id="lisansGiris">Devam</button>
+
+      <div class="lisans-durum" id="lisansDurum"></div>
+    </div>
   </div>
 
   <!-- Temalı modal (native confirm/alert yerine) -->

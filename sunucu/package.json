@@ -1,0 +1,10 @@
+{
+  "name": "yusufwrl-lisans-sunucu",
+  "private": true,
+  "type": "module",
+  "_not": "type:module -> worker.js ESM (export default). Bagimlilik YOK, npm install gerekmez.",
+  "scripts": {
+    "test": "node test-worker.mjs",
+    "deploy": "wrangler deploy"
+  }
+}

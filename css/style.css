@@ -318,6 +318,56 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 @keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalPop { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
 
+/* ---------- LİSANS KİLİDİ ----------
+   z-index MODAL'DAN (1000) YÜKSEK olmak ZORUNDA: kilit açıkken arkada bir onay kutusu
+   açılırsa (ör. oturum geri yükleme sorusu) kilidin üstüne çıkar ve kullanıcı onu
+   cevaplayarak panelle etkileşime girerdi. */
+.lisans-kilit {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center; padding: 22px;
+  background: rgba(8, 6, 14, 0.86); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  animation: modalFade .18s ease;
+}
+.lisans-kilit[hidden] { display: none; }   /* display:flex, [hidden]'ı ezer — bu satır olmadan kilit ASLA gizlenmez */
+.lisans-kart {
+  width: 100%; max-width: 330px; text-align: center;
+  background: linear-gradient(160deg, rgba(44,37,66,.96), rgba(29,24,41,.96));
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 26px 22px 20px; box-shadow: 0 18px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(157,92,249,.08);
+  animation: modalPop .22s cubic-bezier(.2,.8,.3,1.1);
+}
+.lisans-logo {
+  width: 46px; height: 46px; margin: 0 auto 12px; border-radius: 13px;
+  display: grid; place-items: center; color: #fff;
+  background: var(--grad); box-shadow: 0 6px 20px var(--glow);
+}
+.lisans-baslik { font-size: 16px; font-weight: 800; margin-bottom: 5px;
+  background: var(--grad-soft); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.lisans-alt { font-size: 12.4px; color: var(--muted); line-height: 1.55; margin-bottom: 16px; }
+.lisans-input {
+  width: 100%; padding: 11px 13px; font-size: 13.5px; text-align: center; letter-spacing: .5px;
+  background: rgba(16,13,24,.7); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  outline: none; font-family: inherit;
+}
+.lisans-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lisans-btn { width: 100%; margin-top: 10px; }
+.lisans-durum { font-size: 12.2px; line-height: 1.55; margin-top: 12px; min-height: 1px; white-space: pre-wrap; }
+.lisans-not { font-size: 11.4px; color: var(--faint); line-height: 1.65; margin-top: 16px;
+  padding-top: 14px; border-top: 1px solid var(--border); }
+.lisans-not b { color: var(--muted); font-weight: 700; }
+.lisans-hwid { margin-top: 12px; font-size: 10.5px; color: var(--faint); line-height: 1.7; }
+/* Kimlik 64 karakter: TAŞMASIN diye kırpılıp kaydırılabilir kalıyor (kopyala düğmesi tam değeri verir) */
+.lisans-hwid code {
+  display: block; margin: 3px 0; padding: 5px 7px; font-size: 9.6px; color: var(--muted);
+  background: rgba(16,13,24,.65); border: 1px solid var(--border); border-radius: 6px;
+  overflow-x: auto; white-space: nowrap; font-family: Consolas, "Courier New", monospace;
+}
+.lisans-kopyala {
+  background: none; border: none; color: var(--accent-2); font-size: 10.5px;
+  cursor: pointer; text-decoration: underline; font-family: inherit; padding: 0;
+}
+
 /* ---------- İlerleme: bitti / hata rozeti + durum ---------- */
 .prog-badge { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
   font-size: 12px; font-weight: 800; color: #fff; line-height: 1; }

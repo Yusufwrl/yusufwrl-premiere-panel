@@ -34,18 +34,27 @@ $PanelInclude = @("index.html", "config.json", "update.json", "version.json",
 # config.json bu listede DEGIL ve buraya EKLENMEZ: pakete GIRMESI gerekiyor, yoksa temiz
 # kurulumda panel hic acilmaz. Guncellemede korunmasi js\updater.js configBirlestir()
 # ve installer\kur.ps1'deki birlestirme ile saglaniyor.
+#
+# lisans.json: sifre BIR KERE girilir (kullanicinin acik istegi). Guncelleme ya da
+# yeniden kurulum bu dosyayi ezerse arkadas her seferinde sifreyi tekrar girer ve
+# sunucuya gereksiz bir aktivasyon daha duser -> BES LISTEDE DE bulunmasi SART.
 $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
                     "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
                     "presetler.json",
-                    "presetler.bak.json")
+                    "presetler.bak.json",
+                    "lisans.json")
 
 # Panele girmemesi NORMAL olan ust duzey ogeler (gelistirme/dagitim/dokuman dosyalari).
 # Test-PanelFileList bunlari "unutulmus" saymaz.
 # .debug: yalnizca gelistirici kopyasina gider (deploy-dev.ps1). Son kullanici paketinde
 #         gereksiz bir DevTools dinleyicisi (localhost:8088) acar, o yuzden burada.
+# sunucu: Cloudflare Worker kaynagi (lisans sunucusu). Panele GITMEZ — orasi Cloudflare'de
+#         calisiyor ve panelin icinde bir isi yok. Panel yalniz Worker'in ADRESINI biliyor
+#         (js/lisans.js SUNUCU_HOST); ADMIN_TOKEN ve diger secret'lar Cloudflare'de durur,
+#         hicbiri panele gomulmez.
 $PanelIgnore = @(".git", ".gitignore", ".claude", ".debug", "installer", "KUR.bat",
                  "CLAUDE.md", "DAGITIM.md", "KULLANIM.md", "INCELEME-RAPORU.md",
-                 "GELISTIRICI-MODU.reg", "deploy-dev.ps1", "install-dev.ps1")
+                 "GELISTIRICI-MODU.reg", "deploy-dev.ps1", "install-dev.ps1", "sunucu")
 
 # Repo kokunde, hicbir listede olmayan ust duzey oge var mi? (Sessizce disarida kalmasin.)
 function Test-PanelFileList {

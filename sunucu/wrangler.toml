@@ -1,0 +1,63 @@
+# =============================================================================
+#  Yusufwrl lisans sunucusu — Cloudflare Worker ayarlari
+# =============================================================================
+#  Bu klasor PANELE GIRMEZ. installer\panel-files.ps1 icindeki $PanelInclude bir
+#  IZIN LISTESI oldugu icin "sunucu" orada olmadikca pakete kopyalanmaz; yine de
+#  $PanelIgnore'a eklenmeli ki Test-PanelFileList bunu "unutulmus dosya" sanip
+#  her pakette uyari basmasin.
+#
+#  Yayinlama (bu klasorun icinde, PowerShell):
+#     npx wrangler@4 deploy
+# =============================================================================
+
+# ⚠ ADRES BU IKI PARCADAN OLUSUYOR:  <name>.<hesap-alt-adi>.workers.dev
+#   js\lisans.js icindeki SUNUCU_HOST su an "lisans.yusufwrl.workers.dev" —
+#   yani name = "lisans" VE Cloudflare hesap alt adi "yusufwrl" olmali.
+#   Cloudflare ilk deploy'da alt adi bir kere soruyor: "yusufwrl" yaz.
+#   Baskasi kapmissa (ornegin "yusufwrl2" vermek zorunda kaldiysan) panel
+#   sunucuyu BULAMAZ — o zaman js\lisans.js'teki SUNUCU_HOST satirini gercek
+#   adresle degistir ve paneli yeniden dagit. Bunu deploy ciktisindaki URL ile
+#   HARFI HARFINE karsilastir.
+name = "lisans"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+# Hata ayiklama gunlukleri (ucretsiz planda da acik: gunde 200.000 satir).
+# "Arkadasta calismadi" dendiginde Cloudflare panelinden ham istekleri gorursun.
+[observability]
+enabled = true
+
+# --- KV veritabani -----------------------------------------------------------
+# id'yi SEN doldurmuyorsun, komut veriyor:
+#     npx wrangler@4 kv namespace create LISANS
+# ciktidaki id'yi asagiya yapistir. (Bu id GIZLI DEGIL, hesaba bagli bir numara.)
+[[kv_namespaces]]
+binding = "LISANS"
+id = "b007b73b95d44727905983ebd3f3cfa1"
+
+# --- Hiz freni (brute force korumasi) ---------------------------------------
+# 60 saniyede ayni IP'den en fazla 10 sifre denemesi.
+# namespace_id senin sectigin bir numara (Cloudflare'den alinmaz), sadece bu
+# Worker icinde sayaci ayirt eder. period YALNIZ 10 ya da 60 olabilir.
+#
+# ⚠ Eger "wrangler deploy" bu blok yuzunden hata verirse (plan/hesap desteklemiyorsa)
+#   bu 6 satiri SIL ve tekrar deploy et. Worker frensiz de calisir: worker.js
+#   icindeki hizAsildiMi() binding yoksa sessizce "fren yok" der, PATLAMAZ.
+[[ratelimits]]
+name = "HIZ"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+# --- SECRET'LER (buraya YAZILMAZ, komutla eklenir) ---------------------------
+#   npx wrangler@4 secret put ADMIN_TOKEN    <- yonetim sayfasinin sifresi (SENDE kalir)
+#   npx wrangler@4 secret put PEPPER         <- lisans sifrelerinin karistiricisi
+#   npx wrangler@4 secret put TOKEN_SECRET   <- cihaz jetonlarinin imza anahtari
+#
+# ⚠⚠ PEPPER ve TOKEN_SECRET BIR DAHA DEGISTIRILMEZ.
+#    PEPPER degisirse dagitilmis butun SIFRELER gecersiz olur (KV'deki pw: anahtarlari
+#    eski pepper ile uretildi). TOKEN_SECRET degisirse butun kurulu panellerin JETONU
+#    coper, herkes yeniden sifre girmek zorunda kalir. ADMIN_TOKEN istedigin zaman
+#    degistirilebilir (yalnizca senin tarayicini etkiler).

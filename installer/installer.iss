@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.9.3"
+#define AppVersion "1.9.4"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}
@@ -53,7 +53,7 @@ Type: files; Name: "{app}\.debug"
 ; DIKKAT: config.json bu listede DEGIL ve buraya EKLENMEZ. Pakette gelir ve temiz
 ; kurulumda gerekir; dislanirsa panel hic acilmaz (js\pipeline.js loadConfig patlar).
 ; Guncellemede korunmasi js\updater.js configBirlestir() ve kur.ps1 ile saglaniyor.
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json"; \
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,lisans.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
 ;     (Motoru ayri dagitacaksan bu satiri sil ve arkadasin motoru elle koysun.)
