@@ -108,6 +108,23 @@ function anahtarOku(extRoot) {
     var s = satirlar[i].trim();
     if (s) { anahtar = s; break; }
   }
+  /* ⚠ KISALTILMIŞ ANAHTAR TUZAĞI — GERÇEKTEN OLDU (ParsMazi, 7 Ağustos 2026).
+     Anthropic anahtarın TAM hâlini yalnız oluşturulduğu anda bir kez gösteriyor; konsol
+     listesinde ise "sk-ant-api03-5Ue...2gAA" diye KISALTILMIŞ görünüyor. Kullanıcı listeden
+     kopyalayınca ortadaki "..." de geliyor ve sunucu "invalid x-api-key" (401) dönüyor —
+     yani anahtar "yanlış" değil, EKSİK. Sebebi mesajdan anlaşılmıyordu: kullanıcı anahtarı
+     defalarca kontrol ediyor, hep doğru görünüyor.
+     İstek GÖNDERİLMEDEN yakalanıyor: boşuna bekleme ve boşuna "anahtar geçersiz" şüphesi yok. */
+  if (anahtar.indexOf("...") !== -1 || anahtar.indexOf("…") !== -1) {
+    throw _hata("Anahtar EKSİK: içinde \"...\" var. Anthropic'in listesinde anahtar kısaltılmış " +
+                "gösteriliyor; oradan kopyalanan hâli çalışmaz. Yeni bir anahtar oluştur ve " +
+                "açılan pencerede gösterilen TAM hâlini yapıştır (o pencere kapanınca bir daha " +
+                "gösterilmiyor).", { anahtarYok: true });
+  }
+  if (anahtar && anahtar.length < 40) {
+    throw _hata("Anahtar çok kısa (" + anahtar.length + " karakter) — yarım kopyalanmış olabilir. " +
+                "Anthropic'te yeni anahtar oluşturup TAM hâlini yapıştır.", { anahtarYok: true });
+  }
   if (!anahtar) {
     throw _hata("Anthropic API anahtarı yok. Panel klasörüne \"" + DOSYA + "\" dosyasını " +
                 "koy (içinde tek satır: sk-ant-... ile başlayan anahtar) ya da panelden gir.",
