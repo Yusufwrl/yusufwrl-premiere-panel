@@ -251,7 +251,11 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
   const oran = Math.min(0.9, Math.max(0.05, Number((opts && opts.hedefOran) || 0.40)));
 
   const secimler = [];
-  let atilan = 0, hataliParca = 0, karDisi = 0;
+  /* sonHata: SEBEBİ EKRANA TAŞIMAK İÇİN. vurucu.js zaten net Türkçe mesaj üretiyor
+     ("Anthropic anahtarı geçersiz (401)", "istek sınırı aşıldı (429)"…) ama emoji tarafı
+     onu yutup herkese aynı "Yapay zekâ cevabı alınamadı"yı gösteriyordu. Kullanıcı sebebi
+     ancak Ayrıntılar log'unu açarsa görüyordu — teknik olmayan biri için o log yok demek. */
+  let atilan = 0, hataliParca = 0, karDisi = 0, sonHata = "";
   const parcaSayi = Math.ceil(cumleler.length / PARCA);
 
   for (let p = 0; p < parcaSayi; p++) {
@@ -289,7 +293,8 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
          Iptal ise devam etmenin anlami yok — yukari firlat. */
       if (e && e.iptal) throw e;
       hataliParca++;
-      log("[emoji] parça " + (p + 1) + " alınamadı: " + (e.message || e));
+      sonHata = String((e && e.message) || e);
+      log("[emoji] parça " + (p + 1) + " alınamadı: " + sonHata);
       continue;
     }
 
@@ -301,7 +306,12 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
       const m = String(metin).match(/\{[\s\S]*\}/);
       if (m) { try { j = JSON.parse(m[0]); } catch (e3) { j = null; } }
     }
-    if (!j || !j.secimler) { hataliParca++; log("[emoji] parça " + (p + 1) + " cevabı okunamadı."); continue; }
+    if (!j || !j.secimler) {
+      hataliParca++;
+      sonHata = "Yapay zekânın cevabı okunamadı (JSON bozuk)";
+      log("[emoji] parça " + (p + 1) + " cevabı okunamadı.");
+      continue;
+    }
 
     /* MODEL LISTE DISINA CIKARSA AT. Sema enum kullaniyor ama semasiz geri dusulmus
        olabilir; bilinmeyen bir duygu adi icin dosya yoktur ve sessizce bos klip olurdu. */
@@ -336,7 +346,12 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
   /* Model o karakterde OLMAYAN bir duygu sectiyse sebep gorunur olsun: "az emoji cikti"
      sikayetinin kaynagi bu olabilir ve cozumu kod degil, eksik resmi cizmek. */
   if (karDisi) log("[emoji] " + karDisi + " seçim o karakterde olmayan duyguydu, atıldı.");
-  if (hataliParca === parcaSayi) return { secimler: [], hata: "Yapay zekâ cevabı alınamadı" };
+  /* SEBEBİ GÖSTER. vurucu.js'in ürettiği mesaj zaten ne yapılacağını söylüyor
+     (anahtar geçersiz / kredi bitti / sınır aşıldı); onu yutup genel bir cümle göstermek
+     kullanıcıyı çaresiz bırakıyordu. */
+  if (hataliParca === parcaSayi) {
+    return { secimler: [], hata: sonHata || "Yapay zekâ cevabı alınamadı" };
+  }
   return {
     secimler: secimler,
     hata: "",
