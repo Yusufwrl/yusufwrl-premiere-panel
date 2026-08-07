@@ -56,9 +56,18 @@ Type: files; Name: "{app}\.debug"
 Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,lisans.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
-;     (Motoru ayri dagitacaksan bu satiri sil ve arkadasin motoru elle koysun.)
+;     KOSULLU: motor staging\engine altinda VARSA exe'ye gomulur, YOKSA bu satir hic
+;     derlenmez ve kurulum yalniz paneli kurar.
+;     NEDEN: motor 7,3 GB. Exe'ye gomulunce (a) Inno tek dosyada ~2 GB sinirina takiliyor,
+;     (b) 7 GB'lik bir exe'yi Drive/WeTransfer'dan indirtmek zaten pratik degil. Motor
+;     ayrica RAR ile gonderiliyor; kurulum sihirbazi motorun yerini SORUYOR (GetEngineDir)
+;     ve panele engine-root.txt olarak yaziyor, yani elle konan motor da sorunsuz bulunuyor.
+;     Motoru yine de gomecek olursan: staging\engine\ altini doldur, bu blok kendiliginden
+;     devreye girer.
+#if FileExists(AddBackslash(SourcePath) + "staging\engine\Faster-Whisper-XXL\faster-whisper-xxl.exe")
 Source: "staging\engine\*"; DestDir: "{code:GetEngineDir}"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
+#endif
 ; --- Font (gecici; asagida per-user kurulur) ---
 Source: "staging\PoetsenOne-Regular.ttf"; DestDir: "{tmp}"; Flags: dontcopy
 

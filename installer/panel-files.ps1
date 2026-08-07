@@ -54,7 +54,8 @@ $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
 #         hicbiri panele gomulmez.
 $PanelIgnore = @(".git", ".gitignore", ".claude", ".debug", "installer", "KUR.bat",
                  "CLAUDE.md", "DAGITIM.md", "KULLANIM.md", "INCELEME-RAPORU.md",
-                 "GELISTIRICI-MODU.reg", "deploy-dev.ps1", "install-dev.ps1", "sunucu")
+                 "GELISTIRICI-MODU.reg", "deploy-dev.ps1", "install-dev.ps1", "sunucu",
+                 "panel.zip", "TESLIM.md")
 
 # Repo kokunde, hicbir listede olmayan ust duzey oge var mi? (Sessizce disarida kalmasin.)
 function Test-PanelFileList {
