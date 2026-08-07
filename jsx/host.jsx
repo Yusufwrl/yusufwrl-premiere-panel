@@ -291,7 +291,9 @@ function senkronUygula(planDosyaPath) {
             catch (ei) { return "err:Dosyalar projeye alınamadı: " + ei.toString(); }
         }
 
-        var konan = 0, hata = 0, ilkHata = "";
+        /* tasinan: istenen kanal reddedince BASKA kanala konanlar. Sonuc mesajina yaziliyor —
+           sessizce baska yere koymak "sesim nerede" sorusunu doguruyordu. */
+        var konan = 0, hata = 0, ilkHata = "", tasinan = [];
         for (i = 0; i < isler.length; i++) {
             var it = isler[i];
             var pi = _bul(it.yol);
@@ -320,15 +322,48 @@ function senkronUygula(planDosyaPath) {
             try { sonra = seq.audioTracks[it.kanal].clips.numItems; } catch (e6) {}
             if (sonra > once) konan++;
             else {
-                hata++;
-                if (!ilkHata) ilkHata = it.ad + ": A" + (it.kanal + 1) + " kanalına yerleşmedi " +
-                    "(kanal tipi uyumsuz olabilir — Mono kanala stereo klip konamaz)";
+                /* ⚠ KANAL TIPI UYUMSUZ — YEDEK KANAL ARA, PES ETME.
+                   Premiere'de her ses kanalinin bir TIPI var (mono/stereo/5.1) ve MONO bir
+                   kanala STEREO klip konmuyor; tip sekans kurulurken belirleniyor ve
+                   SONRADAN DEGISTIRILEMIYOR. Craig kayitlari stereo, yani kullanicinin
+                   sekansi mono kanallarla acilmissa panel hicbir sey yapamiyordu.
+                   GERCEKTEN OLDU (ParsMazi, 7 Agustos 2026): 5 sesin 4'u yerlesemedi ve
+                   kullaniciya "sekansi yeniden kur" demekten baska yol kalmadi.
+                   Artik istenen kanal reddederse ASAGIDAKI BOS kanallar sirayla denenir.
+                   YALNIZ BOS KANAL (clips.numItems === 0): dolu bir kanala yazmak
+                   kullanicinin baska bir sesini EZERDI — o bedel, yerlesmeyen bir sesten
+                   cok daha pahali. Nereye kondugu sonuc mesajina yaziliyor, yoksa kullanici
+                   hangi kanalda kim var bilemez. */
+                var yBul = -1, y, yOnce, ySonra;
+                for (y = it.kanal + 1; y < seq.audioTracks.numTracks && yBul < 0; y++) {
+                    yOnce = -1;
+                    try { yOnce = seq.audioTracks[y].clips.numItems; } catch (e7) { yOnce = -1; }
+                    if (yOnce !== 0) continue;                     // dolu ya da okunamadi -> DOKUNMA
+                    try { seq.audioTracks[y].overwriteClip(pi, it.bas); } catch (e8) {}
+                    ySonra = 0;
+                    try { ySonra = seq.audioTracks[y].clips.numItems; } catch (e9) {}
+                    if (ySonra > yOnce) yBul = y;
+                }
+                if (yBul >= 0) {
+                    konan++;
+                    tasinan.push(it.ad + " -> A" + (yBul + 1));
+                } else {
+                    hata++;
+                    if (!ilkHata) ilkHata = it.ad + ": hiçbir kanala yerleşmedi " +
+                        "(kanal tipi uyumsuz — Craig kaydı stereo, sekanstaki kanallar mono; " +
+                        "Sequence > Add Tracks ile Track Type 'Standard' kanal ekle)";
+                }
             }
         }
         // Hicbiri yerlesmediyse BASARI DONME: panel "ok:" gorunce akisa devam edip
         // A2 temizligini bile teklif ediyordu.
         if (!konan) return "err:Hiçbir ses yerleştirilemedi. " + (ilkHata || "sebep bilinmiyor");
-        return "ok:" + konan + " ses yerleştirildi" + (hata ? (", " + hata + " hata | " + ilkHata) : "");
+        var msg = "ok:" + konan + " ses yerleştirildi";
+        /* Baska kanala tasinanlari SOYLE: kanal tipi uyumsuzlugu yuzunden panel plani
+           degistirdi, kullanici tabloya bakip "burada olmaliydi" diye aramasin. */
+        if (tasinan.length) msg += " | kanal tipi uymadığı için taşındı: " + tasinan.join(" · ");
+        if (hata) msg += " | " + hata + " hata: " + ilkHata;
+        return msg;
     } catch (e) {
         return "err:" + e.toString();
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
