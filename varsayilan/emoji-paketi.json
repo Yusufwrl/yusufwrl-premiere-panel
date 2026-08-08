@@ -77,46 +77,66 @@
     },
     {
         "dosya":  "emoji20.png",
-        "ad":  "Reddeden Tofi.png"
+        "ad":  "Reddeden Moni.png"
     },
     {
         "dosya":  "emoji21.png",
-        "ad":  "Sinsi Planlı Tofi.png"
+        "ad":  "Reddeden Tofi.png"
     },
     {
         "dosya":  "emoji22.png",
-        "ad":  "Şapşal Tofi.png"
+        "ad":  "Sevgi Mimi.png"
     },
     {
         "dosya":  "emoji23.png",
-        "ad":  "Şaşırmış Dora.png"
+        "ad":  "Sevgi Moni.png"
     },
     {
         "dosya":  "emoji24.png",
-        "ad":  "Şaşırmış Mimi.png"
+        "ad":  "Sinsi Planlı Moni.png"
     },
     {
         "dosya":  "emoji25.png",
-        "ad":  "Şaşırmış Moni.png"
+        "ad":  "Sinsi Planlı Tofi.png"
     },
     {
         "dosya":  "emoji26.png",
-        "ad":  "Şaşırmış Tofi.png"
+        "ad":  "Şapşal Moni.png"
     },
     {
         "dosya":  "emoji27.png",
-        "ad":  "Yalvaran Dora.png"
+        "ad":  "Şapşal Tofi.png"
     },
     {
         "dosya":  "emoji28.png",
-        "ad":  "Yalvaran Mimi.png"
+        "ad":  "Şaşırmış Dora.png"
     },
     {
         "dosya":  "emoji29.png",
-        "ad":  "Yalvaran Moni.png"
+        "ad":  "Şaşırmış Mimi.png"
     },
     {
         "dosya":  "emoji30.png",
+        "ad":  "Şaşırmış Moni.png"
+    },
+    {
+        "dosya":  "emoji31.png",
+        "ad":  "Şaşırmış Tofi.png"
+    },
+    {
+        "dosya":  "emoji32.png",
+        "ad":  "Yalvaran Dora.png"
+    },
+    {
+        "dosya":  "emoji33.png",
+        "ad":  "Yalvaran Mimi.png"
+    },
+    {
+        "dosya":  "emoji34.png",
+        "ad":  "Yalvaran Moni.png"
+    },
+    {
+        "dosya":  "emoji35.png",
         "ad":  "Yalvaran Tofi.png"
     }
 ]

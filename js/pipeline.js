@@ -1122,6 +1122,131 @@ function kanallarArasiCakisma(gruplar, opts, onLog) {
   return sayac;
 }
 
+/* ================= AYNI CÜMLEDE BOŞLUK BIRAKMA (KÖPRÜ) =================
+   SORUN (kullanıcı, 8 Ağustos 2026): "altyazılar yazılırken kelime aralarında boşluk oluyo,
+   o biraz garip duruyo — tek cümleyse birleşik olmalı."
+   SEBEP ÖLÇÜLDÜ: buildCues her cue'nun bitişini `sonraki.start - MIN_GAP` değerine DAYIYOR
+   (pipeline.js süre döngüsü) ve MIN_GAP = 0.08 sn. Kelime tavanı 2 olduğu için hızlı konuşmada
+   cue'ların BÜYÜK ÇOĞUNLUĞU bu tavana çarpıyor — yani neredeyse HER cue sınırında ekranda
+   2 karelik (30 fps'te 2.4 kare) bir boşluk kalıyor ve yazı sürekli yanıp sönüyor.
+
+   ÇÖZÜM: aynı CÜMLENİN ardışık cue'larında önceki cue'nun bitişi sonrakinin başlangıcına
+   YAPIŞTIRILIR (end = next.start). Cümleler ARASINDA boşluk KORUNUR — orada yanıp sönme
+   bilgi taşıyor ("yeni cümle başlıyor") ve kullanıcı da "tek cümleyse" dedi.
+
+   NEDEN GÜVENLİ — ÜÇ NOKTA ÖLÇÜLDÜ:
+     · cuesToSrt zaman damgasını `Math.round(t*1000)` ile üretiyor; end ile next.start BİREBİR
+       aynı sayıdan geldiği için aynı ms dizgisini verirler. SRT'de bitiş == sonraki başlangıç
+       tamamen olağan; ters dönen ya da 1 ms çakışan satır oluşmaz.
+     · cakismaGider'in testi `if (onc.end <= snr.start) continue;` → end === start ÇAKIŞMA
+       DEĞİL. kanallarArasiCakisma'nın testi `if (B.start >= A.end) break;` → o da değil.
+       Yani iki giderici de bu köprüyü geri açmaz.
+     · start'a ASLA dokunulmaz: senkron bu projede en pahalı şey ve yalnız bitiş uzuyor.
+
+   ⚠ KANALLAR ARASI GÜVENLİK BURADA, ÇAĞIRANDA DEĞİL. Köprü bitişi 0.08 sn uzatıyor; o aralıkta
+   BAŞKA bir kanalın cue'su varsa Premiere ikisini aynı anda ve aynı yerde çizer — yani
+   kullanıcının şikâyet ettiği üst üste binme geri gelir. Bu yüzden köprü, uzatılacak aralıkta
+   başka grubun cue'su varsa KURULMAZ. Alternatifi (köprüyü kanallarArasiCakisma'dan ÖNCE
+   kurmak) daha kolaydı ama bedeli vardı: uzayan cue yeni çakışma doğurur, o da kırpma ya da
+   GİZLEME üretir — yani metin kaybı satın alırdık. Yanıp sönmeyi düzeltmek için altyazı
+   kaybetmek yanlış takas.
+
+   gruplar: [{ad, cues:[...]}] — cue nesneleri YERİNDE değiştirilir, çağıranın KOPYA vermesi
+   beklenir (placeCaptions öyle yapıyor). Her grubun cues'u zaman sırasına dizili olmalı. */
+function cumleBirlestir(gruplar, opts, onLog) {
+  opts = opts || {};
+  /* KÖPRÜ KURULACAK EN BÜYÜK BOŞLUK. 0.08 buildCues'un MIN_GAP'i, 0.15 onun iki katına yakın
+     bir pay: yuvarlama ve sesleHizala'nın kaydırmaları yüzünden boşluk tam 0.08 çıkmayabiliyor.
+     BÜYÜTME — 0.15'in üstündeki boşluk artık yapay değil GERÇEK bir duraklamadır ve altyazının
+     orada kaybolması doğrudur. */
+  var MAX_KOPRU = (opts.maxKopru > 0) ? opts.maxKopru : 0.15;
+  /* Başka kanalın cue'suna bırakılacak emniyet payı — kanallarArasiCakisma'nın GAP'i ile aynı. */
+  var GAP = (opts.gap > 0) ? opts.gap : 0.08;
+  var sayac = { koprulen: 0, kanalEngeli: 0, farkliCumle: 0, uzakBosluk: 0 };
+  gruplar = gruplar || [];
+
+  /* Diğer grupların cue'ları — köprü aralığında biri var mı diye bakmak için tek düz liste.
+     Grup sayısı 1 ise liste boş kalır ve kontrol bedava geçer (tek kaynak modu).
+     ⚠ CUE NESNESİNİN KENDİSİ TUTULUR, start/end KOPYASI DEĞİL. Kopyayla çalışırken bu
+     fonksiyon KENDİ kurduğu köprüleri göremiyordu: C1'in cue'su 10.42 → 10.55'e uzatılıyor,
+     sonra C2 işlenirken kontrol hâlâ eski 10.42'yi görüp "önce bitmiş" diyor ve ikinci köprüyü
+     kuruyordu → 10.50-10.55 arasında iki kanalın yazısı ekranda ÜST ÜSTE. Sızıntı köprü başına
+     en fazla MAX_KOPRU (0.15 sn) ile sınırlıydı ama tam olarak kullanıcının şikâyet ettiği
+     eksende ve SESSİZ. Referansla canlı okununca aynı turda kurulan köprüler de görünüyor.
+     Sıralama `start`'a göre ve start HİÇ değişmiyor (yalnız end uzuyor), yani erken çıkış
+     (break) geçerliliğini koruyor. */
+  var digerBas = [], g, i, cs;
+  for (g = 0; g < gruplar.length; g++) {
+    cs = (gruplar[g] && gruplar[g].cues) || [];
+    for (i = 0; i < cs.length; i++) {
+      if (!isFinite(cs[i].start) || !isFinite(cs[i].end)) continue;
+      digerBas.push({ g: g, c: cs[i] });
+    }
+  }
+  digerBas.sort(function (a, b) { return a.c.start - b.c.start; });
+
+  /* (grupNo, bas, son) aralığında BAŞKA gruptan cue var mı. Doğrusal tarama yeterli:
+     köprü sayısı cue sayısıyla orantılı ve aralık çok kısa, ama yine de erken çıkılıyor.
+     (Ölçüldü: 5000 cue / 5 grup → 13 ms.) */
+  function baskaKanalVar(grupNo, bas, son) {
+    var j;
+    for (j = 0; j < digerBas.length; j++) {
+      if (digerBas[j].c.start >= son) break;            // sıralı: buradan sonrası hep uzakta
+      if (digerBas[j].g === grupNo) continue;           // kendi grubu — kanal içi zaten çözülmüş
+      if (digerBas[j].c.end <= bas) continue;           // önce bitmiş (CANLI bitiş)
+      return true;
+    }
+    return false;
+  }
+
+  for (g = 0; g < gruplar.length; g++) {
+    cs = (gruplar[g] && gruplar[g].cues) || [];
+    for (i = 0; i + 1 < cs.length; i++) {
+      var a = cs[i], b = cs[i + 1];
+      if (!isFinite(a.end) || !isFinite(b.start)) continue;
+      var d = b.start - a.end;
+      if (d <= 0) continue;                             // zaten bitişik ya da çakışıyor
+      if (d > MAX_KOPRU) { sayac.uzakBosluk++; continue; }
+      /* AYNI CÜMLE Mİ? cumleId "<oturum jetonu>-<kaynakNo>:<segment>" ve buildCues cümle
+         sınırında grubu BÖLÜYOR, yani kimlik gerçekten kesin. Kimliği olmayan cue'da
+         (seg bilgisi yok) köprü kurulmaz: cümle sınırını uydurmaktansa boşluk bırakmak
+         yeğdir — kullanıcı "TEK CÜMLEYSE birleşik olsun" dedi, "her zaman" demedi. */
+      if (!a.cumleId || !b.cumleId || a.cumleId !== b.cumleId) { sayac.farkliCumle++; continue; }
+      if (baskaKanalVar(g, a.end, b.start + GAP)) { sayac.kanalEngeli++; continue; }
+      a.end = b.start;
+      sayac.koprulen++;
+    }
+  }
+
+  /* ── DOĞRULAMA TURU: İDDİAYI ÖLÇ ──
+     "Köprü kanallar arası çakışma DOĞURMAZ" bir iddia; bu projede iddiaların gerçek veriyle
+     sınanmadan yazılmasının bedeli birkaç kez ödendi. Köprüden SONRA kalan kanallar arası
+     çakışma gerçekten sayılır ve varsa log'a yazılır — sıfırsa hiç satır basılmaz. */
+  var kalanKA = 0, duz = [], x, y;
+  for (g = 0; g < gruplar.length; g++) {
+    cs = (gruplar[g] && gruplar[g].cues) || [];
+    for (i = 0; i < cs.length; i++)
+      if (isFinite(cs[i].start) && isFinite(cs[i].end)) duz.push({ g: g, c: cs[i] });
+  }
+  duz.sort(function (p, q) { return p.c.start - q.c.start; });
+  for (x = 0; x < duz.length; x++) {
+    for (y = x + 1; y < duz.length; y++) {
+      if (duz[y].c.start >= duz[x].c.end) break;      // sıralı: örtüşme bitti
+      if (duz[y].g !== duz[x].g) kalanKA++;
+    }
+  }
+  sayac.kalanKanallarArasi = kalanKA;
+
+  if (onLog) {
+    if (sayac.koprulen) onLog("[kopru] " + sayac.koprulen + " altyazi ayni cumlede birlestirildi.\n");
+    /* Kurulamayan köprüler SESSİZ KALMAZ: kullanıcı hâlâ yanıp sönme görürse sebebi burada. */
+    if (sayac.kanalEngeli) onLog("[kopru] " + sayac.kanalEngeli + " tanesi baska kanal yuzunden kurulmadi.\n");
+    if (sayac.farkliCumle) onLog("[kopru] " + sayac.farkliCumle + " bosluk cumle sinirinda, birakildi.\n");
+    if (kalanKA) onLog("[kopru] UYARI: koprüden sonra " + kalanKA + " kanallar arasi cakisma var.\n");
+  }
+  return sayac;
+}
+
 function cuesToSrt(cues) {
   var out = [];
   for (var i = 0; i < cues.length; i++)
@@ -1623,7 +1748,7 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
 
 module.exports = {
   loadConfig, ensureDir, buildTimelineAudio, transcribe, mixWavs, trimWav, trimAudioCopy,
-  buildCues, sesleHizala, cakismaGider, kanallarArasiCakisma, cuesToSrt, buildShortSrt, cleanPunct, flattenWords,
+  buildCues, sesleHizala, cakismaGider, kanallarArasiCakisma, cumleBirlestir, cuesToSrt, buildShortSrt, cleanPunct, flattenWords,
   analyzeSilence, cancelAll,
   fmtChapter, cuesToTxt, cuesToChapters, censorText, sozluk, filterHallucinations,
   // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında

@@ -62,8 +62,18 @@ function tara(kok) {
 
   const duyguSet = {}, karakterSet = {};
   for (const g of girdiler) {
-    // ALT KLASOR ATLANIR (bkz. dosya basindaki not) — sayilir ki kullanici bilsin.
-    if (!g.isFile()) { sonuc.atlanan++; continue; }
+    /* ⚠ PANELIN KENDI URETTIGI OGELER SAYILMAZ. "atlanan" sayaci kullaniciya "bir PNG'yi
+       yanlis adlandirdin, panel onu goremiyor" demek icin var. Emoji klasorunun icine artik
+       panel de yaziyor: "ayna" alt klasoru (js/pngayna.js — sol taraf kopyalari), "eski"
+       alt klasoru (varsayilanlariKur yedegi) ve ".panel-emoji.json" kayit dosyasi. Bunlar
+       sayilirsa sayac her makinede kalici olarak sisiyor ve GERCEK bir hatali ad
+       ("Korkmus  Dora.png") o gurultunun icinde fark edilmiyor. */
+    if (g.name.charAt(0) === ".") continue;
+    if (!g.isFile()) {
+      const alt = asciiAnahtar(g.name);
+      if (alt !== "ayna" && alt !== "eski") sonuc.atlanan++;
+      continue;
+    }
     if (!/\.png$/i.test(g.name)) { sonuc.atlanan++; continue; }
 
     let taban = g.name.replace(/\.png$/i, "").trim();

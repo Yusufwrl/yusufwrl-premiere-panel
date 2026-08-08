@@ -594,11 +594,26 @@ function emojiYerlestir(planYol, devamMi) {
            ogreniyor: bin'e tek basina guvenmek yetmiyor, cunku createBin basarisiz olursa
            PNG'ler proje KOKUNE import ediliyor ve bin aramasi bos donuyor (kullanicinin
            projesinde tam olarak bu oldu — 479 emoji "yabanci klip" sanildi). */
-        var klasorler = {}, kk, kd;
+        var klasorler = {}, kk, kd, kf, kust;
         for (i = 0; i < plan.length; i++) {
             kk = String(plan[i].yol).replace(/\\/g, "/").toLowerCase();
             kd = kk.lastIndexOf("/");
-            if (kd > 0) klasorler["k" + kk.slice(0, kd + 1)] = true;
+            if (kd <= 0) continue;
+            kf = kk.slice(0, kd + 1);
+            klasorler["k" + kf] = true;
+            /* ⚠ "…/ayna/" ISE BIR UST KLASORU DE EKLE. Sol taraftaki karakterlerin resmi
+               panelin urettigi AYNALANMIS kopyalar ve <Emoji>\ayna\ altinda duruyor;
+               sag taraftakiler kok klasorde. Bu kume plan PARCASI basina kuruluyor (40'lik
+               dilimler): bir devam parcasinin 40 satirinin TAMAMI sol taraf olursa (uzun bir
+               konuk sohbeti) kume yalniz ayna klasorunu icerir ve onceki parcanin KOK
+               klasorden gelen emojilerini "yabanci klip" sayip yerlestirmeyi ORTADA durdurur
+               ("V7 kanalinda emoji OLMAYAN 40 klip var"), kullanicida yarim bir emoji
+               katmani kalirdi. Bin haritasi normalde bunu yakalar ama createBin basarisiz
+               olup PNG'ler proje KOKUNE import edildiginde harita BOS kalir — kullanicinin
+               projesinde bir kez gercekten oldu (5 katman / 479 klip). Bu satir tam da o
+               ikinci emniyetin aynalama yuzunden delinmesini onluyor. */
+            kust = kf.match(/^(.*\/)ayna\/$/);
+            if (kust) klasorler["k" + kust[1]] = true;
         }
         function _emojiKlasorde(yol) {
             var y = String(yol).replace(/\\/g, "/").toLowerCase(), a;

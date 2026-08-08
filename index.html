@@ -254,7 +254,7 @@
                    o yüzden sonuç satırında. Boş bir video kanalı ister; yoksa uyarır. -->
               <!-- Emoji Ekle + sıklık seçici BİRLİKTE kaysın (Bölümler/aralık ikilisiyle aynı desen). -->
               <div class="chap-group">
-                <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre sağ alt köşeye tepki resmi koyar (yapay zekâ seçer)">Emoji Ekle</button>
+                <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar (yapay zekâ seçer). Tofi ve Moni sağ alt köşede, diğer karakterler sol alt köşede (resimleri ekrana bakacak şekilde yatay çevrilir). Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
                 <!-- SIKLIK PANELDEN AYARLANIR. "Baya emoji" görecelidir ve tek doğru sayı yok;
                      kullanıcının 22 dk'lık videosunda ölçülen karşılıkları: Az ≈ 100 (13 sn'de
                      bir) · Orta ≈ 155 (8,6 sn'de bir) · Bol ≈ 220 (6,1 sn'de bir). Bu seçici
@@ -267,13 +267,18 @@
                     <option value="0.6">Bol emoji</option>
                   </select>
                 </div>
-                <!-- EMOJİ PRESET'İ: yerleştirmeden hemen sonra, emoji kanalındaki BÜTÜN
+                <!-- EMOJİ ANİMASYONU: yerleştirmeden hemen sonra, emoji kanalındaki BÜTÜN
                      kliplere uygulanır. Kullanıcının "Emoji Sağ Taraf" preset'i tam bunun
                      için öğretilmiş (Transform ile pop giriş + aşağı kayarak çıkış).
-                     Liste app.js'te öğrenilmiş preset'lerden dolduruluyor. -->
+                     ⚠ SEÇENEK ADI "preset yok" DEĞİL "animasyon yok": kullanıcı bu seçiciyi
+                     TARAF seçici sanıyordu ("Tofi/Moni sağda dedik, bu ne?" — 8 Ağustos 2026).
+                     Taraf artık tümüyle otomatik (bkz. EMOJI_SAG_KARAKTER); burada seçilen
+                     şey yalnızca emojinin ekrana GİRİŞ animasyonu ve iki taraf için de aynı
+                     animasyon kullanılır — ölçüldü: preset'in yatay bileşeni yok, yani
+                     "sağ" ve "sol" sürümü birbirinin aynısı olurdu. -->
                 <div class="select chap-select">
-                  <select id="emojiPreset" title="Emojiler konduktan sonra bu preset hepsine uygulansın">
-                    <option value="">preset yok</option>
+                  <select id="emojiPreset" title="Emojinin GİRİŞ ANİMASYONU (pop). Sağ/sol tarafı panel kendisi seçiyor — Tofi ve Moni sağda, diğerleri solda. Burada seçtiğin animasyon iki tarafa da uygulanır.">
+                    <option value="">animasyon yok</option>
                   </select>
                 </div>
               </div>
@@ -407,6 +412,9 @@
           <!-- "Senin karakterin" seçicisi KALDIRILDI (kullanıcı isteği): karakter adı artık
                kanal listesinden geliyor — A1 satırının da isim kutusu var. Tek yerde ayarlanan
                bir şeyi ikinci bir ekranda tekrar sormak kafa karıştırıyordu. -->
+          <!-- TARAF KURALI BURADA YAZILI: kullanıcı "neden bu solda?" diye sormadan görsün.
+               Liste js/app.js → EMOJI_SAG_KARAKTER; kadro değişirse orası tek satır. -->
+          <p class="note" style="margin:8px 0 0"><b>Taraf otomatik:</b> Tofi ve Moni sağ alt köşede, diğer karakterler (Dora, Mimi…) sol alt köşede — soldakilerin resmi ekrana baksın diye <b>yatay çevrilir</b> ve çevrilmiş kopyalar emoji klasöründeki <code>ayna</code> alt klasörüne bir kez üretilir. Seçmen gereken bir şey yok. Yanındaki <b>animasyon</b> menüsü tarafla ilgili değil: emojinin ekrana geliş hareketini (pop) seçer ve iki tarafa da aynısı uygulanır.</p>
           <p class="note" style="margin:8px 0 0">Hangi karakterin hangi emojiyi alacağı <b>kanal isimlerinden</b> gelir: Altyazı ekranındaki kanal listesinde her kanala adını yaz (<b>A1 dahil</b> — en üstteki kutu), dosya adıyla aynı olsun. Bir ad klasörde yoksa <b>Emoji Ekle</b>'ye bastığında düğmelerin altında “o ad → hangi karakter” diye tek satır çıkar; bir kez seçersin, hatırlanır. Emojisi hiç olmayan biri için “emoji yok” de.</p>
           <div class="dict-actions" style="margin-top:8px">
             <button class="btn-ghost" id="btnEmojiTest" type="button">Ölçüm testi</button>

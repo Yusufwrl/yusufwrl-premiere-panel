@@ -500,6 +500,11 @@
      pencerelerin %39'unda hiç ünlem yok, konuşma hızı ters işaretli. */
   var VUR = null;
   var EMJ = null;                // js/emoji.js — emoji klasörü tarayıcı (Premiere'e dokunmaz)
+  var AYNA = null;               // js/pngayna.js — sol taraf emojileri için yatay ayna (saf dosya işi)
+  /* Emoji eşleme onayı — OTURUMLUK, diske YAZILMAZ. Anahtar sekans kimliği, değer eşlemenin
+     imzası. Bilerek localStorage değil: sekans adları projeler arası tekrar ediyor ve kalıcı
+     bir onay, başka bir projenin kararıyla bu videonun sorusunu susturabilirdi. */
+  var _emojiEslemeOnay = {};
   function vurucuAcik() { var c = $("chkVurucu"); return !!(c && c.checked); }
 
   /* ---------- ASLA ÜST ÜSTE GELMESİN ----------
@@ -602,6 +607,31 @@
     catch (e) { return PRESET_VARSAYILAN.slice(0); }
   }
   function presetSeciliYaz() { lsSet("preset.secili", JSON.stringify(_presetSecili)); }
+
+  /* ÖĞRETİLMİŞ AMA KARTI OLMAYAN PRESET'LERİ LİSTEYE AL — KENDİ KENDİNİ ONARAN ADIM.
+     ⚠ KULLANICININ GÖRDÜĞÜ HATA TAM OLARAK BUYDU (8 Ağustos 2026, ekran görüntüsüyle):
+     `presetler.json`'ında "Emoji Sağ Taraf" ve "Camera Shake 1" öğretilmiş olarak duruyordu
+     ama ekranda KARTLARI YOKTU — yani erişilemez bir kayıt. Sebep varsayilanlariKur'un preset
+     bloğunun "kullanıcının kendi presetler.json'ı varsa HİÇ çalışma" kuralı: o blok aynı
+     zamanda paket adlarını `preset.secili`ye ekliyordu, dolayısıyla pakete SONRADAN eklenen
+     hiçbir preset mevcut kullanıcıya ulaşmıyordu. Emoji resimlerindeki "üzerine yazma"
+     tuzağının birebir aynısı — aynı hatanın iki ayrı yerdeki hâli.
+     ÇÖZÜM PAKETE DEĞİL VERİYE BAKIYOR: öğretilmiş bir yığının kartı yoksa o yığın kullanılamaz
+     demektir, kartı geri koy. Bu, paket büyüdükçe kendiliğinden doğru kalır.
+     "Bilerek kaldırdığım kart geri geliyor" durumu OLUŞMAZ: presetKaldir hem adı hem yığını
+     birlikte siliyor (bkz. orası), yani kartsız yığın yalnız bu hatadan doğabiliyor. */
+  function presetSeciliTazele() {
+    var yig = {}, ad, eklenen = [];
+    try { yig = presetYiginlar() || {}; } catch (e) { return; }
+    for (ad in yig) {
+      if (!Object.prototype.hasOwnProperty.call(yig, ad)) continue;
+      if (_presetSecili.indexOf(ad) === -1) { _presetSecili.push(ad); eklenen.push(ad); }
+    }
+    if (!eklenen.length) return;
+    presetSirala();
+    presetSeciliYaz();
+    logLine("Öğretilmiş ama kartı olmayan preset'ler listeye eklendi: " + eklenen.join(", "));
+  }
   function efektSira(ad) {
     for (var i = 0; i < _efektler.length; i++) if (_efektler[i] === ad) return i;
     return -1;
@@ -765,16 +795,69 @@
         var eHedef = emojiKlasorVarsayilan();
         if (eList && eList.length && eHedef) {
           pipeline.ensureDir(eHedef);
-          var eKondu = 0, eVar = 0;
+          var eKondu = 0, eVar = 0, eYeni = 0, eKorunan = 0, eYedek = 0, eYeniAd = [];
+          /* ⚠ "DOSYA VARSA HİÇ DOKUNMA" KURALI BİR GÜNCELLEMEYİ SESSİZCE YUTUYORDU.
+             Kural yeni AD eklemek için doğruydu (kullanıcının kendi resimlerini ezmesin) ama
+             AYNI ADLA DÜZELTİLMİŞ bir resmi kimseye ulaştırmıyordu. Gerçekte oldu: kullanıcı
+             8 Tofi resmini yeniden kaydetti (CLAUDE.md'de yazan "sol kenarı kesik" sorunu) —
+             ne sürüm çıkarmak ne yeniden kurmak o düzeltmeyi motor klasörüne taşıyordu, çünkü
+             dosya adları aynıydı. Panel "zaten kurulu (30)" deyip geçiyordu.
+             ÇÖZÜM — panelin KENDİ kurduğu dosyaların kaydını tut (.panel-emoji.json: ad→boyut):
+               · hedefte yok            → kur
+               · boyut aynı             → zaten güncel, dokunma
+               · boyut farklı + kaydımızdaki boyutla eşleşiyor (yani kurduğumuzdan beri
+                 DEĞİŞTİRİLMEMİŞ)       → paketteki yeni hâliyle TAZELE
+               · boyut farklı + kaydımızla da uyuşmuyor (kullanıcı elle değiştirmiş) → KORU
+             Kayıt dosyası hiç yoksa (bu sürümden önce kurulmuş panel) dosyalar "bizim" sayılır:
+             emoji klasörü panelin yönettiği bir önbellek, kullanıcının kaynak klasörü ise
+             Youtube\Edit\Emoji. Tazelenen her ad log'a ADIYLA yazılır — sessiz değişiklik yok.
+             Ad başında NOKTA var: js/emoji.js tara() yalnız *.png okuduğu için zaten atlanırdı,
+             nokta ayrıca kullanıcının klasörde "bu ne?" demesini engelliyor. */
+          var izYol = path.join(eHedef, ".panel-emoji.json"), iz = {}, izVarMi = false, izK;
+          try {
+            if (fs.existsSync(izYol)) iz = JSON.parse(String(fs.readFileSync(izYol, "utf8")).replace(/^﻿/, "")) || {};
+          } catch (eIz) { iz = {}; }
+          for (izK in iz) { if (Object.prototype.hasOwnProperty.call(iz, izK)) { izVarMi = true; break; } }
           eList.forEach(function (x) {
             try {
               var src = path.join(kok, "emoji", x.dosya), dst = path.join(eHedef, x.ad);
               if (!fs.existsSync(src)) return;
-              if (fs.existsSync(dst)) { eVar++; return; }      // ÜZERİNE YAZMA
+              var sBoy = fs.statSync(src).size;
+              if (!fs.existsSync(dst)) {
+                fs.writeFileSync(dst, fs.readFileSync(src));
+                iz[x.ad] = sBoy; eKondu++; return;
+              }
+              var dBoy = fs.statSync(dst).size;
+              if (dBoy === sBoy) { eVar++; iz[x.ad] = sBoy; return; }   // içerik zaten aynı
+              if (izVarMi && iz[x.ad] !== dBoy) { eKorunan++; return; } // kullanıcı elle değiştirmiş
+              /* ⚠ İZ DOSYASI YOKKEN (bu sürümden ÖNCE kurulmuş HER panel) "bizim mi, kullanıcının
+                 mı" ayrımı yapılamıyor — o yüzden üzerine yazılıyor. Bu, düzeltilmiş resimlerin
+                 herkese ulaşması için gerekli AMA kullanıcının kendi çizdiği bir resmi de
+                 götürebilir. ParsMazi'de emoji klasörü "kaynak klasör" gibi kullanılıyor
+                 olabilir (panel o yolu kendisi yazıp "Emoji klasörü" diye gösteriyor), yani
+                 varsayım yalnız geliştiricinin makinesinde güvenli.
+                 ÇÖZÜM: ezmeden ÖNCE eskisini <Emoji>\eski\ altına al. Alt klasör olduğu için
+                 emoji taraması onu görmez (tara() yalnız ana klasörü okur) ve kullanıcı
+                 isterse elle geri koyabilir. Bir defalık, 30 dosyalık bir yedek. */
+              if (!izVarMi) {
+                try {
+                  var yKlasor = path.join(eHedef, "eski");
+                  if (!fs.existsSync(yKlasor)) fs.mkdirSync(yKlasor);
+                  var yHedef = path.join(yKlasor, x.ad);
+                  if (!fs.existsSync(yHedef)) fs.writeFileSync(yHedef, fs.readFileSync(dst));
+                  eYedek++;
+                } catch (eY) {}
+              }
               fs.writeFileSync(dst, fs.readFileSync(src));
-              eKondu++;
+              iz[x.ad] = sBoy; eYeni++;
+              if (eYeniAd.length < 8) eYeniAd.push(x.ad.replace(/\.png$/i, ""));
             } catch (eE) {}
           });
+          try { fs.writeFileSync(izYol, JSON.stringify(iz), "utf8"); } catch (eIw) {}
+          if (eYeni) logLine("Emoji resimleri TAZELENDİ (" + eYeni + "): " + eYeniAd.join(", ") +
+                             (eYeni > eYeniAd.length ? " …" : "") + " — düzeltilmiş hâlleri kuruldu." +
+                             (eYedek ? (" Eskileri " + path.join(eHedef, "eski") + " klasörüne alındı.") : ""));
+          if (eKorunan) logLine("Emoji: " + eKorunan + " resim elle değiştirilmiş, korundu (paketteki hâli yazılmadı).");
           /* Ayarı da doldur: kullanıcı klasörü elle bulmak zorunda kalmasın. Kayıtlı bir
              seçim VARSA dokunulmaz — kendi klasörünü seçmiş olabilir. */
           if (eKondu && !lsGet("emoji.klasor", "")) lsSet("emoji.klasor", eHedef);
@@ -1275,8 +1358,25 @@
      ÖLÇÜLDÜ (kullanıcının oturumu): cümleler 0.80-6.41 sn, ortanca 3.52 · 0.8 sn altında hiç
      cümle yok · 8 sn üzerinde de yok. Taban ve tavan bu yüzden sadece EMNİYET: taban göz
      kırpmasını, tavan da tek bir uzun cümlenin ekranı işgal etmesini engelliyor. */
-  var EMOJI_MIN_SURE = 0.6;
+  /* ⚠ TABAN 0.6 → 1.2 (kullanıcı isteği, 8 Ağustos 2026: "emojilerin süresi çok kısa olmasın,
+     1 saniye gelmeden gidiyo"). Asıl kol aşağıdaki EMOJI_MIN_KELIME; bu taban yalnız o
+     filtreden geçmiş kısa bir cümlenin de göz kırpması gibi durmasını engelliyor.
+     Emoji cümlenin bitişini AŞABİLİR — bilerek: tepki resmi konuşma bittikten sonra bir an
+     daha ekranda kalır, doğal görünen budur. Çakışma freni (EMOJI_GAP) uzamış süreyi zaten
+     `sonBitis` üzerinden görüyor, yani bir sonraki emoji üstüne binmez; host tarafındaki fren
+     de geri OKUNAN bitişten kuruluyor. Tabanı büyütmenin bedeli emoji sayısında değil,
+     yalnız aralarındaki mesafede. */
+  var EMOJI_MIN_SURE = 1.2;
   var EMOJI_MAX_SURE = 10.0;
+  /* EN AZ KAÇ KELİMELİK CÜMLEYE EMOJİ KONUR (kullanıcı isteği, 8 Ağustos 2026: "cümle 3
+     kelimelikse garip duruyo, 1 saniye gelmeden gidiyo — en az 5 kelimelik cümlelerde olsun").
+     ⚠ ELEME YAPAY ZEKÂ ÇAĞRISINDAN **ÖNCE** (emojiCumleleriTopla içinde). Bu projede tam bu
+     hata bir kez yapıldı: karakter eşleştirmesi plan döngüsündeydi ve cümlelerin %52'si
+     modele gidip PARASI ÖDENDİKTEN sonra atılıyordu. Kısa cümle modele hiç gitmiyor —
+     hem ucuz, hem de hedef sayı (hedefOran) gerçekten yerleştirilebilir cümleler üzerinden
+     hesaplandığı için "Bol emoji" seçeneği sözünü tutuyor.
+     Kelime sayısı boşluktan sayılır; cue metni cleanPunct'tan geçtiği için noktalama yok. */
+  var EMOJI_MIN_KELIME = 5;
   /* İKİ EMOJİ ARASI EN AZ BOŞLUK. Artık süre değişken olduğu için fren "başlangıçlar arası
      mesafe" değil "önceki emojinin BİTİŞİ" üzerinden çalışıyor — sabit süre varsayımına
      dayanan eski EMOJI_ARA (2.2) bu yüzden kaldırıldı.
@@ -1329,19 +1429,50 @@
      (bkz. js/emoji.js SISTEM_DUYGU 3. kural). */
   var EMOJI_SECIM_PENCERE = 3.0;
 
+  /* ── HANGİ KARAKTER HANGİ TARAFTA (kullanıcı kararı, 8 Ağustos 2026) ──
+     "Tofi ve Moni her zaman emoji sağda olacak, diğer karakterler diğer tarafa."
+     Tofi ve Moni KANAL SAHİPLERİ (Minecraft ve Roblox kanalları); videoyu hangisi çekerse
+     çeksin ikisi de sağ alt köşede, konuklar (Dora, Mimi, Sage, Niko…) sol alt köşede.
+     ⚠ BU LİSTE BİLEREK KODDA — duygu/karakter kümesinin aksine (o klasörden türetiliyor)
+     "kanalın sahibi kim" bilgisi dosya adlarından ÇIKARILAMAZ. Kadro değişirse tek satır.
+     Anahtarlar ASCII (EMJ.asciiAnahtar çıktısıyla aynı kural): "Tofi"/"TOFİ"/"tofi" hepsi tutar. */
+  var EMOJI_SAG_KARAKTER = { "tofi": 1, "moni": 1 };
+  /* ⚠ İKİNCİ KURAL — A1 (VİDEOYU ÇEKEN) HER ZAMAN SAĞDA, adı ne olursa olsun.
+     Yalnız liste olsaydı, kadrosunda ne Tofi ne Moni bulunan bir kullanıcıda (ParsMazi ya da
+     ileride kadro değişirse) HİÇBİR karakter listede olmaz, hepsi sola düşer ve hepsi
+     aynalanırdı: videoyu çekenin kendi yüzü sol köşede ve TERS, sağ köşe hiç kullanılmaz.
+     Panelde bunu düzeltecek bir ayar yok — kaynak dosya düzenlemek gerekirdi, ki ikinci
+     kullanıcının yapamayacağı tek şey bu. Rol kuralı kadrodan bağımsız doğru davranıyor;
+     Tofi/Moni listesi onun üzerine binen kullanıcı isteği (ikisi de, çekmeseler bile sağda). */
+  function emojiSagMi(karKey, a1Mi) {
+    return !!a1Mi || !!EMOJI_SAG_KARAKTER[String(karKey || "")];
+  }
+
   /* Konum: NORMALİZE (ölçüldü — [0.5,0.5] merkez, piksel DEĞİL).
-     HEPSİ SAĞ ALTTA (kullanıcı isteği, 7 Ağustos 2026). Eskiden "sen sağda, arkadaşlar
-     solda" idi; `sag` parametresi tümden kaldırıldı — dal yoksa yanlış taraf da geçilemez.
      Kenar boşluğu iki eksende AYRI hesaplanır: x kareyi genişliğe, y yüksekliğe böler;
      tek bir oran 16:9 karede emojiyi köşeye eşit uzaklıkta bırakmaz.
-     Doğrulama: 1920x1080'de x=0.836 / y=0.708 çıkıyor; kullanıcının elle ayarlayıp
-     onayladığı klip 1603,3/766,2 yani 0.835/0.709 — 0.002 içinde örtüşüyor. */
-  function emojiKonum(seqW, seqH) {
+     Doğrulama (sağ): 1920x1080'de x=0.836 / y=0.708 çıkıyor; kullanıcının elle ayarlayıp
+     onayladığı klip 1603,3/766,2 yani 0.835/0.709 — 0.002 içinde örtüşüyor.
+     ⚠ `sag` PARAMETRESİ GERİ GELDİ. 7 Ağustos'ta "hepsi sağda" denip tümden kaldırılmıştı
+     ("dal yoksa yanlış taraf da geçilemez"); 8 Ağustos'ta kullanıcı iki taraf istedi. Tarafı
+     artık ÇAĞIRAN SEÇMİYOR — emojiSagMi(karakter) belirliyor, yani "yanlış taraf" ancak
+     yukarıdaki listeyi bozarak geçilebilir. Sol x, sağ x'in kare merkezine göre TAM AYNASI
+     (solX = 1 - sağX), çünkü iki kenar boşluğu da aynı `bosX` değerinden hesaplanıyor. */
+  function emojiKonum(seqW, seqH, sag) {
     var boyPx = seqH * EMOJI_ORAN;                 // emoji ekranda bu kadar yüksek
     var yariPx = boyPx / 2;
     var bosX = Math.round(seqH * EMOJI_BOSLUK_X), bosY = Math.round(seqH * EMOJI_BOSLUK_Y);
-    var x = (seqW - bosX - yariPx) / seqW;
+    var x = sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW);
     var y = (seqH - bosY - yariPx) / seqH;
+    /* ⚠ DİKEY (Shorts) SEKANSTA TARAFLAR YER DEĞİŞTİREBİLİYORDU. Ölçek kare YÜKSEKLİĞİNE
+       bağlı (EMOJI_ORAN); 1080x1920'de emoji 1102 px oluyor, yani kareden GENİŞ. O zaman
+       "sağ" formülü 0.481, "sol" formülü 0.519 veriyor — sağdaki soldan solda kalıyor ve
+       tarafSay sayımı da ters okuyor. Kelepçe iki tarafın ÇAPRAZLAMASINI engelliyor;
+       yatay videoda hiçbir şeyi değiştirmiyor (orada sağ 0.836, sol 0.164 çıkıyor).
+       NOT: dikey sekansta emojinin kareyi taşması AYRI ve ESKİ bir konu — bu kelepçe onu
+       çözmez, yalnız "hangi taraf" bilgisini dürüst tutar. Shorts'ta emoji hiç ölçülmedi. */
+    if (sag && x < 0.5) x = 0.5;
+    if (!sag && x > 0.5) x = 0.5;
     return { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 };
   }
 
@@ -1364,10 +1495,51 @@
        liste = [{sira, ad, kar, bas, bit, metin}] — kar = eşleşmiş karakter nesnesi
        elle  = [{ad, cumle, karar}] — klasörde karşılığı OLMAYAN adlar; karar boşsa kullanıcı
                henüz seçmemiş demektir (o zaman AI'ya istek HİÇ gitmez). */
-  function emojiCumleleriTopla(tarama) {
-    var liste = [], elle = [];
+  /* Cümledeki kelime sayısı. Metin cleanPunct'tan geçtiği için noktalama yok — boşluktan
+     saymak yeterli ve tek bir kurala bağlı kalıyor (pipeline'daki _kelimeSay dışa açık değil,
+     kopyalamak yerine burada tek satırlık karşılığı tutuluyor). */
+  function emojiKelimeSay(s) {
+    var t = String(s || "").replace(/\s+/g, " ").trim();
+    return t ? t.split(" ").length : 0;
+  }
 
-    function ekle(ad, cues) {
+  /* "A1", "A4" gibi KANAL KODLARI bir KİMLİK DEĞİLDİR — bir videoda Tofi, ötekinde Moni.
+     Bu adlar için kaydedilmiş bir emoji eşleşmesine ASLA güvenilmez (bkz. emojiCumleleriTopla).
+     Aynı ders panelde iki kez alındı: AutoCut'ta `acCh` → `acCh2_` göçü ve emoji eşleşmesinin
+     numara yerine ADLA saklanması. Bu, o kuralın kaçırılan üçüncü hâliydi. */
+  function emojiYerTutucuAd(anahtar) { return /^a\d+$/.test(String(anahtar || "")); }
+
+  /* SEKANS KİMLİĞİ — "bu aynı video mu" sorusunun cevabı.
+     ⚠ Yalnız sekans ADI YETMİYOR: Premiere'in varsayılan adları ("Video Sequence",
+     "Sequence 01") projeler arası tekrar ediyor, yani başka bir videonun kararı bu videoya
+     sızabiliyordu. Süre de eklenince iki farklı videonun aynı kimliğe düşmesi pratikte
+     imkânsızlaşıyor. AutoCut süreyi değiştirirse kimlik de değişir ve soru bir kez daha
+     sorulur — bedeli tek tık, karşılığı yanlış karakterle geçen bir video. */
+  function sekansKimlik() {
+    var ad = (_oturum && _oturum.name) ? String(_oturum.name) : "sekans";
+    var sn = (_oturum && _oturum.end > 0) ? Math.round(_oturum.end) : 0;
+    return ad + "_" + sn;
+  }
+
+  /* Emoji eşleşme kaydının anahtarı — İKİ FARKLI ÖMÜR.
+       GERÇEK AD ("dora")   → KALICI: kadro sabit, Dora her videoda Dora.
+       KANAL KODU ("a1")    → SEKANSA ÖZEL: o kod bir videoda Tofi, ötekinde Moni demek.
+     ⚠ OKUMA VE YAZMA AYNI FONKSİYONU KULLANMAK ZORUNDA. Bir tarafı kalıcı, öteki tarafı
+     sekansa özel anahtar kullanırsa kullanıcı seçim yapar, panel onu bulamaz ve HER BASIŞTA
+     aynı soruyu sorar — çıkmaz sokak. (Tam bu hata bu pakette bir kez yazıldı ve yakalandı.) */
+  function emojiEsleAnahtar(anahtar) {
+    return emojiYerTutucuAd(anahtar)
+      ? ("emoji.esleV." + sekansKimlik() + "." + anahtar)
+      : ("emoji.esle." + anahtar);
+  }
+
+  function emojiCumleleriTopla(tarama) {
+    var liste = [], elle = [], kisaAtilan = 0;
+
+    /* a1 = bu kanal SENİN mikrofonun mu. Çağıran taraf biliyor; emojiEkle bunu "bu videoyu
+       gerçekten X mi çekti" onayını YALNIZ A1 için sormak üzere kullanıyor. Adı karşılaştırıp
+       tahmin etmek kırılgan olurdu (A1'in adı arkadaşınkiyle aynı olabilir). */
+    function ekle(ad, cues, a1, yerTutucu) {
       if (!cues || !cues.length) return;
       ad = String(ad || "").trim();
       /* ⚠ ADI BOŞ A1 "sen"E DÜŞMÜYOR, "A1" OLUYOR. Eski varsayılan "sen" idi ve emoji
@@ -1376,7 +1548,9 @@
          aşağıdaki eşleştirme satırına düşüyor: kullanıcı "A1 (223 cümle) → Tofi" diye
          bir kez seçiyor ve iş bitiyor. Böylece ne sessiz düşüş kalıyor ne de "adını yaz
          ama kutu şu an gizli" çıkmazı (kanal listesi yalnız Herkes modunda görünüyor). */
-      if (!ad) ad = "A1";
+      /* ⚠ YER TUTUCU ÇAĞIRANDAN GELİR. Sabit "A1" idi ve Kaynak Ses = A2 dalında adı boş
+         olan ARKADAŞ kanalı da "A1" oluyordu — yani senin karakterine bağlanıyordu. */
+      if (!ad) ad = yerTutucu || "A1";
 
       /* CUE DEĞİL CÜMLE. Kelime tavanı her zaman 2 olduğu için tek cue "arkanda creeper"
          gibi bir parça; yapay zekâya bunu vermek hem duygu seçimini kötüleştirir hem de
@@ -1407,7 +1581,16 @@
            göre değişiyor (AutoCut'ta acCh → acCh2_ göçünün sebebi buydu) ve numarayla
            saklarsak sonraki videoda A4 başka biri olur, panel SESSİZCE yanlış karakterin
            yüzünü koyar. */
-        var kayit = String(lsGet("emoji.esle." + anahtar, ""));
+        /* ⚠ KANAL KODUNA KAYITLI EŞLEŞME OKUNMAZ — "MONİ ÇEKTİ AMA TOFİ ÇIKTI" HATASININ
+           İKİ SEBEBİNDEN BİRİ TAM OLARAK BUYDU. A1'in isim kutusu boşken ad "A1"e düşüyor,
+           anahtar "emoji.esle.a1" oluyor ve bu kayıt VİDEODAN VİDEOYA taşınıyordu: kullanıcı
+           bir kez "A1 → Tofi" dedikten sonra videoyu Moni çekse bile emojiEkle'deki bekleme
+           kapısı (`if (!e.karar)`) hiç tetiklenmiyor, panel SESSİZCE Tofi'nin yüzünü koyuyordu.
+           Tek iz katlanmış Ayrıntılar log'undaki bir satırdı, yani pratikte görünmez.
+           Artık kanal kodunun kararı SEKANSA ÖZEL bir anahtarda tutuluyor (emojiEsleAnahtar):
+           bu videoda bir kez seçilir, sonraki videoya TAŞINMAZ. Doğru çözüm yine A1 kutusuna
+           adını yazmak; a1Adi() bunu Senkron kartındaki "kim çekiyor"dan da okuyabiliyor. */
+        var kayit = String(lsGet(emojiEsleAnahtar(anahtar), ""));
         if (kayit && kayit !== "__yok__") {
           kar = emojiKarakterAra(tarama, kayit);
           if (!kar) kayit = "";                          // kayıtlı karakter klasörden silinmiş
@@ -1416,17 +1599,43 @@
         if (!kayit) return;                              // karar YOK → AI'ya gitmesin
         if (kayit === "__yok__") return;                 // bilerek emojisiz (resmi gerçekten yok)
       }
-      kayitlar.forEach(function (k) { k.kar = kar; liste.push(k); });
+      /* ── KISA CÜMLELERİ AT — YAPAY ZEKÂYA GİTMEDEN ──
+         Kullanıcı: "cümle 3 kelimelikse garip duruyo, 1 saniye gelmeden gidiyo."
+         Eleme MODELE GİTMEDEN önce olmalı: gönderilip sonra atılan cümlenin parası ödenmiş
+         olur — bu projede aynı hata bir kez yapıldı (cümlelerin %52'si plan döngüsünde
+         eleniyordu).
+         ⚠ AMA KARAKTER ÇÖZÜLDÜKTEN SONRA SAYILIR. Eleme yukarıdayken, emoji resmi hiç
+         OLMAYAN ("emoji yok" işaretli) bir kanalın kısa cümleleri de sayıya giriyordu:
+         durum satırı "40 kısa cümle elendi" diyor, kullanıcı 5 kelime eşiğini suçluyor,
+         gerçek sebep ise o karakterin resminin olmaması oluyordu. Artık yalnız GERÇEKTEN
+         emoji alacak kanalların kısaları sayılıyor. */
+      var oncekiSay = kayitlar.length;
+      kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
+      kisaAtilan += (oncekiSay - kayitlar.length);
+      if (!kayitlar.length) return;
+
+      kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; liste.push(k); });
     }
 
     /* KARAKTER ADI KANALDAN GELİR — ayrı bir "senin karakterin" ayarı YOK. */
     if (state.genMode === "channels") {
-      ekle(a1Adi(), state.a1Cues);
-      aktifKanallar().forEach(function (ch) { ekle(kanalAdi(ch), ch.cues); });
+      ekle(a1Adi(), state.a1Cues, true);
+      aktifKanallar().forEach(function (ch) { ekle(kanalAdi(ch), ch.cues, false); });
+    } else if (state.track === "1") {
+      /* ⚠ KAYNAK SES = A2 → BU SENİN SESİN DEĞİL, ARKADAŞLARIN KARIŞIK KANALI.
+         Eskiden bu dal da `a1Adi()` ile çağrılıyordu: A2'de konuşan Dora'nın 300 cümlesi
+         SENİN karakterine bağlanıyor, bütün emojiler senin yüzün oluyordu — üstelik yeni
+         taraf kuralıyla hepsi sağa gidip hiç aynalanmıyordu. Daha kötüsü: A1 kimlik kapısı
+         "A1 (senin mikrofonun): Tofi → Tofi" diye gösterip "bu videoyu Tofi mi çekti?"
+         diye soruyordu; cevap gerçekten "evet" olduğu için kullanıcı onaylıyor ve panel
+         yanlışı İMZALIYORDU. Artık A2'nin kendi adı kullanılıyor ve a1 bayrağı YOK.
+         Ad yoksa "A2" yer tutucusuna düşer → eşleştirme satırı çıkar, kullanıcı bir kez seçer
+         (o seçim sekansa özel, bkz. emojiEsleAnahtar) ya da "emoji yok" der. */
+      ekle(String(lsGet("kanalAd.1", "")).trim(), state.singleCues, false, "A2");
     } else {
-      /* TEK KAYNAK (A1/A2): cue'lar singleCues'ta, a1Cues BOŞ. Bu dal olmadan emoji
+      /* TEK KAYNAK A1: cue'lar singleCues'ta, a1Cues BOŞ. Bu dal olmadan emoji
          "önce altyazı oluştur" diyordu — oysa altyazı ekranda duruyordu. */
-      ekle(a1Adi(), state.singleCues);
+      ekle(a1Adi(), state.singleCues, true);
     }
 
     liste.sort(function (a, b) { return a.bas - b.bas; });
@@ -1435,7 +1644,7 @@
        2, 361…" diye zıplayan numaralar gidiyordu. Model numarayı değil SIRAYI yankılarsa
        cevap sessizce BAŞKA cümlelere denk gelir. */
     for (var i = 0; i < liste.length; i++) liste[i].sira = i + 1;
-    return { liste: liste, elle: elle };
+    return { liste: liste, elle: elle, kisa: kisaAtilan };
   }
 
   /* EŞLEŞMEYEN AD SATIRLARI — yalnız gerektiğinde. Hepsi tutuyorsa kutu gizli kalır:
@@ -1469,7 +1678,10 @@
          preset.secili'nin adlarla saklanmasıyla aynı desen. */
       opt("__yok__", "emoji yok");
       sel.value = e.karar || "";
-      sel.addEventListener("change", function () { lsSet("emoji.esle." + anahtar, sel.value); });
+      /* ⚠ YAZMA, OKUMAYLA AYNI ANAHTAR FONKSİYONUNU KULLANIR (emojiEsleAnahtar). Kanal
+         kodları ("A1") sekansa özel, gerçek adlar kalıcı. İkisi ayrışırsa kullanıcı seçim
+         yapar ama panel bulamaz ve aynı soruyu sonsuza kadar sorar. */
+      sel.addEventListener("change", function () { lsSet(emojiEsleAnahtar(anahtar), sel.value); });
       sar.appendChild(sel);
       row.appendChild(et); row.appendChild(sar);
       box.appendChild(row);
@@ -1582,12 +1794,22 @@
     });
 
     var cumleler = top.liste;
+    /* KISA CÜMLE ELEMESİ SESSİZ KALMAZ: emoji sayısı doğrudan bununla düşüyor ve sebebini
+       bilmeyen kullanıcı Sıklık'ı boşuna artırır (o kol bu elemeden SONRA çalışıyor). */
+    if (top.kisa) logLine("Emoji: " + top.kisa + " cümle " + EMOJI_MIN_KELIME +
+                          " kelimeden kısa olduğu için elendi — yapay zekâya hiç gitmedi.");
     if (!cumleler.length) {
-      /* İki BAMBAŞKA sebep, iki ayrı mesaj. "Önce altyazı oluştur" demek, altyazısı ekranda
-         duran kullanıcıyı 25 dakikalık GPU işini tekrar etmeye yollardı. */
+      /* ÜÇ BAMBAŞKA SEBEP, ÜÇ AYRI MESAJ. "Önce altyazı oluştur" demek, altyazısı ekranda
+         duran kullanıcıyı 25 dakikalık GPU işini tekrar etmeye yollardı.
+         ⚠ SIRA ÖNEMLİ: "emoji yok" işareti kısa cümle elemesinden ÖNCE sorulur. Ters sırada,
+         resmi olmayan bir karakter yüzünden boş kalan listede panel "hepsi kısa cümle" deyip
+         kullanıcıyı 5 kelime eşiğini kurcalamaya yolluyordu. */
       yaz(top.elle.length
             ? "Bütün karakterler “emoji yok” işaretli — aşağıdan en az birine karakter seç."
-            : "Önce altyazı oluştur — emoji altyazı metninden seçiliyor", "var(--warn)");
+            : (top.kisa
+                ? ("Emoji konacak cümle kalmadı: " + top.kisa + " cümlenin hepsi " + EMOJI_MIN_KELIME +
+                   " kelimeden kısa. Kısa cümlede emoji göz kırpması gibi duruyordu, o yüzden eleniyor.")
+                : "Önce altyazı oluştur — emoji altyazı metninden seçiliyor"), "var(--warn)");
       return;
     }
 
@@ -1595,6 +1817,57 @@
     var anahtar = "";
     try { anahtar = VUR.anahtarOku(extRoot); }
     catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle (emoji duyguyu ondan seçiyor)", "var(--bad)"); return; }
+
+    /* ── A1 KİMLİK KAPISI — "MONİ ÇEKTİ AMA TOFİ ÇIKTI" HATASININ SON HALKASI ──
+       Üç katmanlı korumanın üçüncüsü: (1) kanal koduna kayıtlı eşleşme artık okunmuyor,
+       (2) Senkron kartındaki "kim çekiyor" seçimi kanal isimlerini yazıyor, (3) burada
+       kullanıcıya BİR KEZ gösterilip onaylatılıyor.
+       NEDEN GEREKLİ: A1'in adı localStorage'da (kanalAd.0) videodan videoya taşınıyor ve
+       panel bunun HÂLÂ GEÇERLİ olup olmadığını hiçbir yerden bilemiyor — Moni'nin videosunda
+       geçen ayki "Tofi" değeri sessizce doğru sanılıyordu. Ölçülemeyen bir şeyi tahmin etmek
+       yerine SOR (aynı desen: capBasildi_<sekans> ve cuesStale onayları).
+       SEKANS BAŞINA BİR KEZ: aynı videoda ikinci basışta soru tekrarlanmaz. Emoji özelliği
+       para harcıyor ve 300 klip koyuyor; tek bir onay satırı, render'dan sonra fark edilen
+       yanlış yüzden çok daha ucuz. */
+    /* ⚠ KAPI A1'E DEĞİL EŞLEMENİN TAMAMINA BAĞLI. Önce yalnız A1 kaydına bakıyordu ve
+       A1'den hiç cümle gelmediği durumlarda (adı "emoji yok" işaretli · A1 klipsiz ·
+       A1'in bütün cümleleri yeni 5-kelime filtresine takıldı) kapı SESSİZCE devre dışı
+       kalıyordu — üstelik tam da isimlerin bayat olduğu senaryoda. Artık cümle varsa
+       eşleme her zaman gösteriliyor, A1 sorusu yalnız üstüne ekleniyor.
+       HAFIZA OTURUMLUK (localStorage DEĞİL): anahtar sekans adına bağlıydı ve Premiere'in
+       varsayılan adları ("Video Sequence") projeler arası tekrar ettiği için başka bir
+       projenin onayı bu videoda soruyu susturabiliyordu — kapının önlemek için var olduğu
+       hatanın ta kendisi. Panel kapanınca soru yeniden sorulur; emoji seyrek basılan ve
+       para harcayan bir düğme, tek onay ucuz. */
+    var a1Kayit = null, aq;
+    for (aq = 0; aq < cumleler.length; aq++) { if (cumleler[aq].a1) { a1Kayit = cumleler[aq]; break; } }
+    var esleme = [], gorulenAd = {}, sayimAd = {};
+    cumleler.forEach(function (c) {
+      var anh = c.ad + " → " + (c.kar ? c.kar.ad : "?");
+      sayimAd[anh] = (sayimAd[anh] || 0) + 1;
+      if (!gorulenAd[anh]) { gorulenAd[anh] = 1; esleme.push({ s: anh, a1: !!c.a1 }); }
+    });
+    var eslemeImza = esleme.map(function (e) { return (e.a1 ? "*" : "") + e.s; }).join(" | ");
+    var eslemeKimlik = sekansKimlik();
+    if (_emojiEslemeOnay[eslemeKimlik] !== eslemeImza) {
+      var satirlar = esleme.map(function (e) {
+        return (e.a1 ? "  A1 (senin mikrofonun):  " : "  ") + e.s + "   (" + sayimAd[e.s] + " cümle)";
+      });
+      var soru = (a1Kayit && a1Kayit.kar)
+        ? ("Bu videoyu " + a1Kayit.kar.ad + " mi çekti?\n\n" +
+           "Değilse “Hayır” de: Altyazı ekranındaki EN ÜSTTEKİ isim kutusuna doğru adı yaz " +
+           "(Tofi / Moni), sonra Emoji Ekle'ye tekrar bas.")
+        : ("Eşleşme doğru mu?\n\n(A1'den emoji alacak cümle çıkmadı. İsimler Altyazı " +
+           "ekranındaki kanal listesinden geliyor.)");
+      var onayA1 = await uiConfirm("Emoji karakterleri şöyle eşleşti:\n\n" + satirlar.join("\n") +
+                                   "\n\n" + soru, "Emoji");
+      if (!onayA1) {
+        yaz("İptal edildi — kanal isimlerini düzelt (Altyazı ekranındaki liste), sonra tekrar bas.",
+            "var(--warn)");
+        return;
+      }
+      _emojiEslemeOnay[eslemeKimlik] = eslemeImza;
+    }
 
     /* 2) HEDEF KANAL — ÖNCE MEVCUT EMOJİ KATMANINI SOR.
        ⚠ İKİNCİ BASIŞ TUZAĞI: panel eskiden her çalıştırmada "en üstteki BOŞ kanal"ı
@@ -1686,11 +1959,48 @@
         // Alan adları getSequenceInfoJSON'daki gibi: frameWidth/frameHeight
         if (si && si.frameWidth > 0 && si.frameHeight > 0) { seqW = si.frameWidth; seqH = si.frameHeight; }
       } catch (eS) {}
-      // HEPSİ SAĞ ALTTA — cümle başına hesaplamaya gerek yok, konum sabit.
-      var kon = emojiKonum(seqW, seqH);
+      /* İKİ KONUM: Tofi/Moni sağ alt, konuklar sol alt (bkz. EMOJI_SAG_KARAKTER).
+         Karakter başına hesaplamaya gerek yok — yalnız iki değer var, döngüde seçiliyor. */
+      var konSag = emojiKonum(seqW, seqH, true);
+      var konSol = emojiKonum(seqW, seqH, false);
 
-      var plan = [], sonBitis = -999, atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0 };
-      var sureTop = 0, kisaltilan = 0, varyantSay = {};
+      /* SOL TARAF RESİMLERİ YATAY AYNALANIR — karakter ekranın DIŞINA değil İÇİNE baksın.
+         Ayna kopyaları <emoji klasörü>\ayna\ altında ÖNBELLEKLENİR: ilk çalıştırmada üretilir
+         (ölçüldü: 1000px resim ~100 ms, 2000px ~280 ms), sonrasında hazır. Kaynak resim
+         yeniden kaydedilirse mtime karşılaştırmasıyla kendiliğinden tazelenir.
+         ⚠ ÜRETİLEMEZSE EMOJİ DÜŞMEZ: özgün resim aynalanmadan konur ve sayılır. Ters bakan
+         bir emoji, hiç olmayan emojiden iyidir — ama sessiz kalmaz, sonuç mesajına yazılır. */
+      /* ⚠ HATA SAYIMI EMOJİ BAŞINA DEĞİL DOSYA BAŞINA. Emoji sayarsak sayı iki yerden
+         şişiyordu: (a) aynı dosya planda onlarca kez geçiyor, (b) plan tavana takılıp
+         SEYRELTİLİYOR ve seyreltilen emojiler de sayılmış oluyordu. Kullanıcıya gösterilen
+         her sayı gerçekten olan bir şeyi saymalı — "3 resim aynalanamadı" doğrulanabilir,
+         "47 emoji aynalanamadı" değil. */
+      var aynaBellek = {}, aynaHataDosya = {}, aynaHataAd = "";
+      function aynaHataSay() {
+        var n = 0, k;
+        for (k in aynaHataDosya) if (Object.prototype.hasOwnProperty.call(aynaHataDosya, k)) n++;
+        return n;
+      }
+      function aynaliYol(yol) {
+        if (!AYNA) { aynaHataDosya[yol] = 1; aynaHataAd = "pngayna.js yüklenemedi"; return yol; }
+        if (aynaBellek[yol] !== undefined) return aynaBellek[yol] || yol;
+        var r;
+        try { r = AYNA.aynaYolu(kok, yol); } catch (eAy) { r = { yol: "", hata: (eAy.message || eAy) }; }
+        if (!r || !r.yol) {
+          aynaBellek[yol] = "";
+          aynaHataDosya[yol] = 1;
+          if (!aynaHataAd) aynaHataAd = String((r && r.hata) || "bilinmeyen sebep");
+          logLine("Emoji aynalanamadı: " + yol + " → " + ((r && r.hata) || "?"));
+          return yol;
+        }
+        aynaBellek[yol] = r.yol;
+        if (r.uretildi) logLine("Emoji aynası üretildi: " + r.yol);
+        return r.yol;
+      }
+
+      var plan = [], planSag = [], planAyna = [], sonBitis = -999;
+      var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0 };
+      var sureTop = 0, kisaltilan = 0, varyantSay = {}, tarafSay = { sag: 0, sol: 0 };
 
       /* ÇEŞİTLİLİK SAYAÇLARI + İKİ KLAMP.
          ⚠ HER İKİ EŞİK DE KLAMPLANMAK ZORUNDA — yoksa kural KENDİ KENDİNİ KİLİTLİYOR
@@ -1768,9 +2078,22 @@
         var sure = c.bit - c.bas;
         if (!isFinite(sure) || sure < EMOJI_MIN_SURE) sure = EMOJI_MIN_SURE;
         if (sure > EMOJI_MAX_SURE) { sure = EMOJI_MAX_SURE; kisaltilan++; }
-        plan.push([png.yol, kanal, c.bas.toFixed(3), sure.toFixed(3),
+        /* TARAF: Tofi/Moni sağda, konuklar solda. Soldakinin resmi aynalanır — HOST'A EK BİR
+           ALAN GİTMİYOR, ayna kararı dosya YOLUNA gömülü. Böylece host.jsx (ES3) hiç
+           değişmiyor ve plan satırının 8 alanlı biçimi olduğu gibi kalıyor. */
+        var sagMi = emojiSagMi(c.kar.key, c.a1);
+        var kon = sagMi ? konSag : konSol;
+        var pngYol = sagMi ? png.yol : aynaliYol(png.yol);
+        plan.push([pngYol, kanal, c.bas.toFixed(3), sure.toFixed(3),
                    kon.x, kon.y, EMJ.olcekHesapla(png, seqH, EMOJI_ORAN),
                    png.duygu + " " + png.karakter].join("|"));
+        /* ⚠ TARAF VE AYNA BİLGİSİ PLANA PARALEL DİZİLERDE. Plan satırından geri çıkarım
+           YAPILMIYOR: x alanına bakmak dikey sekansta (iki taraf da 0.5'e kelepçelenince)
+           yanlış okuyor, yol dizgisinde "/ayna/" aramak da kırılgan. Diziler seyreltmede
+           planla BİRLİKTE süzülüyor, böylece kullanıcıya gösterilen sayılar gerçekten
+           timeline'a konan emojileri sayıyor. */
+        planSag.push(!!sagMi);
+        planAyna.push(!sagMi && !aynaBellek[png.yol]);   // sol ama aynası üretilememiş
         /* ⚠ konmus.push BÜTÜN ELEMELERDEN SONRA, plan.push ile AYNI yerde: plana girmeyen bir
            aday çeşitlilik penceresini yememeli. (Hemen üstteki varyantSay sayacı bu hatayı
            yapıyor — boyutu okunamayan dosya da varyant sırasını ilerletiyor; zararsız ama
@@ -1809,13 +2132,28 @@
       /* TAVAN AŞILIRSA REDDETME, SEYRELT. Host'un eski davranışı (plan > 100 → "err:") tek
          emoji koymadan bütün işi çöpe atıyordu. */
       if (plan.length > EMOJI_PANEL_TAVAN) {
-        var hamSay = plan.length, adim = hamSay / EMOJI_PANEL_TAVAN, seyrek = [], ix;
-        for (ix = 0; ix < EMOJI_PANEL_TAVAN; ix++) seyrek.push(plan[Math.floor(ix * adim)]);
-        plan = seyrek;
+        var hamSay = plan.length, adim = hamSay / EMOJI_PANEL_TAVAN, ix, kx;
+        var seyrek = [], seyrekSag = [], seyrekAyna = [];
+        for (ix = 0; ix < EMOJI_PANEL_TAVAN; ix++) {
+          kx = Math.floor(ix * adim);
+          /* ⚠ ÜÇ DİZİ AYNI İNDEKSLE SÜZÜLÜR. Yalnız plan seyreltilseydi taraf ve ayna
+             sayıları ham plana ait kalır, kullanıcıya timeline'da olmayan emojiler
+             raporlanırdı (300 klip konarken "450 resim aynalanamadı" gibi). */
+          seyrek.push(plan[kx]); seyrekSag.push(planSag[kx]); seyrekAyna.push(planAyna[kx]);
+        }
+        plan = seyrek; planSag = seyrekSag; planAyna = seyrekAyna;
         logLine("Emoji: " + hamSay + " aday vardı, tavan " + EMOJI_PANEL_TAVAN + " — eşit aralıkla seyreltildi.");
       }
+      /* TARAF VE AYNA SAYIMI SEYRELTMEDEN SONRA, PARALEL DİZİLERDEN. */
+      var aynasizKondu = 0;
+      tarafSay.sag = 0; tarafSay.sol = 0;
+      for (var tz = 0; tz < plan.length; tz++) {
+        if (planSag[tz]) tarafSay.sag++; else tarafSay.sol++;
+        if (planAyna[tz]) aynasizKondu++;
+      }
       logLine("Emoji planı: " + plan.length + " emoji · ort. süre " +
-              (plan.length ? (sureTop / plan.length).toFixed(1) : "0") + " sn (cümle boyunca).");
+              (plan.length ? (sureTop / plan.length).toFixed(1) : "0") + " sn (cümle boyunca) · " +
+              tarafSay.sag + " sağda, " + tarafSay.sol + " solda (soldakiler yatay aynalandı).");
       logLine("Emoji atlanan: " + atlanan.yakin + " öncekiyle çakışıyor, " +
               atlanan.dosyaYok + " dosya yok, " + atlanan.boyutYok + " boyut okunamadı." +
               (kisaltilan ? (" " + kisaltilan + " uzun cümle " + EMOJI_MAX_SURE + " sn'ye kırpıldı.") : ""));
@@ -1892,15 +2230,27 @@
         }
       }
 
-      var kismi = (kondu < plan.length) || uyarilar.length > 0 || !!parcaHata ||
+      /* AYNALANAMAYAN RESİM KISMİ BAŞARI SAYILIR: emoji ekranda ama TERS bakıyor — kullanıcı
+         bunu ancak videoyu izlerken fark ederdi, yeşil "başarılı" yalan olurdu.
+         ⚠ Ölçüt PLANA GİREN emoji (aynasizKondu), üretimi denenen dosya değil: seyreltmede
+         elenen bir emoji yüzünden sarı uyarı çıkmamalı. Dosya sayısı ayrıca log'da. */
+      var aynaHata = aynaHataSay();
+      var kismi = (kondu < plan.length) || uyarilar.length > 0 || !!parcaHata || aynasizKondu > 0 ||
                   (presetNot.indexOf("UYGULANMADI") !== -1) || (presetNot.indexOf("öğretilmemiş") !== -1);
       var msg = kondu + "/" + plan.length + " emoji kondu (V" + (kanal + 1) + ")";
       if (parcaHata) msg += " — DURDU: " + parcaHata;
       else if (kondu < plan.length) msg += " — " + (plan.length - kondu) + " tanesi OLMADI";
+      msg += " · " + tarafSay.sag + " sağda, " + tarafSay.sol + " solda";
       msg += " · yapay zekâ " + cumleler.length + " cümlenin " + isaret + "'ini işaretledi";
+      /* KISA CÜMLE ELEMESİ DURUM SATIRINDA: "eskisi kadar emoji çıkmadı" hissinin sebebi bu
+         ve ayarlanabilir kol Sıklık DEĞİL — kullanıcı bunu bilmeli. */
+      if (top.kisa) msg += " · " + top.kisa + " kısa cümle (" + EMOJI_MIN_KELIME +
+                           " kelimeden az) baştan elendi";
       /* ÇEŞİTLİLİK YÜZÜNDEN DÜŞEN SAYI SESSİZ KALMAZ: kullanıcı "az emoji" derse hangi kolu
          çevireceğini bilmeli — ayarlanabilir tek kol Sıklık. */
       if (cesit.atlandi) msg += " · " + cesit.atlandi + " tanesi çeşitlilik kuralına takıldı (daha çok emoji için Sıklık'ı artır)";
+      if (aynasizKondu) msg += " · ⚠ " + aynasizKondu + " emoji AYNALANMADAN kondu (ters bakıyor, " +
+                               aynaHata + " resim çevrilemedi): " + (aynaHataAd || "sebep bilinmiyor");
       msg += presetNot;
       if (uyarilar.length) msg += " | " + uyarilar.slice(0, 2).join(" ; ");
       /* Her emoji ayrı bir işlem = plan uzunluğu kadar geri-alma adımı. Kullanıcı refleksle
@@ -2050,6 +2400,9 @@
        gelsin, boş kart görünüp sonradan dolmasın. Kendi kaydı olanda hiçbir şey yapmaz. */
     try { varsayilanlariKur(); } catch (eVk) { logLine("Hazır içerik kurulamadı: " + (eVk.message || eVk)); }
     _presetSecili = presetSeciliOku();
+    /* Kartlar ÇİZİLMEDEN ÖNCE: öğretilmiş ama listede olmayan preset'ler eklensin, yoksa
+       kullanıcı erişemediği bir kaydın varlığını hiç öğrenemiyor. */
+    presetSeciliTazele();
     presetBtnlarCiz();
 
     /* Yedekten kurtarma olduysa kullanıcı BİLMELİ (log'a gömmek yetmez): kurtarılan kayıt
@@ -2394,7 +2747,45 @@
   function a1Adi() {
     var el = state.a1AdInput;
     var ad = el ? String(el.value).trim() : "";
-    return ad || String(lsGet("kanalAd.0", "")).trim();
+    if (ad) return ad;
+    ad = String(lsGet("kanalAd.0", "")).trim();
+    if (ad) return ad;
+    /* SON ÇARE: Senkron kartındaki "Videoyu kim çekiyor?" seçimi (yw.snkCeken).
+       Kaynak Ses A1/A2 iken kanal listesi hiç ÇİZİLMİYOR (modGorunumUygula #kanalBox'ı yalnız
+       "Herkes"te gösteriyor), yani state.a1AdInput null kalıyor ve kanalAd.0 hiç dolmamış
+       olabilir. O durumda panelin elindeki tek gerçek bilgi bu seçici. Boş dönerse çağıran
+       taraf kullanıcıya SÖYLÜYOR — sessizce bir karaktere düşmek yasak. */
+    try { return String(lsGet("snkCeken", "")).trim(); } catch (e) { return ""; }
+  }
+
+  /* Senkron planındaki karakterleri kanal isimlerine yaz (localStorage + canlı kutular).
+     Plan zaten "hangi kanalda kim olacak"ın tek doğru kaynağı; emoji ve altyazı tarafı da
+     kanal isimlerinden okuyor. İki kaynağın ayrı ayrı elle doldurulması "Moni çekti ama Tofi
+     çıktı" hatasını üretiyordu.
+     ATLANANLAR: oyun sesi (karakter değil), eşleşmeyen dosya ("?"), ve boş ad. "(2. kayıt)"
+     eki SİLİNİR — o kanalda konuşan yine aynı karakter, emoji eşleşmesi ekle takılmasın. */
+  function kanalAdlariniPlandanYaz(plan) {
+    if (!plan || !plan.length) return;
+    var yazilan = [];
+    plan.forEach(function (p) {
+      if (!p || p.oyun || p.bilinmeyen) return;
+      var ad = String(p.karakter || "").replace(/\s*\(\s*\d+\.\s*kayıt\s*\)\s*$/i, "").trim();
+      if (!ad || ad === "?") return;
+      var kn = p.kanal;
+      if (!(kn >= 0)) return;
+      lsSet("kanalAd." + kn, ad);
+      /* Canlı kutu da güncellensin: kullanıcı Altyazı ekranına döndüğünde ne olduğunu
+         GÖRSÜN. Yalnız localStorage yazmak sessiz bir değişiklik olurdu. */
+      if (kn === 0) { if (state.a1AdInput) state.a1AdInput.value = ad; }
+      else {
+        state.channels.forEach(function (c) {
+          if (c && c.idx === kn && c.adInput) c.adInput.value = ad;
+        });
+      }
+      yazilan.push("A" + (kn + 1) + "=" + ad);
+    });
+    if (yazilan.length) snkLog("Kanal isimleri plandan yazıldı: " + yazilan.join(" · ") +
+                               " (emoji karakterleri de bu isimlerden seçiliyor)");
   }
 
   function kanalAdi(ch) {
@@ -2887,6 +3278,25 @@
     if (!isler.length) return "err:Bütün altyazılar çakışma yüzünden gizlendi. " +
       "“Asla üst üste gelmesin” kutusunu kapat ya da kanal sayısını azalt.";
 
+    /* AYNI CÜMLEDE BOŞLUK BIRAKMA — SON ADIM, SRT YAZILMADAN HEMEN ÖNCE.
+       buildCues her cue'nun bitişini `sonraki.start - 0.08`e dayıyor; kelime tavanı 2 olduğu
+       için hızlı konuşmada neredeyse HER cue sınırında 2 karelik bir boşluk kalıyor ve yazı
+       sürekli yanıp sönüyor (kullanıcı: "kelime aralarında boşluk oluyo, garip duruyo").
+       Aynı cümlenin ardışık cue'ları yapıştırılır, cümleler arasındaki boşluk KORUNUR.
+       ⚠ SIRA BİLEREK EN SONDA — üç sebebi var:
+         1) Kanallar arası çakışma çözümünden SONRA çalışır, yani köprü yeni bir çakışma
+            doğurup KIRPMA/GİZLEME tetikleyemez. Yanıp sönmeyi düzeltmek için altyazı
+            kaybetmek yanlış takas olurdu; fonksiyon kendi içinde diğer kanalları kontrol
+            edip gerekirse köprüyü hiç kurmuyor.
+         2) Gizlenen cue'lar listeden DÜŞÜRÜLDÜKTEN sonra çalışır, yani köprü gerçekten
+            ekrana çıkacak komşuya kurulur.
+         3) Cue KOPYASI üzerinde çalışıyoruz (yukarıdaki kopya bloğu) — panelin listesi,
+            oturum dosyası ve emoji süreleri hiç etkilenmez. */
+    if (pipeline && typeof pipeline.cumleBirlestir === "function") {
+      try { pipeline.cumleBirlestir(isler, {}, logLine); }
+      catch (eKp) { logLine("Cümle birleştirme yapılamadı: " + (eKp.message || eKp)); }
+    } else logLine("UYARI: cümle birleştirici yok (pipeline.js eski) — altyazılar arasında boşluk kalır.");
+
     var basarili = [], hatalar = [], toplam = 0;
     for (var i = 0; i < isler.length; i++) {
       var is = isler[i];
@@ -3308,6 +3718,14 @@
       snkLog("UYARI: " + snk.uyariMetni);
     }
     snk.plan = plan;
+    /* ⚠ KANAL İSİMLERİNİ PLANDAN YAZ — "MONİ ÇEKTİ AMA TOFİ ÇIKTI" HATASININ ASIL ÇÖZÜMÜ.
+       Panel doğru cevabı ZATEN biliyordu: bu kartta "Videoyu kim çekiyor?" seçicisi var ve
+       plan[0] tam olarak "A1 = çeken" diyor. Ama emoji tarafı A1'in adını bambaşka bir
+       yerden (localStorage kanalAd.0) okuyordu ve o değer VİDEODAN VİDEOYA taşınıyordu:
+       kullanıcı Senkron'da "Moni" seçse bile A1'in adı geçen videodan kalma "Tofi" kalıyor,
+       emoji Tofi'nin yüzünü koyuyordu. İki kaynak arasında tek satır bağ yoktu — bu, o bağ.
+       Kullanıcı zaten her videoda bu seçiciyi çeviriyor; kanal listesi artık peşinden geliyor. */
+    kanalAdlariniPlandanYaz(plan);
     snkPlanCiz();
     $("snkPlanCard").hidden = false;
     $("snkUygula").hidden = false;
@@ -4341,6 +4759,11 @@
        DEVAM EDER (emoji bir ek özellik), ama sessiz kalmaz. */
     try { EMJ = require(path.join(extRoot, "js", "emoji.js")); }
     catch (eEmj) { EMJ = null; logLine("Emoji modülü yüklenemedi: " + (eEmj.message || eEmj)); }
+    /* PNG yatay aynalama — sol taraftaki karakterlerin ekranın içine bakması için.
+       Yüklenemezse emoji özelliği DÜŞMEZ: sol taraftakiler aynalanmadan konur ve sayısı
+       sonuç mesajına yazılır (sessiz düşüş yok). Saf dosya işi, Premiere'e dokunmaz. */
+    try { AYNA = require(path.join(extRoot, "js", "pngayna.js")); }
+    catch (eAyna) { AYNA = null; logLine("PNG aynalama modülü yüklenemedi: " + (eAyna.message || eAyna)); }
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
