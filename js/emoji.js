@@ -209,9 +209,11 @@ const SISTEM_DUYGU = [
   "   ATLAMA. Ama listesi UZUN olan bir konusmacida listenin TAMAMINI kullan, hepsini iki uc",
   "   taneye yigma; kisa listeli konusmacida tekrar kacinilmazdir, sorun degil.",
   "8. sira alanina SANA VERILEN NUMARAYI yaz — satirin kacinci sirada oldugunu degil.",
-  "9. duygu2 alanina IKINCI EN UYGUN duyguyu yaz (duygu'dan FARKLI, ayni konusanin listesinden).",
-  "   Panel ayni resmi cok yakinda tekrarlamamak icin gerekirse onu kullanir; uygun bir ikinci",
-  "   duygu yoksa bos birak.",
+  "9. duygu2 alanini CIDDIYE AL — cesitliligi asil ORASI belirliyor. Ikinci en uygun duyguyu",
+  "   yaz (duygu'dan FARKLI, ayni konusanin listesinden). Panel iki secenek de uyduğunda o",
+  "   videoda DAHA AZ kullanilmis olani seciyor; yani iyi bir duygu2 yazarsan ayni resim",
+  "   tekrar tekrar cikmaz. Sadece GERCEKTEN uyan bir ikinci varsa yaz, uydurma — uygun",
+  "   ikinci duygu yoksa bos birak.",
   "10. Cevabin SADECE JSON olsun, aciklama yazma."
 ].join("\n");
 

@@ -505,6 +505,72 @@ function _haritadaBul(harita, yol) {
     return harita[k] ? harita[k] : null;
 }
 
+/* DOSYA ADIYLA ara — yol eslesmesi tutmadiginda SON CARE.
+   ⚠ YALNIZ EMOJI BIN'I ICINDE aranir: proje genelinde ad eslesmesi yanlis klibi koydurur
+   (bkz. _binYolBul'un basindaki not), ama bu bin'e yalnizca panel yaziyor ve emoji dosya
+   adlari ("Korkmus Dora.png") tekil.
+   NEDEN VAR: yol eslesmesi tutmazsa dosya "projede yok" sanilir; eski kod da onu YENIDEN
+   import ederdi. Bu yedek, tek bir eslesme aksakliginin yuzlerce emojiyi dusurmesini
+   ve gereksiz import turlarini engelliyor. */
+function _binAdBul(bin, yol) {
+    if (!bin || !yol) return null;
+    var ad = String(yol).replace(/^.*[\\\/]/, "").toLowerCase(), i, ch, p;
+    try {
+        for (i = 0; i < bin.children.numItems; i++) {
+            ch = bin.children[i];
+            p = ""; try { p = String(ch.getMediaPath()); } catch (e0) { p = ""; }
+            if (p && p.replace(/^.*[\\\/]/, "").toLowerCase() === ad) return ch;
+        }
+    } catch (e) {}
+    return null;
+}
+
+/* TUM EMOJI RESIMLERINI TEK SEFERDE ICE AKTAR — PARCA BASINA IMPORT ETME.
+   ⚠ ARKADASIN MAKINESINDE KILITLENEN SEY BUYDU (ParsMazi, 8 Agustos 2026): emojiYerlestir
+   plan PARCASI basina (40 emoji) calisiyor ve HER CAGRIDA kendi eksik resimlerini import
+   ediyordu. 117 emojilik bir planda bu 3 ayri import demek; Premiere `suppressUI=true` olsa
+   bile "Import Files" ilerleme penceresi aciyor ve ucuncusu kilitlendi. Kullanici pencereyi
+   iptal edince o parcanin 24 emojisi "resim projeye alinamadi" diye dustu.
+   Artik panel butun TEKIL yollari BIR KEZ, YERLESTIRMEDEN AYRI bir evalScript turunda
+   yukluyor; parcalar bin'de hazir buluyor ve hic import cagirmiyor. Ayri tur olmasi da
+   onemli: import ile klip yerlestirme ayni cagriya sikismiyor, Premiere arada nefes aliyor.
+   Donus: "ok:<alinan>/<denenen> …"  ·  eslesmeyen kalirsa mesajda SAYILIR (sessiz kalmaz). */
+function emojiResimYukle(listeYol) {
+    try {
+        var ham = _readFileUTF8(listeYol);
+        var satirlar = String(ham).split(/\r?\n/), yollar = [], i, s;
+        for (i = 0; i < satirlar.length; i++) { s = satirlar[i]; if (s && s.length) yollar.push(s); }
+        if (!yollar.length) return "ok:0/0 (liste bos)";
+        if (!app.project) return "err:Proje yok";
+
+        var root = app.project.rootItem, bin = _emojiBinBul(root);
+        if (!bin) {
+            try { bin = root.createBin(EMOJI_BIN); } catch (eB) { bin = null; }
+            if (!bin) bin = root;
+        }
+        var harita = _binYolHaritasi(bin);
+        var eksik = [], gorulen = {}, anah;
+        for (i = 0; i < yollar.length; i++) {
+            anah = "p" + String(yollar[i]).toLowerCase();
+            if (gorulen[anah]) continue;
+            gorulen[anah] = true;
+            if (!_haritadaBul(harita, yollar[i]) && !_binAdBul(bin, yollar[i])) eksik.push(yollar[i]);
+        }
+        if (!eksik.length) return "ok:0/" + yollar.length + " (hepsi zaten projede)";
+
+        try { app.project.importFiles(eksik, true, bin, false); }
+        catch (eI) { return "err:Emoji resimleri ice aktarilamadi: " + eI.toString(); }
+
+        harita = _binYolHaritasi(bin);
+        var kalan = 0;
+        for (i = 0; i < eksik.length; i++)
+            if (!_haritadaBul(harita, eksik[i]) && !_binAdBul(bin, eksik[i])) kalan++;
+        var msg = "ok:" + (eksik.length - kalan) + "/" + eksik.length + " resim projeye alindi";
+        if (kalan) msg += " | " + kalan + " tanesi alinamadi (dosya yok ya da Premiere reddetti)";
+        return msg;
+    } catch (e) { return "err:" + e.toString(); }
+}
+
 /* HANGI VIDEO KANALI PANELIN EMOJI KATMANI?
    Panel bunu bilemiyordu ve her calistirmada "en ustteki BOS kanal"i seciyordu: ikinci
    basista onceki katman dolu oldugu icin BIR UST kanala IKINCI bir tam set koyuyor, her
@@ -661,12 +727,18 @@ function emojiYerlestir(planYol, devamMi) {
             if (!bin) bin = root;
         }
 
-        /* Eksik PNG'leri BIR KEZ ice aktar (medya yoluna gore). */
+        /* Eksik PNG'leri ice aktar — NORMALDE BURASI HIC CALISMAZ.
+           ⚠ Resimler artik emojiResimYukle ile TEK SEFERDE, bu cagridan ONCE yukleniyor
+           (bkz. o fonksiyonun basindaki not: parca basina import ParsMazi'nin makinesinde
+           "Import Files" penceresini kilitliyordu). Burasi yalnizca YEDEK: panel eski
+           surumdeyse ya da on yukleme atlandiysa devreye girer.
+           Ad yedegi (_binAdBul) once denenir ki yol eslesmesindeki tek bir aksaklik
+           gereksiz bir import turu baslatmasin. */
         var eksik = [], gorulen = {}, j;
         for (i = 0; i < plan.length; i++) {
             if (gorulen[plan[i].yol]) continue;
             gorulen[plan[i].yol] = true;
-            if (!_haritadaBul(harita, plan[i].yol)) eksik.push(plan[i].yol);
+            if (!_haritadaBul(harita, plan[i].yol) && !_binAdBul(bin, plan[i].yol)) eksik.push(plan[i].yol);
         }
         if (eksik.length) {
             try { app.project.importFiles(eksik, true, bin, false); }
@@ -683,7 +755,9 @@ function emojiYerlestir(planYol, devamMi) {
                 hata.push(it.ad + " (onceki emojiyle cakisiyor, atlandi)");
                 continue;
             }
-            var pi = _haritadaBul(harita, it.yol);
+            /* Yol eslesmesi tutmazsa ADA gore ara (yalniz emoji bin'i icinde) — tek bir
+               eslesme aksakligi yuzunden emojiyi dusurme. */
+            var pi = _haritadaBul(harita, it.yol) || _binAdBul(bin, it.yol);
             if (!pi) { hata.push(it.ad + " (resim projeye alinamadi)"); continue; }
 
             var oncekiSayi = vt.clips.numItems;

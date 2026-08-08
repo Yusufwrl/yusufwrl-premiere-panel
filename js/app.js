@@ -2079,6 +2079,13 @@
       var plan = [], planSag = [], planAyna = [], sonBitis = -999;
       var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0 };
       var sureTop = 0, kisaltilan = 0, varyantSay = {}, tarafSay = { sag: 0, sol: 0 };
+      /* KAÇ FARKLI RESİM KULLANILDI — "45 emojim var ama projede 24 tane görüyorum, kalanı
+         kullanmıyor mu?" sorusunun cevabı (kullanıcı sordu, 8 Ağustos 2026).
+         Cevap çoğu zaman masum: videoda OLMAYAN karakterin resmi kullanılamaz. Ama panel
+         bunu hiç söylemiyordu, yani kullanıcı ancak proje penceresindeki öğe sayısına bakıp
+         tahmin edebiliyordu. Artık kullanılan çeşit, BU KADRODA kullanılabilir olanla
+         birlikte yazılıyor — oran düşükse gerçekten bakılacak bir şey var demektir. */
+      var kullanilanDosya = {}, duyguSay = {};
 
       /* ÇEŞİTLİLİK SAYAÇLARI + İKİ KLAMP.
          ⚠ HER İKİ EŞİK DE KLAMPLANMAK ZORUNDA — yoksa kural KENDİ KENDİNİ KİLİTLİYOR
@@ -2130,12 +2137,28 @@
            gösteriyor (ölçüldü) — duygu doğruluğu için ödenen isteği çöpe atmak olurdu.
            Sadece-atla politikası da ölçüldü: -%30 hacim, yani "az emoji" şikâyetini geri
            getiriyor. 2. tercihle kayıp -%8'de kalıyor. */
-        var duygu = s.duygu;
-        if (cesitIhlal(c.kar.key, duygu)) {
-          if (s.duygu2 && s.duygu2 !== duygu && !cesitIhlal(c.kar.key, s.duygu2)) {
-            duygu = s.duygu2; cesit.ikinci++;
-          } else { cesit.atlandi++; return false; }
-        }
+        /* ── ÇEŞİT TERCİHİ: İKİSİ DE UYUYORSA AZ KULLANILMIŞ OLANI AL ──
+           (kullanıcı isteği, 8 Ağustos 2026: "genel olarak tüm emojileri kullanmaya çalışsın,
+           farklı olmaları daha eğlenceli — ama tabii ki cümlelere uyuyorsa".)
+           ⚠ FİT KAYBI YOK, ve bu şart: seçilen iki duygunun İKİSİNİ de yapay zekâ TAM BU
+           CÜMLE İÇİN seçti (duygu = en uygun, duygu2 = ikinci en uygun). Yani "uymayan ama
+           kullanılmamış" bir resme geçmiyoruz — yalnızca ikisi de uyuyorken beraberliği
+           çeşitlilik lehine bozuyoruz.
+           ⚠ KÖR DEĞİŞTİRME HÂLÂ YASAK: karakterin havuzundan "en uzun süredir kullanılmayan"ı
+           seçmek denenmişti ve emojilerin %35-44'ünü modelin SEÇMEDİĞİ duyguyla gösteriyordu
+           (ölçüldü) — burada aday kümesi yalnız modelin verdiği İKİ duygu. */
+        var birinci = s.duygu;
+        var ikinci = (s.duygu2 && s.duygu2 !== birinci) ? s.duygu2 : "";
+        var ihlal1 = cesitIhlal(c.kar.key, birinci);
+        var ihlal2 = ikinci ? cesitIhlal(c.kar.key, ikinci) : true;
+        var duygu;
+        if (!ihlal1 && !ihlal2) {
+          var say1 = duyguSay[c.kar.key + "|" + birinci] || 0;
+          var say2 = duyguSay[c.kar.key + "|" + ikinci] || 0;
+          if (say2 < say1) { duygu = ikinci; cesit.ikinci++; } else duygu = birinci;
+        } else if (!ihlal1) duygu = birinci;
+        else if (!ihlal2) { duygu = ikinci; cesit.ikinci++; }
+        else { cesit.atlandi++; return false; }
         /* matris artık VARYANT LİSTESİ: aynı duygu+karakter için birden çok resim olabilir
            ("Heyecanlı Tofi.png" + "Heyecanlı Tofi 2.png"). Eskiden ikincisi birinciyi
            sessizce eziyordu; şimdi sırayla dönülüyor — aynı duygu tekrar geldiğinde farklı
@@ -2172,11 +2195,16 @@
            timeline'a konan emojileri sayıyor. */
         planSag.push(!!sagMi);
         planAyna.push(!sagMi && !aynaBellek[png.yol]);   // sol ama aynası üretilememiş
+        kullanilanDosya[png.yol] = 1;                    // kaç FARKLI resim kullanıldı (rapor)
         /* ⚠ konmus.push BÜTÜN ELEMELERDEN SONRA, plan.push ile AYNI yerde: plana girmeyen bir
            aday çeşitlilik penceresini yememeli. (Hemen üstteki varyantSay sayacı bu hatayı
            yapıyor — boyutu okunamayan dosya da varyant sırasını ilerletiyor; zararsız ama
            örnek alınmamalı.) */
         konmus.push({ k: c.kar.key, d: duygu });
+        /* Karakter+duygu başına kullanım sayacı — yukarıdaki "az kullanılmışı tercih et"
+           kararı buna bakıyor. konmus penceresi yalnız SON 6'ya bakıyor, bu ise VİDEO
+           BOYUNCA sayıyor: çeşitlilik kuralı "üst üste gelmesin", bu ise "hepsi kullanılsın". */
+        duyguSay[c.kar.key + "|" + duygu] = (duyguSay[c.kar.key + "|" + duygu] || 0) + 1;
         karSay[c.kar.key] = (karSay[c.kar.key] || 0) + 1;
         sonBitis = c.bas + sure; sureTop += sure;
         return true;
@@ -2229,9 +2257,27 @@
         if (planSag[tz]) tarafSay.sag++; else tarafSay.sol++;
         if (planAyna[tz]) aynasizKondu++;
       }
+      /* ÇEŞİT RAPORU: kaç FARKLI resim kullanıldı / bu kadroda kullanılabilir kaç resim vardı.
+         Payda kasıtlı olarak KLASÖRÜN TAMAMI DEĞİL: videoda olmayan karakterin resmi zaten
+         kullanılamaz, onu paydaya koymak her videoda haksız bir "az kullanıyor" izlenimi
+         verirdi. Kadro = konuşan ve karakteri eşleşen herkes (cumleler'den). */
+      var kadroKar = {}, uygunDosya = 0, kkk;
+      cumleler.forEach(function (c) { if (c.kar) kadroKar[c.kar.key] = 1; });
+      for (kkk in kadroKar) {
+        if (!Object.prototype.hasOwnProperty.call(kadroKar, kkk)) continue;
+        (tarama.karakterDuygu[kkk] || []).forEach(function (d) {
+          var vl = tarama.matris[d + "|" + kkk];
+          uygunDosya += (vl && vl.length) ? vl.length : 0;
+        });
+      }
+      var kullanilanSay = 0, kdk;
+      for (kdk in kullanilanDosya) if (Object.prototype.hasOwnProperty.call(kullanilanDosya, kdk)) kullanilanSay++;
       logLine("Emoji planı: " + plan.length + " emoji · ort. süre " +
               (plan.length ? (sureTop / plan.length).toFixed(1) : "0") + " sn (cümle boyunca) · " +
               tarafSay.sag + " sağda, " + tarafSay.sol + " solda (soldakiler yatay aynalandı).");
+      logLine("Emoji çeşidi: " + kullanilanSay + " farklı resim kullanıldı · bu kadroda " +
+              uygunDosya + " resim kullanılabilirdi (klasörde toplam " + tarama.dosyalar.length + ") · " +
+              "kadro: " + Object.keys(kadroKar).join(", ") + ".");
       logLine("Emoji atlanan: " + atlanan.yakin + " öncekiyle çakışıyor, " +
               atlanan.dosyaYok + " dosya yok, " + atlanan.boyutYok + " boyut okunamadı." +
               (kisaltilan ? (" " + kisaltilan + " uzun cümle " + EMOJI_MAX_SURE + " sn'ye kırpıldı.") : ""));
@@ -2252,6 +2298,54 @@
         logLine("Emoji: eski katman temizlendi (V" + (temizlenecekler[tsil] + 1) + ") → " + rt);
         if (rt.indexOf("ok:") !== 0 && temizlenecekler[tsil] === kanal) {
           yaz("Eski emoji katmanı temizlenemedi: " + rt.replace(/^err:/, ""), "var(--bad)"); return;
+        }
+      }
+
+      /* 5.5) RESİMLERİ TEK SEFERDE PROJEYE AL — YERLEŞTİRMEDEN AYRI BİR ÇAĞRIDA.
+         ⚠ ARKADAŞIN MAKİNESİNDE KİLİTLENEN ŞEY BUYDU (ParsMazi, 8 Ağustos 2026): host
+         plan PARÇASI başına (40 emoji) kendi eksik resimlerini import ediyordu. 117 emojilik
+         bir plan 3 parça, yani ÜÇ ayrı import demek; Premiere `suppressUI=true` verilse bile
+         "Import Files" ilerleme penceresi açıyor ve üçüncüsü kilitlendi. Kullanıcı pencereyi
+         iptal edince o parçanın 24 emojisi "resim projeye alınamadı" diye düştü.
+         Artık bütün TEKİL yollar bir kez burada yükleniyor; parçalar bin'de hazır buluyor.
+         AYRI ÇAĞRI OLMASI DA ÖNEMLİ: import ile klip yerleştirme aynı evalScript turuna
+         sıkışmıyor, Premiere ikisinin arasında nefes alıyor.
+         Yükleme başarısızsa DURULUR: eksik resimle devam etmek, yarısı boş bir emoji
+         katmanı bırakır ve sebebi kullanıcıya görünmez. */
+      var uniqYol = {}, uniqListe = [];
+      plan.forEach(function (satir) {
+        var y = String(satir).split("|")[0];
+        if (y && !uniqYol[y]) { uniqYol[y] = 1; uniqListe.push(y); }
+      });
+      if (uniqListe.length) {
+        var impYol = path.join(extRoot, "emoji_import.txt");
+        try {
+          fs.writeFileSync(impYol, uniqListe.join("\n"), "utf8");
+          yaz("resimler projeye alınıyor… (" + uniqListe.length + " dosya)");
+          var ri = String(await evalES('emojiResimYukle("' + esPath(impYol) + '")'));
+          logLine("Emoji resim yükleme (" + uniqListe.length + " tekil dosya): " + ri);
+          try { fs.unlinkSync(impYol); } catch (eIu) {}
+          /* ⚠ İKİ FARKLI BAŞARISIZLIK, İKİ FARKLI DAVRANIŞ — KARIŞTIRMA:
+             "err:" → yeni fonksiyon çalıştı ama resimleri alamadı. DUR: eksik resimle devam
+                      etmek yarısı boş bir emoji katmanı bırakır ve sebebi görünmez.
+             başka   → fonksiyon HİÇ YOK (host.jsx eski). host.jsx yalnız PREMIERE AÇILIRKEN
+                      yükleniyor, paneli kapat-aç yetmiyor; yani güncellemeden sonra Premiere'i
+                      tam kapatmayan herkes buraya düşer. Burada DURMAK, çalışan bir özelliği
+                      kullanılamaz yapardı — host'un kendi yedek import dalı devreye girer,
+                      eski davranışla devam edilir. Sessiz kalmaz, log'a yazılır. */
+          if (ri.indexOf("err:") === 0) {
+            yaz("Emoji resimleri projeye alınamadı: " + ri.replace(/^err:/, "") +
+                " — Premiere'de bir Import penceresi açık kaldıysa kapat ve tekrar bas.", "var(--bad)");
+            return;
+          }
+          if (ri.indexOf("ok:") !== 0) {
+            logLine("Emoji ön yükleme yapılamadı (host.jsx eski olabilir — Premiere'i TAMAMEN " +
+                    "kapatıp aç). Resimler eski yoldan, parça parça alınacak. Dönen: " + ri);
+          }
+        } catch (eImp) {
+          /* Host eskiyse (emojiResimYukle yok) yerleştirme yine çalışır: host'taki YEDEK
+             import dalı devreye girer. Sessiz geçme, söyle. */
+          logLine("Emoji ön yükleme atlandı (host eski olabilir): " + (eImp.message || eImp));
         }
       }
 
@@ -2319,6 +2413,9 @@
       if (parcaHata) msg += " — DURDU: " + parcaHata;
       else if (kondu < plan.length) msg += " — " + (plan.length - kondu) + " tanesi OLMADI";
       msg += " · " + tarafSay.sag + " sağda, " + tarafSay.sol + " solda";
+      /* ÇEŞİT DURUM SATIRINDA: "projede 24 öğe var ama 45 emojim var" sorusu bir daha
+         proje penceresine bakılarak tahmin edilmesin. Payda bu KADRODA kullanılabilir olan. */
+      msg += " · " + kullanilanSay + "/" + uygunDosya + " farklı resim kullanıldı";
       msg += " · yapay zekâ " + cumleler.length + " cümlenin " + isaret + "'ini işaretledi";
       /* KISA CÜMLE ELEMESİ DURUM SATIRINDA: "eskisi kadar emoji çıkmadı" hissinin sebebi bu
          ve ayarlanabilir kol Sıklık DEĞİL — kullanıcı bunu bilmeli. */
