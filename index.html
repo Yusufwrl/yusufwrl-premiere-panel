@@ -255,18 +255,12 @@
               <!-- Emoji Ekle + sıklık seçici BİRLİKTE kaysın (Bölümler/aralık ikilisiyle aynı desen). -->
               <div class="chap-group">
                 <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar (yapay zekâ seçer). Tofi ve Moni sağ alt köşede, diğer karakterler sol alt köşede (resimleri ekrana bakacak şekilde yatay çevrilir). Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
-                <!-- SIKLIK PANELDEN AYARLANIR. "Baya emoji" görecelidir ve tek doğru sayı yok;
-                     kullanıcının 22 dk'lık videosunda ölçülen karşılıkları: Az ≈ 100 (13 sn'de
-                     bir) · Orta ≈ 155 (8,6 sn'de bir) · Bol ≈ 220 (6,1 sn'de bir). Bu seçici
-                     olmasaydı "az/çok geldi" geri bildirimi kaynak dosya düzenlemeyi ve
-                     yeniden kurmayı gerektirirdi. -->
-                <div class="select chap-select">
-                  <select id="emojiSiklik" title="Ne kadar sık emoji çıksın?">
-                    <option value="0.25">Az emoji</option>
-                    <option value="0.4" selected>Orta</option>
-                    <option value="0.6">Bol emoji</option>
-                  </select>
-                </div>
+                <!-- SIKLIK SEÇİCİSİ KALDIRILDI (kullanıcı isteği, 8 Ağustos 2026): "az/orta/bol
+                     seçeneğine gerek yok, her zaman bol olsun, hatta bolden biraz fazla".
+                     Değer artık js/app.js → EMOJI_SIKLIK = 0.75 (eski "Bol" 0.60'tı).
+                     ⚠ GERİ EKLEME: ölçüldü, 0.85'e çıkmak TEK BİR emoji bile eklemiyor —
+                     tavanı yapay zekâ değil çakışma freni belirliyor (emoji cümle boyunca
+                     ekranda kalıyor). Ayrıntı EMOJI_SIKLIK'in yanındaki notta. -->
                 <!-- EMOJİ ANİMASYONU: yerleştirmeden hemen sonra, emoji kanalındaki BÜTÜN
                      kliplere uygulanır. Kullanıcının "Emoji Sağ Taraf" preset'i tam bunun
                      için öğretilmiş (Transform ile pop giriş + aşağı kayarak çıkış).

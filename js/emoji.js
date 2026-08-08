@@ -173,11 +173,16 @@ function olcekHesapla(png, sekansYukseklik, oranYukseklik) {
    2) 7. kural "duygu kumesi KUCUK (genelde 5 tane)" DIYORDU. O sayi Tofi'de 19, Moni'de 17
       oldu; modele "kume kucuk, tekrar normal" demek yeni eklenen resimlerin kullanilmamasina
       yol aciyordu. Artik "konusana gore degisiyor, genis listeyi tamamen kullan" diyor.
-   IKISI DE GENISLETICI degisiklik — yukaridaki "hacmi kisma" kuralina aykiri degil. */
+   IKISI DE GENISLETICI degisiklik — yukaridaki "hacmi kisma" kuralina aykiri degil.
+   ⚠ ISTEME SOMUT ANAHTAR ADI YAZMA. Ilk halinde ornekler vardi ("'susun biraz' -> sessiz ol");
+   kullanici dosyalari yeniden adlandirinca o anahtar YOK oldu ve istem modele var olmayan bir
+   secenegi ornek gostermeye basladi. Kural artik anahtar adi gecirmeden anlatiliyor: klasor
+   degisince istem kendiliginde dogru kalir. Duygu/karakter kumesi gibi ORNEKLER de klasore
+   bagli olamaz — o yuzden genel. */
 const SISTEM_DUYGU = [
   "Bir Minecraft/Roblox video kanalinin kurgucususun. Altyazi satirlarini okuyup, hangilerine",
   "konusanin TEPKI RESMI konacagini isaretliyorsun. Tepki bir yuz ifadesi olabilir (saskinlik,",
-  "korku, sevgi) ama bir HAREKET/POZ da olabilir (onaylama, susturma, ret).",
+  "korku, sevgi) ama bir HAREKET ya da TAVIR da olabilir (onaylama, ret, fisildama).",
   "",
   "KURALLAR:",
   "1. Duygu, O SATIRI SOYLEYEN kisinin duygusudur. Baskasini korkutan bir cumle soyleyen kisi",
@@ -192,16 +197,17 @@ const SISTEM_DUYGU = [
   "4. DUYGU BULMADIGIN SATIRI CEVABA HIC YAZMA. Yalnizca isaretledigin satirlari dondur.",
   "   (Butun satirlari yazmak cevabi gereksiz uzatip yarida kesilmesine yol aciyor.)",
   "5. Yalnizca sana verilen anahtarlardan birini kullan. Baska kelime yazma.",
-  "   ⚠ LISTE YALNIZ YUZ IFADESI DEGIL: onaylama, susturma, ret, poz/kostum gibi HAREKET",
-  "   anlatan secenekler de olabilir. Cumle o hareketi anlatiyorsa onu sec: 'tamam anlastik'",
-  "   -> onaylayan · 'susun biraz' -> sessiz ol · 'olmaz, yapmam' -> reddeden. Adindan ne",
-  "   oldugunu cikaramadigin bir secenegi ZORLAMA, o satiri baska bir anahtarla isaretle.",
+  "   LISTE YALNIZ YUZ IFADESI DEGIL: bir HAREKET ya da TAVIR anlatan anahtarlar da olabilir",
+  "   (onaylama, ret, fisildama, plan kurma gibi). Anahtarin adi ne yapildigini soyluyorsa,",
+  "   cumle de o seyi yapiyorsa onu sec — kisi o an oyle bir yuz ifadesi takinmasa bile.",
+  "   Adindan ne oldugunu cikaramadigin bir anahtari ZORLAMA, o satira baskasini ver.",
   "6. Ses tonunu duymuyorsun, yalniz metni goruyorsun. Iki duygu arasinda kaldiysan EN YAKIN",
   "   olani SEC — 'emin degilim' diye atlama. Yalniz tamamen notr/bilgi veren satirlari",
   "   (koordinat okuma, 'tamam', 'evet', 'orada') bos birak.",
-  "7. Secenek sayisi KONUSANA GORE DEGISIYOR (kiminde 6, kiminde 19). Ayni secenegin tekrar",
-  "   tekrar cikmasi NORMALDIR — cesitlilik olsun diye satir ATLAMA. Ama listesi GENIS olan",
-  "   bir konusmacida listenin tamamini kullan; hepsini iki uc taneye yigma.",
+  "7. Secenek sayisi KONUSANA GORE COK DEGISIYOR: birinin listesi bir avuc, otekininki uzun",
+  "   olabilir. Ayni secenegin tekrar tekrar cikmasi NORMALDIR — cesitlilik olsun diye satir",
+  "   ATLAMA. Ama listesi UZUN olan bir konusmacida listenin TAMAMINI kullan, hepsini iki uc",
+  "   taneye yigma; kisa listeli konusmacida tekrar kacinilmazdir, sorun degil.",
   "8. sira alanina SANA VERILEN NUMARAYI yaz — satirin kacinci sirada oldugunu degil.",
   "9. duygu2 alanina IKINCI EN UYGUN duyguyu yaz (duygu'dan FARKLI, ayni konusanin listesinden).",
   "   Panel ayni resmi cok yakinda tekrarlamamak icin gerekirse onu kullanir; uygun bir ikinci",

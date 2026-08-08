@@ -853,6 +853,39 @@
               if (eYeniAd.length < 8) eYeniAd.push(x.ad.replace(/\.png$/i, ""));
             } catch (eE) {}
           });
+          /* ── PAKETTEN ÇIKARILMIŞ DOSYALARI TOPLA (yeniden adlandırma artığı) ──
+             ⚠ SESSİZ HAYALET DUYGU SORUNU: kullanıcı bir emojiyi yeniden adlandırınca paket
+             yeni adı getiriyor ama ESKİ ad hedefte kalıyordu (kur yalnız ekliyor, hiç
+             silmiyordu). Panel duygu kümesini KLASÖRDEN türettiği için silinmiş olması
+             gereken duygu hâlâ listede duruyor ve yapay zekâya seçenek olarak gidiyor —
+             kullanıcı temizlik yapıyor, panel temizliği geri alıyor.
+             SİLMEK YERİNE TAŞI: <Emoji>\eski\ altına alınır (alt klasör olduğu için tara()
+             görmez) ve kullanıcı isterse geri koyar. Yalnız ŞU ÜÇÜ birden doğruysa taşınır:
+               1) izde var  → o dosyayı PANEL kurmuştu, kullanıcının kendi resmi değil
+               2) boyutu izdekiyle aynı → kurduğumuzdan beri DEĞİŞTİRİLMEMİŞ
+               3) paketin yeni listesinde yok → gerçekten çıkarılmış
+             Üçünden biri tutmazsa dosyaya DOKUNULMAZ. */
+          var paketAd = {}, eskiye = [], izAd;
+          eList.forEach(function (x) { paketAd[x.ad] = 1; });
+          for (izAd in iz) {
+            if (!Object.prototype.hasOwnProperty.call(iz, izAd)) continue;
+            if (paketAd[izAd]) continue;                       // hâlâ pakette
+            try {
+              var esk = path.join(eHedef, izAd);
+              if (!fs.existsSync(esk)) { delete iz[izAd]; continue; }
+              if (fs.statSync(esk).size !== iz[izAd]) continue;  // kullanıcı değiştirmiş → dokunma
+              var eKla = path.join(eHedef, "eski");
+              if (!fs.existsSync(eKla)) fs.mkdirSync(eKla);
+              var eHed = path.join(eKla, izAd);
+              if (fs.existsSync(eHed)) fs.unlinkSync(eHed);
+              fs.renameSync(esk, eHed);
+              delete iz[izAd];
+              eskiye.push(izAd.replace(/\.png$/i, ""));
+            } catch (eEs) {}
+          }
+          if (eskiye.length) logLine("Emoji: paketten çıkarılmış " + eskiye.length +
+                                     " resim “eski” klasörüne taşındı (" + eskiye.join(", ") +
+                                     ") — yeniden adlandırılmış olabilirler.");
           try { fs.writeFileSync(izYol, JSON.stringify(iz), "utf8"); } catch (eIw) {}
           if (eYeni) logLine("Emoji resimleri TAZELENDİ (" + eYeni + "): " + eYeniAd.join(", ") +
                              (eYeni > eYeniAd.length ? " …" : "") + " — düzeltilmiş hâlleri kuruldu." +
@@ -1688,21 +1721,22 @@
     });
   }
 
-  /* Emoji sıklığı — kullanıcı ayarı. "Baya emoji" görecelidir ve tek doğru sayı yok:
-     ölçüldü (kullanıcının 22 dk'lık oturumu, 448 uygun cümle) → 0.25 ≈ 100 emoji (13 sn'de
-     bir) · 0.40 ≈ 155 (8,6 sn'de bir) · 0.60 ≈ 220 (6,1 sn'de bir). Kaynak dosya düzenleyip
-     yeniden kurmak yerine panelden seçilsin: aynı düğme satırında zaten bir seçici var
-     (#chapInterval), yani yeni bir kart/ekran açılmıyor. */
-  function emojiOran() {
-    var s = $("emojiSiklik");
-    var v = s ? parseFloat(s.value) : NaN;
-    return (isFinite(v) && v > 0) ? v : 0.40;
-  }
-  function wireEmojiSiklik() {
-    var s = $("emojiSiklik"); if (!s) return;
-    s.value = lsGet("emoji.siklik", "0.4");
-    s.addEventListener("change", function () { lsSet("emoji.siklik", s.value); });
-  }
+  /* ── EMOJİ SIKLIĞI ARTIK SABİT — SEÇİCİ KALDIRILDI (kullanıcı isteği, 8 Ağustos 2026:
+        "az/orta/bol seçeneğine gerek yok, her zaman bol olsun, hatta bolden biraz fazla —
+        videoda emoji olması iyi oluyor").
+     Değer yapay zekâya "cümlelerin yaklaşık şu kadarını işaretle" diye gidiyor (hedefOran).
+
+     ⚠ 0.75 SEÇİLDİ ÇÜNKÜ ÜSTÜ BOŞA GİDİYOR — ÖLÇÜLDÜ (kullanıcının gerçek oturumu, 32 uygun
+     cümle / 142 sn, plan döngüsü birebir simüle edilerek):
+        oran 0.40 → 10 emoji (4.2/dk) · 0.60 → 13 (5.5/dk) · **0.75 → 17 (7.2/dk)**
+        0.85 → 17 (7.2/dk, KAZANÇ YOK) · 1.00 → 19 (8.0/dk)
+     Yani "Bol"a göre +%31, ama 0.85'e çıkmak tek bir emoji bile eklemiyor — yalnız API
+     parası harcıyor (işaretlenen cümle 24 → 27).
+     TAVANI YAPAY ZEKÂ BELİRLEMİYOR: emoji cümle boyunca ekranda kaldığı için çakışma freni
+     (EMOJI_GAP) ve 3 sn'lik seçim penceresi bir üst sınır koyuyor. Daha çok emoji isteniyorsa
+     çevrilecek kol bu sabit DEĞİL, o iki fren — ama ikisi de üst üste binmeyi önlüyor. */
+  var EMOJI_SIKLIK = 0.75;
+  function emojiOran() { return EMOJI_SIKLIK; }
 
   /* EMOJİ PRESET SEÇİCİSİ — yalnız GERÇEKTEN öğrenilmiş yığınlar listelenir.
      Öğrenilmemiş bir adı listeye koymak "uyguladım ama hiçbir şey olmadı" üretirdi
@@ -1795,7 +1829,7 @@
 
     var cumleler = top.liste;
     /* KISA CÜMLE ELEMESİ SESSİZ KALMAZ: emoji sayısı doğrudan bununla düşüyor ve sebebini
-       bilmeyen kullanıcı Sıklık'ı boşuna artırır (o kol bu elemeden SONRA çalışıyor). */
+       bilmeyen kullanıcı başka yerde arar (sıklık artık sabit, çevrilecek bir kol yok). */
     if (top.kisa) logLine("Emoji: " + top.kisa + " cümle " + EMOJI_MIN_KELIME +
                           " kelimeden kısa olduğu için elendi — yapay zekâya hiç gitmedi.");
     if (!cumleler.length) {
@@ -2246,9 +2280,12 @@
          ve ayarlanabilir kol Sıklık DEĞİL — kullanıcı bunu bilmeli. */
       if (top.kisa) msg += " · " + top.kisa + " kısa cümle (" + EMOJI_MIN_KELIME +
                            " kelimeden az) baştan elendi";
-      /* ÇEŞİTLİLİK YÜZÜNDEN DÜŞEN SAYI SESSİZ KALMAZ: kullanıcı "az emoji" derse hangi kolu
-         çevireceğini bilmeli — ayarlanabilir tek kol Sıklık. */
-      if (cesit.atlandi) msg += " · " + cesit.atlandi + " tanesi çeşitlilik kuralına takıldı (daha çok emoji için Sıklık'ı artır)";
+      /* ÇEŞİTLİLİK YÜZÜNDEN DÜŞEN SAYI SESSİZ KALMAZ: kullanıcı "az emoji" derse ne
+         yapacağını bilmeli.
+         ⚠ MESAJ ARTIK "Sıklık'ı artır" DEMİYOR — o seçici kaldırıldı (sıklık sabit 0.75).
+         Çeşitlilik kuralına takılmanın gerçek çaresi o karaktere YENİ RESİM çizmek: kural
+         "aynı resim çok yakında tekrar etmesin" diyor, yani havuz küçükse tıkanıyor. */
+      if (cesit.atlandi) msg += " · " + cesit.atlandi + " tanesi çeşitlilik kuralına takıldı (o karaktere yeni tepki resmi eklersen artar)";
       if (aynasizKondu) msg += " · ⚠ " + aynasizKondu + " emoji AYNALANMADAN kondu (ters bakıyor, " +
                                aynaHata + " resim çevrilemedi): " + (aynaHataAd || "sebep bilinmiyor");
       msg += presetNot;
@@ -2301,7 +2338,7 @@
     /* "Senin karakterin" seçicisi KALDIRILDI: karakter adı artık kanal listesinden geliyor
        (A1 satırının da isim kutusu var). Aynı bilgiyi iki yerde sormak kafa karıştırıyordu. */
 
-    wireEmojiSiklik();
+    /* wireEmojiSiklik() KALDIRILDI — sıklık seçicisi yok, değer sabit (bkz. EMOJI_SIKLIK). */
     wireEmojiPreset();
     var bEkle = $("btnEmojiEkle"), bSil = $("btnEmojiSil");
     if (bEkle) bEkle.addEventListener("click", function () {
