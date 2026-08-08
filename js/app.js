@@ -789,10 +789,17 @@
        panel "<Duygu> <Karakter>.png" kalıbından duygu ve karakteri türetiyor, ad bozulursa
        emoji sessizce yanlış karaktere bağlanır. Stiller için kanıtlanmış aynı desen. */
     try {
+      /* ⚠ HEDEF, PANELİN GERÇEKTEN OKUDUĞU KLASÖR OLMALI. Eskiden koşulsuz
+         emojiKlasorVarsayilan() (motor kökü altı) kullanılıyordu; ama emoji ÖZELLİĞİ
+         #emojiKlasor kutusundaki yoldan okuyor. İkisi ayrışabiliyor ve ayrışınca kurulum
+         bir klasöre gidiyor, okuma başkasından oluyor — panel "kuruldu" diyor, kullanıcı
+         "güncelleme gelmedi" diyor ve ikisi de haklı. ParsMazi'de bu gerçek bir risk:
+         motor RAR'ı "-teslim" ekiyle açıldığı için makinesinde İKİ motor klasörü var.
+         Kayıtlı seçim varsa O kullanılır; yoksa eskisi gibi motor kökü altı. */
       var eMan = path.join(kok, "emoji-paketi.json");
       if (fs.existsSync(eMan)) {
         var eList = JSON.parse(String(fs.readFileSync(eMan, "utf8")).replace(/^﻿/, ""));
-        var eHedef = emojiKlasorVarsayilan();
+        var eHedef = String(lsGet("emoji.klasor", "")).trim() || emojiKlasorVarsayilan();
         if (eList && eList.length && eHedef) {
           pipeline.ensureDir(eHedef);
           var eKondu = 0, eVar = 0, eYeni = 0, eKorunan = 0, eYedek = 0, eYeniAd = [];
@@ -899,6 +906,43 @@
         }
       }
     } catch (e3) { logLine("Emoji resimleri kurulamadı: " + (e3.message || e3)); }
+  }
+
+  /* ── EMOJİ KLASÖRÜ DURUMU — "güncelleme geldi ama yeni emojiler yok" SESSİZ KALMASIN ──
+     ⚠ NEDEN VAR: panel emoji resimlerini bir klasöre KURUYOR, emoji özelliği ise başka bir
+     kutudan (#emojiKlasor) OKUYOR. İkisi ayrışırsa kurulum bir yere gider, okuma başka
+     yerden olur ve panel hiçbir şey söylemez — kullanıcı "güncelleme gelmedi" der, panel
+     "kuruldu" der, ikisi de haklıdır. ParsMazi'de bu somut bir risk: motor RAR'ı "-teslim"
+     ekiyle açıldığı için makinesinde İKİ motor klasörü var.
+     Bu satır paneldeki resim sayısını PAKETTEKİ sayıyla yan yana koyuyor; tutmuyorsa
+     "Emojileri Yeniden Kur" düğmesi tek tıkla çözüyor. */
+  function emojiPaketSayisi() {
+    try {
+      var m = path.join(extRoot, "varsayilan", "emoji-paketi.json");
+      if (!fs.existsSync(m)) return 0;
+      var j = JSON.parse(String(fs.readFileSync(m, "utf8")).replace(/^﻿/, ""));
+      return (j && j.length) || 0;
+    } catch (e) { return 0; }
+  }
+  function emojiKlasorDurumYaz() {
+    var el = $("emojiKlasorDurum"); if (!el) return;
+    function yaz(m, renk) { el.textContent = m; el.style.color = renk || "var(--muted)"; }
+    var kok = String(($("emojiKlasor") || {}).value || "").trim();
+    if (!kok) { yaz("Emoji klasörü seçilmedi.", "var(--warn)"); return; }
+    if (!EMJ) { yaz("emoji.js yüklenemedi — paneli yeniden kur.", "var(--bad)"); return; }
+    var t = null;
+    try { t = EMJ.tara(kok); } catch (e) { t = null; }
+    if (!t || t.hata) { yaz("Klasör okunamadı: " + ((t && t.hata) || "bilinmeyen hata"), "var(--bad)"); return; }
+    var paketSay = emojiPaketSayisi();
+    var ozet = t.dosyalar.length + " resim · " + t.karakterler.length + " karakter (" +
+               t.karakterler.map(function (k) { return k.ad; }).join(", ") + ") · " +
+               t.duygular.length + " tepki";
+    if (paketSay && t.dosyalar.length < paketSay) {
+      yaz("⚠ " + ozet + " — pakette " + paketSay + " resim var, " + (paketSay - t.dosyalar.length) +
+          " tanesi bu klasörde YOK. “Emojileri Yeniden Kur”a bas.", "var(--warn)");
+    } else {
+      yaz("✓ " + ozet + (paketSay ? (" · paketle uyumlu") : ""), "var(--muted)");
+    }
   }
 
   var _presetYigin = null;
@@ -2322,17 +2366,56 @@
     var dur = $("emojiTestDurum"), cik = $("emojiTestCikti");
     if (!inp || !bTest) return;
     inp.value = lsGet("emoji.klasor", "") || emojiKlasorVarsayilan();
-    inp.addEventListener("change", function () { lsSet("emoji.klasor", inp.value.trim()); });
+    inp.addEventListener("change", function () {
+      lsSet("emoji.klasor", inp.value.trim());
+      emojiKlasorDurumYaz();          // klasör değişince sayılar hemen tazelensin
+    });
     function yaz(m, renk) { if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; } }
+    emojiKlasorDurumYaz();            // açılışta durumu göster (eksik varsa hemen görünsün)
 
     if (bSec) bSec.addEventListener("click", function () {
       if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
       try {
         if (window.cep && window.cep.fs && window.cep.fs.showOpenDialogEx) {
           var r = window.cep.fs.showOpenDialogEx(false, true, "Emoji klasörünü seç", inp.value || "");
-          if (r && r.data && r.data.length) { inp.value = r.data[0]; lsSet("emoji.klasor", inp.value); }
+          if (r && r.data && r.data.length) {
+            inp.value = r.data[0]; lsSet("emoji.klasor", inp.value); emojiKlasorDurumYaz();
+          }
         }
       } catch (e) { yaz("klasör seçilemedi: " + (e.message || e), "var(--bad)"); }
+    });
+
+    /* EMOJİLERİ YENİDEN KUR — "güncelleme geldi ama yeni emojiler yok"un tek tıklık çaresi.
+       varsayilanlariKur zaten açılışta çalışıyor ama YALNIZ kayıtlı klasöre yazıyor; kutuda
+       başka bir yol duruyorsa (ya da kullanıcı klasörü sonradan değiştirdiyse) kurulum oraya
+       hiç ulaşmıyordu. Bu düğme önce kutudaki yolu KAYDEDİYOR, sonra kurulumu çalıştırıyor —
+       yani hedefi kullanıcının gördüğü klasör yapıyor. Eksikleri ekler, düzeltilmişleri
+       tazeler, kullanıcının kendi resimlerine dokunmaz (bkz. .panel-emoji.json izi). */
+    var bKur = $("btnEmojiKur");
+    if (bKur) bKur.addEventListener("click", function () {
+      var durEl = $("emojiKlasorDurum");
+      var yol = String(inp.value || "").trim();
+      if (!yol) {
+        if (durEl) { durEl.textContent = "Önce emoji klasörünü seç."; durEl.style.color = "var(--warn)"; }
+        return;
+      }
+      lsSet("emoji.klasor", yol);
+      if (durEl) { durEl.textContent = "kuruluyor…"; durEl.style.color = "var(--muted)"; }
+      bKur.disabled = true;
+      try {
+        var oncekiSay = 0;
+        try { var t0 = EMJ ? EMJ.tara(yol) : null; oncekiSay = (t0 && !t0.hata) ? t0.dosyalar.length : 0; } catch (eT) {}
+        varsayilanlariKur();
+        var sonSay = 0;
+        try { var t1 = EMJ ? EMJ.tara(yol) : null; sonSay = (t1 && !t1.hata) ? t1.dosyalar.length : 0; } catch (eT2) {}
+        logLine("Emojiler yeniden kuruldu: " + oncekiSay + " → " + sonSay + " resim (" + yol + ")");
+      } catch (eK) {
+        logLine("Emojiler yeniden kurulamadı: " + (eK.message || eK));
+        if (durEl) { durEl.textContent = "kurulamadı: " + (eK.message || eK); durEl.style.color = "var(--bad)"; }
+        bKur.disabled = false; return;
+      }
+      bKur.disabled = false;
+      emojiKlasorDurumYaz();
     });
 
     /* "Senin karakterin" seçicisi KALDIRILDI: karakter adı artık kanal listesinden geliyor
