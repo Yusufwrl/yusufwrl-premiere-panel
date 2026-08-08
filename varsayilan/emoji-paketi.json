@@ -41,126 +41,142 @@
     },
     {
         "dosya":  "emoji11.png",
-        "ad":  "Havalı Tofi.png"
+        "ad":  "Evet Tabelalı Onaylayan Tofi.png"
     },
     {
         "dosya":  "emoji12.png",
-        "ad":  "Heyecanlı Tofi 2.png"
+        "ad":  "Havalı Tofi.png"
     },
     {
         "dosya":  "emoji13.png",
-        "ad":  "Heyecanlı Tofi.png"
+        "ad":  "Heyecanlı Tofi 2.png"
     },
     {
         "dosya":  "emoji14.png",
-        "ad":  "Korkmuş Dora.png"
+        "ad":  "Heyecanlı Tofi.png"
     },
     {
         "dosya":  "emoji15.png",
-        "ad":  "Korkmuş Mimi.png"
+        "ad":  "Korkmuş Dora.png"
     },
     {
         "dosya":  "emoji16.png",
-        "ad":  "Korkmuş Moni.png"
+        "ad":  "Korkmuş Mimi.png"
     },
     {
         "dosya":  "emoji17.png",
-        "ad":  "Korkmuş Tofi.png"
+        "ad":  "Korkmuş Moni.png"
     },
     {
         "dosya":  "emoji18.png",
-        "ad":  "Küsmüş Tofi.png"
+        "ad":  "Korkmuş Tofi.png"
     },
     {
         "dosya":  "emoji19.png",
-        "ad":  "Mızmızlanan Tofi.png"
+        "ad":  "Küsmüş Tofi.png"
     },
     {
         "dosya":  "emoji20.png",
-        "ad":  "Mutlu Tofi.png"
+        "ad":  "Mızmızlanan Tofi.png"
     },
     {
         "dosya":  "emoji21.png",
-        "ad":  "Onaylayan Moni.png"
+        "ad":  "Mutlu Tofi.png"
     },
     {
         "dosya":  "emoji22.png",
-        "ad":  "Reddeden Moni.png"
+        "ad":  "Onaylayan Moni.png"
     },
     {
         "dosya":  "emoji23.png",
-        "ad":  "Reddeden Tofi.png"
+        "ad":  "Onaylayan Tofi.png"
     },
     {
         "dosya":  "emoji24.png",
-        "ad":  "Sevgi Dora.png"
+        "ad":  "Reddeden Moni.png"
     },
     {
         "dosya":  "emoji25.png",
-        "ad":  "Sevgi Mimi.png"
+        "ad":  "Reddeden Tofi.png"
     },
     {
         "dosya":  "emoji26.png",
-        "ad":  "Sevgi Moni.png"
+        "ad":  "Sevgi Dora.png"
     },
     {
         "dosya":  "emoji27.png",
-        "ad":  "Sevgi Tofi.png"
+        "ad":  "Sevgi Mimi.png"
     },
     {
         "dosya":  "emoji28.png",
-        "ad":  "Sinsi Planlı Moni.png"
+        "ad":  "Sevgi Moni.png"
     },
     {
         "dosya":  "emoji29.png",
-        "ad":  "Sinsi Planlı Tofi.png"
+        "ad":  "Sevgi Tofi.png"
     },
     {
         "dosya":  "emoji30.png",
-        "ad":  "Şapşal Moni.png"
+        "ad":  "Sinsi Planlı Moni.png"
     },
     {
         "dosya":  "emoji31.png",
-        "ad":  "Şapşal Tofi.png"
+        "ad":  "Sinsi Planlı Tofi.png"
     },
     {
         "dosya":  "emoji32.png",
-        "ad":  "Şaşırmış Dora.png"
+        "ad":  "Şapşal Moni.png"
     },
     {
         "dosya":  "emoji33.png",
-        "ad":  "Şaşırmış Mimi.png"
+        "ad":  "Şapşal Tofi.png"
     },
     {
         "dosya":  "emoji34.png",
-        "ad":  "Şaşırmış Moni.png"
+        "ad":  "Şaşırmış Dora.png"
     },
     {
         "dosya":  "emoji35.png",
-        "ad":  "Şaşırmış Tofi.png"
+        "ad":  "Şaşırmış Mimi.png"
     },
     {
         "dosya":  "emoji36.png",
-        "ad":  "ŞŞ Sessiz Ol Moni.png"
+        "ad":  "Şaşırmış Moni.png"
     },
     {
         "dosya":  "emoji37.png",
-        "ad":  "Takım Elbise Resmi Moni.png"
+        "ad":  "Şaşırmış Tofi.png"
     },
     {
         "dosya":  "emoji38.png",
-        "ad":  "Yalvaran Dora.png"
+        "ad":  "ŞŞ Sessiz Ol Moni.png"
     },
     {
         "dosya":  "emoji39.png",
-        "ad":  "Yalvaran Mimi.png"
+        "ad":  "ŞŞ Sessiz Ol Tofi.png"
     },
     {
         "dosya":  "emoji40.png",
-        "ad":  "Yalvaran Moni.png"
+        "ad":  "Takım Elbise Resmi Moni.png"
     },
     {
         "dosya":  "emoji41.png",
+        "ad":  "Takım Elbise Resmi Tofi.png"
+    },
+    {
+        "dosya":  "emoji42.png",
+        "ad":  "Yalvaran Dora.png"
+    },
+    {
+        "dosya":  "emoji43.png",
+        "ad":  "Yalvaran Mimi.png"
+    },
+    {
+        "dosya":  "emoji44.png",
+        "ad":  "Yalvaran Moni.png"
+    },
+    {
+        "dosya":  "emoji45.png",
         "ad":  "Yalvaran Tofi.png"
     }
 ]

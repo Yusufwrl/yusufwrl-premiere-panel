@@ -165,10 +165,19 @@ function olcekHesapla(png, sekansYukseklik, oranYukseklik) {
    yiyor ve model neredeyse hicbir sey secmiyordu (kullanicinin ilk testinde 1 emoji cikti).
    Buraya yeni bir "dikkatli ol" kurali eklerken bunu hatirla: hacmi kisan her kural
    dogrudan kullanicinin sikayetini besler. */
+/* ⚠ ISTEM KLASORLE BIRLIKTE ESKIYOR — IKI YERI GERCEGE GORE GUNCEL TUT (8 Agustos 2026):
+   1) "YUZUNDE belirgin bir duygu" DIYORDU. Kullanici artik yuz ifadesi OLMAYAN tepki
+      resimleri de ekliyor (Onaylayan, SS Sessiz Ol, Takim Elbise Resmi); model yalniz yuz
+      ifadesi aradigi icin bunlari secmiyordu. Cerceve TEPKI'ye genisletildi ve 5. kurala
+      somut ornekler kondu.
+   2) 7. kural "duygu kumesi KUCUK (genelde 5 tane)" DIYORDU. O sayi Tofi'de 19, Moni'de 17
+      oldu; modele "kume kucuk, tekrar normal" demek yeni eklenen resimlerin kullanilmamasina
+      yol aciyordu. Artik "konusana gore degisiyor, genis listeyi tamamen kullan" diyor.
+   IKISI DE GENISLETICI degisiklik — yukaridaki "hacmi kisma" kuralina aykiri degil. */
 const SISTEM_DUYGU = [
-  "Bir Minecraft/Roblox video kanalinin kurgucususun. Altyazi satirlarini okuyup, hangilerinde",
-  "konusanin YUZUNDE belirgin bir duygu olacagini isaretliyorsun; o anlara karakterin tepki",
-  "resmi konacak.",
+  "Bir Minecraft/Roblox video kanalinin kurgucususun. Altyazi satirlarini okuyup, hangilerine",
+  "konusanin TEPKI RESMI konacagini isaretliyorsun. Tepki bir yuz ifadesi olabilir (saskinlik,",
+  "korku, sevgi) ama bir HAREKET/POZ da olabilir (onaylama, susturma, ret).",
   "",
   "KURALLAR:",
   "1. Duygu, O SATIRI SOYLEYEN kisinin duygusudur. Baskasini korkutan bir cumle soyleyen kisi",
@@ -182,12 +191,17 @@ const SISTEM_DUYGU = [
   "   gorunmesi. (Panel de kendi tarafinda dengeliyor ama asil denge burada kuruluyor.)",
   "4. DUYGU BULMADIGIN SATIRI CEVABA HIC YAZMA. Yalnizca isaretledigin satirlari dondur.",
   "   (Butun satirlari yazmak cevabi gereksiz uzatip yarida kesilmesine yol aciyor.)",
-  "5. Yalnizca sana verilen duygu anahtarlarindan birini kullan. Baska kelime yazma.",
+  "5. Yalnizca sana verilen anahtarlardan birini kullan. Baska kelime yazma.",
+  "   ⚠ LISTE YALNIZ YUZ IFADESI DEGIL: onaylama, susturma, ret, poz/kostum gibi HAREKET",
+  "   anlatan secenekler de olabilir. Cumle o hareketi anlatiyorsa onu sec: 'tamam anlastik'",
+  "   -> onaylayan · 'susun biraz' -> sessiz ol · 'olmaz, yapmam' -> reddeden. Adindan ne",
+  "   oldugunu cikaramadigin bir secenegi ZORLAMA, o satiri baska bir anahtarla isaretle.",
   "6. Ses tonunu duymuyorsun, yalniz metni goruyorsun. Iki duygu arasinda kaldiysan EN YAKIN",
   "   olani SEC — 'emin degilim' diye atlama. Yalniz tamamen notr/bilgi veren satirlari",
   "   (koordinat okuma, 'tamam', 'evet', 'orada') bos birak.",
-  "7. Duygu kumesi KUCUK (genelde 5 tane). Ayni duygunun tekrar tekrar cikmasi NORMALDIR —",
-  "   cesitlilik olsun diye satir ATLAMA.",
+  "7. Secenek sayisi KONUSANA GORE DEGISIYOR (kiminde 6, kiminde 19). Ayni secenegin tekrar",
+  "   tekrar cikmasi NORMALDIR — cesitlilik olsun diye satir ATLAMA. Ama listesi GENIS olan",
+  "   bir konusmacida listenin tamamini kullan; hepsini iki uc taneye yigma.",
   "8. sira alanina SANA VERILEN NUMARAYI yaz — satirin kacinci sirada oldugunu degil.",
   "9. duygu2 alanina IKINCI EN UYGUN duyguyu yaz (duygu'dan FARKLI, ayni konusanin listesinden).",
   "   Panel ayni resmi cok yakinda tekrarlamamak icin gerekirse onu kullanir; uygun bir ikinci",
