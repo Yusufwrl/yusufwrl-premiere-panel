@@ -208,7 +208,9 @@ const SISTEM_DUYGU = [
   "   olabilir. Ayni secenegin tekrar tekrar cikmasi NORMALDIR — cesitlilik olsun diye satir",
   "   ATLAMA. Ama listesi UZUN olan bir konusmacida listenin TAMAMINI kullan, hepsini iki uc",
   "   taneye yigma; kisa listeli konusmacida tekrar kacinilmazdir, sorun degil.",
-  "8. sira alanina SANA VERILEN NUMARAYI yaz — satirin kacinci sirada oldugunu degil.",
+  "8. sira alanina satirin BASINDAKI numarayi yaz. Numaralar her istekte 1'den baslar;",
+  "   listede kacinci gordugunle ayni sey olmali. Bu numara yanlissa tepki resmi BASKA",
+   "   KISIYE gider.",
   "9. duygu2 alanini CIDDIYE AL — cesitliligi asil ORASI belirliyor. Ikinci en uygun duyguyu",
   "   yaz (duygu'dan FARKLI, ayni konusanin listesinden). Panel iki secenek de uyduğunda o",
   "   videoda DAHA AZ kullanilmis olani seciyor; yani iyi bir duygu2 yazarsan ayni resim",
@@ -287,15 +289,27 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
      ("Anthropic anahtarı geçersiz (401)", "istek sınırı aşıldı (429)"…) ama emoji tarafı
      onu yutup herkese aynı "Yapay zekâ cevabı alınamadı"yı gösteriyordu. Kullanıcı sebebi
      ancak Ayrıntılar log'unu açarsa görüyordu — teknik olmayan biri için o log yok demek. */
-  let atilan = 0, hataliParca = 0, karDisi = 0, sonHata = "";
+  let atilan = 0, hataliParca = 0, karDisi = 0, siraDisi = 0, sonHata = "";
   const parcaSayi = Math.ceil(cumleler.length / PARCA);
 
   for (let p = 0; p < parcaSayi; p++) {
     const dilim = cumleler.slice(p * PARCA, (p + 1) * PARCA);
     /* Konusan KARAKTER ANAHTARIYLA yazilir (tofi/dora), gorunen adla degil: yukaridaki
        karakter-duygu listesi de ayni anahtarla yazildi, model ikisini ancak boyle eslestirir. */
-    const satirlar = dilim.map((c) =>
-      c.sira + " [" + ((c.kar && c.kar.key) ? c.kar.key : asciiAnahtar(c.ad)) + "] " +
+    /* ⚠ NUMARALAR PARÇA İÇİNDE 1'DEN BAŞLAR — GLOBAL NUMARA GÖNDERME.
+       BU, EMOJİLERİ YANLIŞ KİŞİYE KOYAN HATANIN TA KENDİSİYDİ (ParsMazi, 9 Ağustos 2026:
+       "Moni'de hâlâ senin emojileri Moni'ye, Moni'ninkileri sana ekliyor · Moni kısmı
+       tamamen rastgele, Mimi'nin sesine Moni'yi eklemiş").
+       Eskiden satırlar GLOBAL sıra numarasıyla yazılıyordu: 2. parçada "251 [moni] …".
+       Model 250 satırlık bir liste görüp onu 1'den numaralamak istediğinde (en doğal
+       davranış) cevabındaki "1" panelde 1. cümleye denk geliyordu — YANİ BAŞKA PARÇANIN,
+       BAŞKA KONUŞMACININ cümlesine. Birinci parça doğru, sonraki parçalar rastgele çıkıyordu;
+       uzun videoda (2149 altyazı = birden çok parça) bu her seferinde oluyor.
+       Panelde hiçbir doğrulama yoktu: gelen numara doğrudan indekse yazılıyordu.
+       Artık her parça KENDİ İÇİNDE 1..N numaralanıyor (modelin doğal sayması ile aynı) ve
+       cevap `dilim[numara-1]` ile geri eşleniyor; aralık dışı numara ATILIP SAYILIYOR. */
+    const satirlar = dilim.map((c, ix) =>
+      (ix + 1) + " [" + ((c.kar && c.kar.key) ? c.kar.key : asciiAnahtar(c.ad)) + "] " +
       String(c.metin || "").slice(0, 160));
     const hedef = Math.max(1, Math.round(dilim.length * oran));
 
@@ -347,30 +361,31 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
 
     /* MODEL LISTE DISINA CIKARSA AT. Sema enum kullaniyor ama semasiz geri dusulmus
        olabilir; bilinmeyen bir duygu adi icin dosya yoktur ve sessizce bos klip olurdu. */
-    /* Bu parcadaki satirlarin karakterleri — asagidaki "o karakterde var mi" kontrolu icin. */
-    const parcaKar = {};
-    dilim.forEach((c) => { parcaKar[c.sira] = (c.kar && c.kar.key) ? c.kar.key : asciiAnahtar(c.ad); });
     j.secimler.forEach((s) => {
+      /* ⚠ NUMARA PARÇA İÇİNDE VE ARALIKTA OLMAK ZORUNDA — DOĞRULAMASIZ KABUL YASAK.
+         Emojinin yanlış kişiye gitmesinin sebebi tam olarak buydu: gelen numara hiç
+         denetlenmeden indekse yazılıyordu. Aralık dışı numara artık ATILIR ve SAYILIR;
+         cevap bozuksa emoji az çıkar ama YANLIŞ KİŞİYE gitmez. */
+      const ix = parseInt(s.sira, 10);
+      if (!(ix >= 1 && ix <= dilim.length)) { siraDisi++; return; }
+      const kayit = dilim[ix - 1];
+      const kk = (kayit.kar && kayit.kar.key) ? kayit.kar.key : asciiAnahtar(kayit.ad);
+
       const d = asciiAnahtar(s.duygu || "");
       if (!d || d === "yok") return;
       if (!gecerli[d]) { atilan++; return; }
       /* ⚠ DUYGU O KARAKTERDE GERCEKTEN VAR MI? Havuz karakter basina degistigi icin model
          Dora'ya "mutlu" verebiliyor ve o dosya YOK. Panel bunu sonradan "dosya yok" diye
          atlardi ama sebebi gorunmezdi; burada yakalanip AYRI sayiliyor. */
-      if (kd) {
-        const kk = parcaKar[s.sira];
-        if (kk && kd[kk] && kd[kk].indexOf(d) < 0) { karDisi++; return; }
-      }
+      if (kd && kk && kd[kk] && kd[kk].indexOf(d) < 0) { karDisi++; return; }
       /* 2. TERCIH AYNI KAPILARDAN GECER: taninmiyorsa, "yok" ise, birinciyle AYNI ise ya da
          o karakterde bulunmuyorsa BOSALTILIR. Yoksa panel var olmayan bir dosyayi arar ve
          emoji "dosya yok" diye sessizce duser — cesitlilik kurali da bosa cikar. */
       let d2 = asciiAnahtar(s.duygu2 || "");
       if (!d2 || d2 === "yok" || d2 === d || !gecerli[d2]) d2 = "";
-      if (d2 && kd) {
-        const kk2 = parcaKar[s.sira];
-        if (kk2 && kd[kk2] && kd[kk2].indexOf(d2) < 0) d2 = "";
-      }
-      secimler.push({ sira: s.sira, duygu: d, duygu2: d2 });
+      if (d2 && kd && kk && kd[kk] && kd[kk].indexOf(d2) < 0) d2 = "";
+      /* GERÇEK (global) sıra numarası buradan yazılır — modelin verdiği yerel numaradan DEĞİL. */
+      secimler.push({ sira: kayit.sira, duygu: d, duygu2: d2 });
     });
   }
 
@@ -378,6 +393,11 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
   /* Model o karakterde OLMAYAN bir duygu sectiyse sebep gorunur olsun: "az emoji cikti"
      sikayetinin kaynagi bu olabilir ve cozumu kod degil, eksik resmi cizmek. */
   if (karDisi) log("[emoji] " + karDisi + " seçim o karakterde olmayan duyguydu, atıldı.");
+  /* ⚠ ARALIK DIŞI NUMARA = MODEL SATIRLARI YANLIŞ NUMARALADI. Eskiden bu durum hiç
+     görülmüyordu (numara doğrudan indekse yazılıyordu) ve emoji BAŞKA KONUŞMACIYA
+     gidiyordu. Artık atılıyor ve sayılıyor — bu satır görünürse cevap güvenilmez
+     demektir, sebebi kullanıcıya söylenmeli. */
+  if (siraDisi) log("[emoji] " + siraDisi + " cevap satırı aralık dışı numara taşıyordu, atıldı.");
   /* SEBEBİ GÖSTER. vurucu.js'in ürettiği mesaj zaten ne yapılacağını söylüyor
      (anahtar geçersiz / kredi bitti / sınır aşıldı); onu yutup genel bir cümle göstermek
      kullanıcıyı çaresiz bırakıyordu. */
