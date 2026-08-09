@@ -48,7 +48,10 @@ Write-Output "Kopyalaniyor (birkac dakika surebilir)..."
 # robocopy: buyuk dosyalarda Copy-Item'dan cok daha hizli ve surdurulebilir.
 # /XD = dislanan klasorler (ad bazli, hangi derinlikte olursa olsun)
 # /NFL /NDL = dosya/klasor listesini basma (9 GB'lik ciktiyi konsola dokmesin)
-$dislanan = @("work", "faster-whisper-medium", "reverb-diarization-v2", ".cache")
+# ayna/eski/.panel-emoji.json = PANELIN URETTIGI ONBELLEK. Teslim RAR'ina girerse arkadasa
+#   senin ayna kopyalarin + senin ESKI resimlerin + senin dosya boyutlarini iceren iz dosyan
+#   gider. Kirilmiyor (tara() alt klasorleri atliyor) ama gereksiz ve yaniltici.
+$dislanan = @("work", "faster-whisper-medium", "reverb-diarization-v2", ".cache", "ayna", "eski")
 $argv = @($Kaynak, $Hedef, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP", "/XD") + $dislanan
 & robocopy @argv | Out-Null
 

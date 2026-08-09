@@ -87,6 +87,22 @@
             <div class="tc-arrow">›</div>
           </button>
 
+          <!-- EMOJİ KENDİ EKRANINDA (kullanıcı isteği, 9 Ağustos 2026: "emoji kısmını altyazı
+               kartından ayır, bir ayrı görelim"). Sebep sadece yer değil: emoji hangi sesin
+               kime ait olduğuna bağlı ve bu bilgi Altyazı ekranındaki isim kutularına
+               gömülüydü — yanlış eşleşme ancak videoyu izlerken fark ediliyordu. Burada
+               kanal→karakter listesi AÇIKÇA görünüyor ve basmadan önce denetleniyor. -->
+          <button class="tool-card" data-view="emoji">
+            <div class="tc-icon grad-c">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8.5 15a4 4 0 0 0 7 0"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Emoji</div>
+              <div class="tc-desc">Konuşana göre tepki resmi — kimin hangi kanalda olduğunu sen onaylarsın</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+
           <!-- Ayarlar: üretim ekranından çıkarılan, nadiren dokunulan şeyler burada. -->
           <button class="tool-card" data-view="ayarlar">
             <div class="tc-icon grad-d">
@@ -250,33 +266,10 @@
               </button>
               <button class="btn-ghost" id="btnExportSrt" title="Altyazı dosyası (.srt)">SRT</button>
               <button class="btn-ghost" id="btnExportTxt" title="Düz metin (.txt)">TXT</button>
-              <!-- EMOJİ: altyazı ÜRETİLDİKTEN sonra anlamlı (duygu altyazı metninden seçiliyor),
-                   o yüzden sonuç satırında. Boş bir video kanalı ister; yoksa uyarır. -->
-              <!-- Emoji Ekle + sıklık seçici BİRLİKTE kaysın (Bölümler/aralık ikilisiyle aynı desen). -->
-              <div class="chap-group">
-                <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar (yapay zekâ seçer). Tofi ve Moni sağ alt köşede, diğer karakterler sol alt köşede (resimleri ekrana bakacak şekilde yatay çevrilir). Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
-                <!-- SIKLIK SEÇİCİSİ KALDIRILDI (kullanıcı isteği, 8 Ağustos 2026): "az/orta/bol
-                     seçeneğine gerek yok, her zaman bol olsun, hatta bolden biraz fazla".
-                     Değer artık js/app.js → EMOJI_SIKLIK = 0.75 (eski "Bol" 0.60'tı).
-                     ⚠ GERİ EKLEME: ölçüldü, 0.85'e çıkmak TEK BİR emoji bile eklemiyor —
-                     tavanı yapay zekâ değil çakışma freni belirliyor (emoji cümle boyunca
-                     ekranda kalıyor). Ayrıntı EMOJI_SIKLIK'in yanındaki notta. -->
-                <!-- EMOJİ ANİMASYONU: yerleştirmeden hemen sonra, emoji kanalındaki BÜTÜN
-                     kliplere uygulanır. Kullanıcının "Emoji Sağ Taraf" preset'i tam bunun
-                     için öğretilmiş (Transform ile pop giriş + aşağı kayarak çıkış).
-                     ⚠ SEÇENEK ADI "preset yok" DEĞİL "animasyon yok": kullanıcı bu seçiciyi
-                     TARAF seçici sanıyordu ("Tofi/Moni sağda dedik, bu ne?" — 8 Ağustos 2026).
-                     Taraf artık tümüyle otomatik (bkz. EMOJI_SAG_KARAKTER); burada seçilen
-                     şey yalnızca emojinin ekrana GİRİŞ animasyonu ve iki taraf için de aynı
-                     animasyon kullanılır — ölçüldü: preset'in yatay bileşeni yok, yani
-                     "sağ" ve "sol" sürümü birbirinin aynısı olurdu. -->
-                <div class="select chap-select">
-                  <select id="emojiPreset" title="Emojinin GİRİŞ ANİMASYONU (pop). Sağ/sol tarafı panel kendisi seçiyor — Tofi ve Moni sağda, diğerleri solda. Burada seçtiğin animasyon iki tarafa da uygulanır.">
-                    <option value="">animasyon yok</option>
-                  </select>
-                </div>
-              </div>
-              <button class="btn-ghost" id="btnEmojiSil" title="Panelin koyduğu emojileri siler">Emojileri Sil</button>
+              <!-- ⚠ EMOJİ DÜĞMELERİ BURADAN KALDIRILDI → kendi ekranı (viewEmoji).
+                   Emoji hangi sesin kime ait olduğuna bağlı; o bilgi burada görünmüyordu
+                   ve yanlış eşleşme ancak videoyu izlerken fark ediliyordu. Yeni ekranda
+                   kanal→karakter listesi açıkça duruyor. -->
               <!-- "Bölümler" ile aralığı birlikte tut: satır dar panelde alt satıra kayarsa ikisi birlikte kaysın.
                    <span> DEĞİL <div>: içinde blok seviyesinde bir <div class="select"> var, <span> yalnızca
                    metin-içi içerik alabilir (geçersiz HTML). Görünüm değişmez, .chap-group zaten inline-flex. -->
@@ -297,19 +290,14 @@
                 </div>
               </div>
             </div>
-            <!-- Emoji işinin kendi durum satırı: sonuç mesajı Preset kartındaki yazıya
-                 gitmesin (o başka bir ekranda, kullanıcı göremez). -->
-            <span class="dict-status" id="emojiDurum" style="display:block;margin-top:8px"></span>
           </div>
-          <!-- KARAKTER EŞLEŞTİRME SATIRLARI. Yalnız emoji klasöründe karşılığı OLMAYAN kanal
-               adları için doldurulur; hepsi eşleşiyorsa burası boş ve gizli kalır (#trackStilBox'ın
-               7 kanallı kadroda ekranı 7 boş seçiciyle doldurma hatası tekrarlanmasın).
-               Seçim ASCII ADLA hatırlanır (emoji.esle.<ad>), KANAL NUMARASIYLA DEĞİL: kanal
-               numarasının anlamı kadroya göre değişiyor (AutoCut'ta acCh → acCh2_ göçünün sebebi
-               buydu) ve numarayla saklarsak sonraki videoda A4 başka biri olur, panel SESSİZCE
-               yanlış karakterin yüzünü koyar.
-               .result-head'in DIŞINDA: o kutu flex ve içine konan seçici satırları sağa itiliyor. -->
-          <div id="emojiEsleBox" hidden style="margin:0 0 10px"></div>
+          <!-- ⚠ EMOJİ DÜĞMELERİ BURADAN TAŞINDI → kendi ekranına (viewEmoji, 9 Ağustos 2026).
+               Sebep sadece yer darlığı değildi: emoji hangi sesin kime ait olduğuna bağlı ve
+               o bilgi buradaki isim kutularına gömülüydü; yanlış eşleşme ancak videoyu
+               izlerken fark ediliyordu (ParsMazi'de tam olarak bu oldu). Yeni ekranda
+               kanal→karakter listesi açıkça görünüyor ve basmadan önce denetleniyor.
+               #emojiDurum · #emojiPreset · #emojiEsleBox · btnEmojiEkle · btnEmojiSil
+               artık viewEmoji içinde — id'ler AYNI kaldı, emoji kodunda tek satır değişmedi. -->
           <p class="note" id="trHint" style="margin:0 0 10px">Timeline'a eklemeden önce satırlara tıklayıp metni düzeltebilirsin. Konuşan kişi yanlışsa soldaki noktaya tıkla.</p>
           <div class="transcript" id="transcript"></div>
         </div>
@@ -332,6 +320,45 @@
            Timeline'da SEÇİLİ olana, öğretilmiş preset'i uygular.
            Kartlara SAĞ TIK → yeniden adlandır / kaldır. Sıralama HER ZAMAN alfabetik
            (Türkçe) — kullanıcı kartın yerini ezberliyor, sıra oynamamalı. -->
+      <!-- ================= EMOJİ ================= -->
+      <div class="view" id="viewEmoji" hidden>
+        <div class="card">
+          <div class="card-title">Emoji</div>
+          <p class="note" style="margin:0 0 10px">
+            Konuşanın duygusuna göre köşeye tepki resmi koyar. Duyguyu <b>yapay zekâ</b> altyazı
+            metninden seçer; <b>kimin konuştuğunu</b> ise aşağıdaki liste belirler — tahmin yok.
+            <b>Tofi ve Moni sağ</b> alt köşede, diğerleri <b>sol</b> alt köşede (resimleri ekrana
+            baksın diye yatay çevrilir). <b>A1'deki kişi</b> (videoyu çeken) adı ne olursa olsun
+            her zaman sağda ve çevrilmez.
+          </p>
+          <p class="note" style="margin:0 0 10px">Önce Altyazı ekranında altyazıyı üret — emoji onun metninden seçiliyor.</p>
+
+          <!-- KANAL → KARAKTER: ekranın ASIL işi. Her ses kanalının karşısında kimin
+               konuştuğu yazıyor; yanlışsa buradan düzeltilir. Seçim SEKANSA ÖZEL saklanır
+               (kanal numarasının anlamı kadroya göre değişiyor — kalıcı saklamak bir sonraki
+               videoda sessizce yanlış yüzü koyardı). -->
+          <div class="card-title" style="font-size:12px;margin-top:4px">Bu videoda kim hangi kanalda?</div>
+          <div id="emojiKanalKar"></div>
+          <span class="dict-status" id="emojiKanalDurum" style="display:block;margin-top:8px"></span>
+
+          <div class="dict-actions" style="margin-top:12px">
+            <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar. Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
+            <!-- ANİMASYON: tarafla ilgisi YOK, emojinin ekrana geliş hareketini seçer. -->
+            <div class="select chap-select">
+              <select id="emojiPreset" title="Emojinin GİRİŞ ANİMASYONU (pop). Sağ/sol tarafı panel kendisi seçiyor.">
+                <option value="">animasyon yok</option>
+              </select>
+            </div>
+            <button class="btn-ghost" id="btnEmojiSil" title="Panelin koyduğu emojileri siler">Emojileri Sil</button>
+            <button class="btn-ghost" id="btnEmojiYenile" title="Kanal listesini ve emoji klasörünü yeniden oku">Yenile</button>
+          </div>
+          <span class="dict-status" id="emojiDurum" style="display:block;margin-top:8px"></span>
+
+          <!-- Klasörde karşılığı OLMAYAN adlar için (yalnız gerektiğinde dolar). -->
+          <div id="emojiEsleBox" hidden style="margin:10px 0 0"></div>
+        </div>
+      </div>
+
       <div class="view" id="viewPreset" hidden>
         <div class="card">
           <div class="card-title">Preset</div>
@@ -408,8 +435,8 @@
                bir şeyi ikinci bir ekranda tekrar sormak kafa karıştırıyordu. -->
           <!-- TARAF KURALI BURADA YAZILI: kullanıcı "neden bu solda?" diye sormadan görsün.
                Liste js/app.js → EMOJI_SAG_KARAKTER; kadro değişirse orası tek satır. -->
-          <p class="note" style="margin:8px 0 0"><b>Taraf otomatik:</b> Tofi ve Moni sağ alt köşede, diğer karakterler (Dora, Mimi…) sol alt köşede — soldakilerin resmi ekrana baksın diye <b>yatay çevrilir</b> ve çevrilmiş kopyalar emoji klasöründeki <code>ayna</code> alt klasörüne bir kez üretilir. Seçmen gereken bir şey yok. Yanındaki <b>animasyon</b> menüsü tarafla ilgili değil: emojinin ekrana geliş hareketini (pop) seçer ve iki tarafa da aynısı uygulanır.</p>
-          <p class="note" style="margin:8px 0 0">Hangi karakterin hangi emojiyi alacağı <b>kanal isimlerinden</b> gelir: Altyazı ekranındaki kanal listesinde her kanala adını yaz (<b>A1 dahil</b> — en üstteki kutu), dosya adıyla aynı olsun. Bir ad klasörde yoksa <b>Emoji Ekle</b>'ye bastığında düğmelerin altında “o ad → hangi karakter” diye tek satır çıkar; bir kez seçersin, hatırlanır. Emojisi hiç olmayan biri için “emoji yok” de.</p>
+          <p class="note" style="margin:8px 0 0"><b>Taraf otomatik:</b> Tofi, Moni ve A1'deki kişi sağ alt köşede, diğer karakterler (Dora, Mimi…) sol alt köşede — soldakilerin resmi ekrana baksın diye <b>yatay çevrilir</b> ve çevrilmiş kopyalar emoji klasöründeki <code>ayna</code> alt klasörüne bir kez üretilir. Seçmen gereken bir şey yok. Yanındaki <b>animasyon</b> menüsü tarafla ilgili değil: emojinin ekrana geliş hareketini (pop) seçer ve iki tarafa da aynısı uygulanır.</p>
+          <p class="note" style="margin:8px 0 0">Hangi karakterin hangi emojiyi alacağını artık <b>Emoji ekranından</b> seçiyorsun (ana ekran → Emoji): orada her ses kanalının karşısında bir karakter menüsü var. Varsayılan yine kanal adından gelir; menüden seçersen o kazanır. Emojisi hiç olmayan biri için “emoji yok” de. Burası yalnızca <b>klasör ayarı</b> ve ölçüm için.</p>
           <!-- KLASÖR DURUMU: panelin GÖRDÜĞÜ resim sayısı ile PAKETTEKİ sayı yan yana.
                ⚠ Bu satır olmadan "güncelleme geldi ama yeni emojiler yok" durumu görünmezdi:
                panel emojileri motor kökünden türettiği klasöre kuruyor, ama okuduğu klasör

@@ -251,7 +251,7 @@
     for (var i = 0; i < all.length; i++) { all[i].classList.remove("active"); all[i].setAttribute("hidden", ""); }
     var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
            : name === "senkron" ? "viewSenkron" : name === "ayarlar" ? "viewAyarlar"
-           : name === "preset" ? "viewPreset" : "viewHome";
+           : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
@@ -267,6 +267,11 @@
     if (name === "autocut") {
       try { var pAc = acKanallariTara(true); if (pAc && pAc["catch"]) pAc["catch"](function () {}); } catch (e) {}
     }
+    /* EMOJİ EKRANI HER AÇILIŞTA TAZELENİR: kanal listesi, isimler ve emoji klasörü arada
+       değişmiş olabilir (kullanıcı Altyazı'da isim yazar, Senkron'da kanal ekler). Bayat bir
+       liste göstermek, bu ekranın var olma sebebini — "kimin hangi kanalda olduğunu GÖR" —
+       ortadan kaldırırdı. */
+    if (name === "emoji") { try { emojiKanalKarCiz(); } catch (e) {} }
   }
   var toolCards = document.querySelectorAll(".tool-card");
   for (var tcx = 0; tcx < toolCards.length; tcx++) toolCards[tcx].addEventListener("click", function () { goView(this.dataset.view); });
@@ -756,7 +761,20 @@
       }
     } catch (e1) { logLine("Hazır preset kurulamadı: " + (e1.message || e1)); }
 
-    // 2) Track Style'lar — yalnız o adda dosya YOKSA
+    /* 2) TRACK STYLE'LAR — KENDİ FONKSİYONUNDA.
+       ⚠ İÇİNDEKİ `return`'LER EMOJİ KURULUMUNU ÖLDÜRÜYORDU. Bu blok üç yerde `return`
+       ediyor (stiller.json yok · liste boş · Belgeler klasörü bulunamadı) ve hepsi
+       varsayilanlariKur'un TAMAMINDAN çıkıyordu — yani 3. adım (46 emoji PNG'sinin kurulumu)
+       hiç çalışmıyordu. stilKlasoruBul yalnız dört adayı deniyor (Documents · Belgeler ·
+       OneDrive\Documents · OneDrive\Belgeler); Belgeler klasörü başka bir sürücüye
+       taşınmış ya da iş/okul OneDrive'ı olan bir makinede BOŞ dönüyor.
+       Sonuç: o kullanıcıda emojiler HİÇ kurulmuyordu ve tek iz katlanmış log'daki
+       "Track Style klasörü bulunamadı" satırıydı. İkinci kullanıcının "emoji gelmedi"
+       şikâyetinin en olası sebebi buydu.
+       Fonksiyona alınca `return` yalnız STİL adımından çıkıyor; emoji adımı her hâlükârda
+       çalışıyor. ⚠ Buraya yeni bir adım eklerken aynı tuzağa düşme: adımlar birbirinden
+       BAĞIMSIZ olmalı. */
+    (function stilleriKur() {
     try {
       var manYol = path.join(kok, "stiller.json");
       if (!fs.existsSync(manYol)) return;
@@ -782,6 +800,7 @@
                                 " — Premiere'de görünmesi için Altyazı ekranındaki " +
                                 "“Stilleri projeye ekle” düğmesine bas (her yeni projede bir kez).");
     } catch (e2) { logLine("Track Style kurulamadı: " + (e2.message || e2)); }
+    })();
 
     /* 3) EMOJİ RESİMLERİ — motor kökü altına, yalnız o dosya YOKSA.
        Paket içinde adlar ASCII (emoji01.png…), gerçek adlar emoji-paketi.json'da: zip'e
@@ -802,7 +821,10 @@
         var eHedef = String(lsGet("emoji.klasor", "")).trim() || emojiKlasorVarsayilan();
         if (eList && eList.length && eHedef) {
           pipeline.ensureDir(eHedef);
-          var eKondu = 0, eVar = 0, eYeni = 0, eKorunan = 0, eYedek = 0, eYeniAd = [];
+          /* eBasarisiz: OneDrive/antivirüs kilidi, salt okunur dosya, disk dolu… Eskiden
+             `catch (eE) {}` bunları SAYISIZ yutuyordu: 46 resmin 6'sı kurulamasa panel yine
+             "kuruldu (40)" diyordu ve o 6 tepki yapay zekâ listesine hiç girmiyordu. */
+          var eKondu = 0, eVar = 0, eYeni = 0, eKorunan = 0, eYedek = 0, eBasarisiz = 0, eYeniAd = [];
           /* ⚠ "DOSYA VARSA HİÇ DOKUNMA" KURALI BİR GÜNCELLEMEYİ SESSİZCE YUTUYORDU.
              Kural yeni AD eklemek için doğruydu (kullanıcının kendi resimlerini ezmesin) ama
              AYNI ADLA DÜZELTİLMİŞ bir resmi kimseye ulaştırmıyordu. Gerçekte oldu: kullanıcı
@@ -858,7 +880,7 @@
               fs.writeFileSync(dst, fs.readFileSync(src));
               iz[x.ad] = sBoy; eYeni++;
               if (eYeniAd.length < 8) eYeniAd.push(x.ad.replace(/\.png$/i, ""));
-            } catch (eE) {}
+            } catch (eE) { eBasarisiz++; }
           });
           /* ── PAKETTEN ÇIKARILMIŞ DOSYALARI TOPLA (yeniden adlandırma artığı) ──
              ⚠ SESSİZ HAYALET DUYGU SORUNU: kullanıcı bir emojiyi yeniden adlandırınca paket
@@ -898,6 +920,8 @@
                              (eYeni > eYeniAd.length ? " …" : "") + " — düzeltilmiş hâlleri kuruldu." +
                              (eYedek ? (" Eskileri " + path.join(eHedef, "eski") + " klasörüne alındı.") : ""));
           if (eKorunan) logLine("Emoji: " + eKorunan + " resim elle değiştirilmiş, korundu (paketteki hâli yazılmadı).");
+          if (eBasarisiz) logLine("⚠ Emoji: " + eBasarisiz + " resim KURULAMADI (klasör yazılamıyor olabilir — " +
+                                  "OneDrive kilidi, antivirüs ya da salt okunur klasör). Bu tepkiler videoda hiç çıkmaz.");
           /* Ayarı da doldur: kullanıcı klasörü elle bulmak zorunda kalmasın. Kayıtlı bir
              seçim VARSA dokunulmaz — kendi klasörünü seçmiş olabilir. */
           if (eKondu && !lsGet("emoji.klasor", "")) lsSet("emoji.klasor", eHedef);
@@ -1610,13 +1634,134 @@
       : ("emoji.esle." + anahtar);
   }
 
+  /* ── KANAL → KARAKTER: AÇIK, GÖRÜNÜR, SEKANSA ÖZEL ──
+     (kullanıcı isteği, 9 Ağustos 2026: "karakterleri sese göre seçmiş olalım, ona göre doğru
+     eklesin timeline'a — yoksa görseldeki gibi yanlışlar oluyor".)
+     Varsayılan hâlâ KANAL ADINDAN türetilir (Altyazı ekranındaki isim kutuları); bu liste
+     onu EZEBİLİR ve asıl değeri şu: eşleşme artık basmadan ÖNCE ekranda görünüyor.
+     ⚠ ANAHTAR SEKANSA ÖZEL. Kanal numarasının anlamı kadroya göre değişiyor (A4 bir videoda
+     Sage, ötekinde Niko) — kalıcı saklamak sonraki videoda SESSİZCE yanlış yüzü koyardı.
+     Aynı ders panelde iki kez alındı: AutoCut'ta acCh → acCh2_ göçü ve emoji eşleşmesinin
+     numara yerine ADLA saklanması. */
+  function emojiKanalKarAnahtar(idx) { return "emoji.kanalKar." + sekansKimlik() + "." + idx; }
+  function emojiKanalKarOku(idx) { return String(lsGet(emojiKanalKarAnahtar(idx), "")); }
+
+  /* Ekranda listelenecek kanallar: A1 her zaman + yazıya dökülen kanallar.
+     Dönüş: [{idx, ad, klip}] — idx 0 = A1. */
+  function emojiKanalListesi() {
+    /* ALTYAZI SAYISI DA TAŞINIR — asıl merak edilen bu. Klip sayısı "bu kanalda ses var mı"
+       der; emoji ise CÜMLEDEN çıkıyor, yani yazıya dökülmemiş bir kanal klip dolu olsa bile
+       hiç emoji alamaz. Sıfır görünce kullanıcı sebebi anında anlıyor ("bu kanalı yazıya
+       dökmemişim") ve boşuna karakter seçmeye çalışmıyor.
+       Tek kaynak (A1/A2) modunda cue'lar singleCues'ta durur — o dal da sayılır. */
+    function say(cues) { return (cues && cues.length) ? cues.length : 0; }
+    var tekKaynak = (state.genMode !== "channels");
+    var a1Say = tekKaynak ? (state.track === "1" ? 0 : say(state.singleCues)) : say(state.a1Cues);
+    var out = [{ idx: 0, ad: a1Adi(), klip: -1, cue: a1Say }];
+    try {
+      if (tekKaynak && state.track === "1") {
+        out.push({ idx: 1, ad: String(lsGet("kanalAd.1", "")).trim(), klip: -1, cue: say(state.singleCues) });
+      } else {
+        aktifKanallar().forEach(function (ch) {
+          out.push({ idx: ch.idx, ad: kanalAdi(ch),
+                     klip: (ch.clips != null ? ch.clips : -1), cue: say(ch.cues) });
+        });
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  function emojiKanalKarCiz() {
+    var box = $("emojiKanalKar"); if (!box) return;
+    var durum = $("emojiKanalDurum");
+    function dyaz(m, renk) { if (durum) { durum.textContent = m || ""; durum.style.color = renk || "var(--muted)"; } }
+    box.innerHTML = "";
+    if (!EMJ) { dyaz("emoji.js yüklenemedi — paneli yeniden kur.", "var(--bad)"); return; }
+    var kok = String(lsGet("emoji.klasor", "")).trim() || emojiKlasorVarsayilan();
+    var tarama = EMJ.tara(kok);
+    if (tarama.hata) { dyaz(tarama.hata + "  (Ayarlar → Duygu Emojileri)", "var(--bad)"); return; }
+
+    var kanallar = emojiKanalListesi();
+    /* Kanal listesi yalnız "Herkes" modunda dolar; tek kaynakta A1 satırı yine görünür ve
+       kullanıcı oradan seçebilir — "adını yaz ama kutu başka ekranda" çıkmazı olmasın. */
+    var karakterler = tarama.karakterler.slice().sort(function (a, b) {
+      return String(a.ad).localeCompare(String(b.ad), "tr");
+    });
+    var cozulen = [];
+    kanallar.forEach(function (k) {
+      var row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap";
+      var et = document.createElement("span");
+      et.className = "dict-status";
+      et.style.cssText = "min-width:190px";
+      et.textContent = "A" + (k.idx + 1) + (k.idx === 0 ? " (senin mikrofonun)" : "") +
+                       (k.ad ? (" · " + k.ad) : " · (isimsiz)") +
+                       (k.cue > 0 ? (" · " + k.cue + " altyazı")
+                                  : (k.klip >= 0 ? (" · " + k.klip + " klip · ALTYAZI YOK") : " · altyazı yok"));
+    /* Altyazısı olmayan kanal SOLGUN gösterilir: emoji cümleden çıkıyor, o kanal karakter
+       seçilse bile hiç emoji alamaz. Renk, kullanıcının boşuna uğraşmasını engelliyor. */
+      if (!(k.cue > 0)) et.style.opacity = "0.55";
+      var sar = document.createElement("div"); sar.className = "select";
+      var sel = document.createElement("select");
+      function opt(v, t) { var o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); }
+      /* OTOMATİK = kanal adından türet (eski davranış). Kullanıcı bir şey seçmediyse bu. */
+      var kendi = emojiKarakterAra(tarama, EMJ.asciiAnahtar(k.ad || ""));
+      opt("", "otomatik" + (kendi ? (" → " + kendi.ad) : " → eşleşmedi"));
+      karakterler.forEach(function (c) { opt(c.key, c.ad); });
+      opt("__yok__", "emoji yok");
+      /* ⚠ KAYITLI SEÇİM ARTIK LİSTEDE YOKSA MENÜ BOŞ GÖRÜNÜYORDU. Kullanıcı klasörden bir
+         karakteri kaldırınca <option> da kalkıyor, `sel.value = <yok olan>` selectedIndex'i
+         -1 yapıyor ve kutu tamamen boş çiziliyordu — neyin uygulanacağı ekrandan okunamıyor.
+         Dahası kayıt localStorage'da KALIYOR: resimler sonradan geri gelirse (ya da
+         "Emojileri Yeniden Kur" paketten getirirse) unutulmuş seçim sessizce diriliyordu.
+         Şimdi geçersiz kayıt TEMİZLENİP "otomatik"e düşülüyor. */
+      var kayitliSecim = emojiKanalKarOku(k.idx);
+      if (kayitliSecim && kayitliSecim !== "__yok__" && !emojiKarakterAra(tarama, kayitliSecim)) {
+        logLine("Emoji: A" + (k.idx + 1) + " için kayıtlı karakter (" + kayitliSecim +
+                ") klasörde yok — seçim temizlendi, otomatiğe düşüldü.");
+        lsSet(emojiKanalKarAnahtar(k.idx), "");
+        kayitliSecim = "";
+      }
+      sel.value = kayitliSecim;
+      (function (idx) {
+        sel.addEventListener("change", function () {
+          lsSet(emojiKanalKarAnahtar(idx), sel.value);
+          emojiKanalKarCiz();      // özet satırı hemen tazelensin
+        });
+      })(k.idx);
+      sar.appendChild(sel);
+      row.appendChild(et); row.appendChild(sar);
+      box.appendChild(row);
+
+      var secim = sel.value;
+      var son = secim === "__yok__" ? null : (secim ? emojiKarakterAra(tarama, secim) : kendi);
+      cozulen.push({ idx: k.idx, ad: k.ad, kar: son, yok: secim === "__yok__" });
+    });
+
+    /* ÖZET: kullanıcı basmadan önce tek bakışta görsün. Eşleşmeyen varsa SARI. */
+    var eksik = cozulen.filter(function (x) { return !x.kar && !x.yok; });
+    var satir = cozulen.map(function (x) {
+      return "A" + (x.idx + 1) + "→" + (x.yok ? "yok" : (x.kar ? x.kar.ad : "?"));
+    }).join(" · ");
+    if (eksik.length) {
+      dyaz("⚠ " + satir + "  —  " + eksik.length + " kanalın karakteri seçilmedi; " +
+           "yanındaki menüden seç (ya da “emoji yok” de).", "var(--warn)");
+    } else {
+      dyaz("✓ " + satir + "  ·  klasörde " + tarama.dosyalar.length + " resim, " +
+           tarama.karakterler.length + " karakter.", "var(--muted)");
+    }
+  }
+
   function emojiCumleleriTopla(tarama) {
-    var liste = [], elle = [], kisaAtilan = 0;
+    /* yokSay: "emoji yok" denen kanal sayısı. Sayılmazsa, bütün kanallar işaretliyken panel
+       "Önce altyazı oluştur" diyordu — ekranda 800 altyazı dururken 25 dakikalık GPU işini
+       tekrar etmeye yolluyordu. */
+    var liste = [], elle = [], kisaAtilan = 0, yokSay = 0;
 
     /* a1 = bu kanal SENİN mikrofonun mu. Çağıran taraf biliyor; emojiEkle bunu "bu videoyu
        gerçekten X mi çekti" onayını YALNIZ A1 için sormak üzere kullanıyor. Adı karşılaştırıp
        tahmin etmek kırılgan olurdu (A1'in adı arkadaşınkiyle aynı olabilir). */
-    function ekle(ad, cues, a1, yerTutucu) {
+    function ekle(ad, cues, a1, yerTutucu, kanalIdx) {
       if (!cues || !cues.length) return;
       ad = String(ad || "").trim();
       /* ⚠ ADI BOŞ A1 "sen"E DÜŞMÜYOR, "A1" OLUYOR. Eski varsayılan "sen" idi ve emoji
@@ -1650,7 +1795,26 @@
       }
       if (!kayitlar.length) return;
 
+      /* ── EMOJİ EKRANINDAKİ AÇIK SEÇİM HER ŞEYİN ÖNÜNDE ──
+         Kullanıcı "bu kanalda kim konuşuyor"u orada elle seçtiyse ad eşleşmesine hiç
+         bakılmaz. Bu, ekranı süs olmaktan çıkaran satır: gördüğü şey gerçekten uygulanıyor.
+         "__yok__" = bu kanal bilerek emojisiz (o karakterin resmi hiç olmayabilir). */
       var anahtar = EMJ.asciiAnahtar(ad);
+      var elSecim = (kanalIdx != null) ? emojiKanalKarOku(kanalIdx) : "";
+      if (elSecim === "__yok__") { yokSay++; return; }
+      if (elSecim) {
+        var elKar = emojiKarakterAra(tarama, elSecim);
+        if (elKar) {
+          var oncekiSayEl = kayitlar.length;
+          kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
+          kisaAtilan += (oncekiSayEl - kayitlar.length);
+          if (!kayitlar.length) return;
+          kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; liste.push(k); });
+          return;
+        }
+        /* Seçilen karakter klasörden silinmişse seçim GEÇERSİZ — sessizce ada düşme, aşağıdaki
+           normal yol çalışsın ve gerekirse eşleştirme satırı çıksın. */
+      }
       var kar = emojiKarakterAra(tarama, anahtar);       // dosya adıyla birebir tutuyor mu
       if (!kar) {
         /* Klasörde karşılığı yok → kullanıcının BİR KEZ verdiği karara bak.
@@ -1696,8 +1860,8 @@
 
     /* KARAKTER ADI KANALDAN GELİR — ayrı bir "senin karakterin" ayarı YOK. */
     if (state.genMode === "channels") {
-      ekle(a1Adi(), state.a1Cues, true);
-      aktifKanallar().forEach(function (ch) { ekle(kanalAdi(ch), ch.cues, false); });
+      ekle(a1Adi(), state.a1Cues, true, "A1", 0);
+      aktifKanallar().forEach(function (ch) { ekle(kanalAdi(ch), ch.cues, false, "A" + (ch.idx + 1), ch.idx); });
     } else if (state.track === "1") {
       /* ⚠ KAYNAK SES = A2 → BU SENİN SESİN DEĞİL, ARKADAŞLARIN KARIŞIK KANALI.
          Eskiden bu dal da `a1Adi()` ile çağrılıyordu: A2'de konuşan Dora'nın 300 cümlesi
@@ -1708,11 +1872,11 @@
          yanlışı İMZALIYORDU. Artık A2'nin kendi adı kullanılıyor ve a1 bayrağı YOK.
          Ad yoksa "A2" yer tutucusuna düşer → eşleştirme satırı çıkar, kullanıcı bir kez seçer
          (o seçim sekansa özel, bkz. emojiEsleAnahtar) ya da "emoji yok" der. */
-      ekle(String(lsGet("kanalAd.1", "")).trim(), state.singleCues, false, "A2");
+      ekle(String(lsGet("kanalAd.1", "")).trim(), state.singleCues, false, "A2", 1);
     } else {
       /* TEK KAYNAK A1: cue'lar singleCues'ta, a1Cues BOŞ. Bu dal olmadan emoji
          "önce altyazı oluştur" diyordu — oysa altyazı ekranda duruyordu. */
-      ekle(a1Adi(), state.singleCues, true);
+      ekle(a1Adi(), state.singleCues, true, "A1", 0);
     }
 
     liste.sort(function (a, b) { return a.bas - b.bas; });
@@ -1721,7 +1885,7 @@
        2, 361…" diye zıplayan numaralar gidiyordu. Model numarayı değil SIRAYI yankılarsa
        cevap sessizce BAŞKA cümlelere denk gelir. */
     for (var i = 0; i < liste.length; i++) liste[i].sira = i + 1;
-    return { liste: liste, elle: elle, kisa: kisaAtilan };
+    return { liste: liste, elle: elle, kisa: kisaAtilan, yokSay: yokSay };
   }
 
   /* EŞLEŞMEYEN AD SATIRLARI — yalnız gerektiğinde. Hepsi tutuyorsa kutu gizli kalır:
@@ -1785,12 +1949,23 @@
   /* EMOJİ PRESET SEÇİCİSİ — yalnız GERÇEKTEN öğrenilmiş yığınlar listelenir.
      Öğrenilmemiş bir adı listeye koymak "uyguladım ama hiçbir şey olmadı" üretirdi
      (preset kartındaki aynı kural: kayıtsız ad devre dışı gösterilir). */
-  function wireEmojiPreset() {
+  /* tazele = true → listeyi YENİDEN kur (Yenile düğmesi / lisans açıldıktan sonra).
+     ⚠ ESKİ HÂLİ SEÇENEKLERİ TEMİZLEMİYOR, yalnız appendChild ile EKLİYORDU. İkinci çağrıda
+     her preset ikinci kez listeye giriyordu; üstelik fonksiyon bir kez, AÇILIŞTA çağrıldığı
+     için (a) lisans kilitliyken preset'ler henüz kurulmamış olduğundan menü ParsMazi'nin İLK
+     oturumunda BOŞ kalıyor, (b) kullanıcı Preset ekranında bir preset öğretse menüde hiç
+     görünmüyor, (c) sildiği preset ölü ad olarak menüde kalıyordu.
+     _tazele dinleyiciyi de bir kez bağlar — her tazelemede yenisini eklemek, tek bir
+     değişiklikte localStorage'a N kez yazardı. */
+  var _emojiPresetBagli = false;
+  function wireEmojiPreset(tazele) {
     var s = $("emojiPreset"); if (!s) return;
     var yig = {}; try { yig = presetYiginlar() || {}; } catch (e) { yig = {}; }
     var adlar = [], k;
     for (k in yig) if (Object.prototype.hasOwnProperty.call(yig, k)) adlar.push(k);
     adlar.sort(function (a, b) { return String(a).localeCompare(String(b), "tr"); });
+    /* Listeyi baştan kur: ilk seçenek ("animasyon yok") korunur, kalanı silinir. */
+    while (s.options.length > 1) s.remove(1);
     adlar.forEach(function (ad) {
       var o = document.createElement("option");
       o.value = ad; o.textContent = ad;
@@ -1799,6 +1974,8 @@
     var kayit = lsGet("emoji.preset", "");
     // Kayıtlı ad artık listede yoksa (preset silinmiş) sessizce "yok"a düş.
     s.value = (kayit && yig[kayit]) ? kayit : "";
+    if (_emojiPresetBagli) return;
+    _emojiPresetBagli = true;
     s.addEventListener("change", function () { lsSet("emoji.preset", s.value); });
   }
 
@@ -1882,8 +2059,8 @@
          ⚠ SIRA ÖNEMLİ: "emoji yok" işareti kısa cümle elemesinden ÖNCE sorulur. Ters sırada,
          resmi olmayan bir karakter yüzünden boş kalan listede panel "hepsi kısa cümle" deyip
          kullanıcıyı 5 kelime eşiğini kurcalamaya yolluyordu. */
-      yaz(top.elle.length
-            ? "Bütün karakterler “emoji yok” işaretli — aşağıdan en az birine karakter seç."
+      yaz((top.elle.length || top.yokSay)
+            ? "Bütün kanallar “emoji yok” işaretli — yukarıdaki listeden en az birine karakter seç."
             : (top.kisa
                 ? ("Emoji konacak cümle kalmadı: " + top.kisa + " cümlenin hepsi " + EMOJI_MIN_KELIME +
                    " kelimeden kısa. Kısa cümlede emoji göz kırpması gibi duruyordu, o yüzden eleniyor.")
@@ -1892,6 +2069,20 @@
     }
 
     /* ANAHTAR KONTROLÜ BAŞTA. Sonda yapılırsa kullanıcı işin sonunda "anahtar yok" görür. */
+    /* ⚠ AUTOCUT SONRASI BAYATLIK FRENI — ALTYAZIDA VARDI, EMOJIDE YOKTU.
+       AutoCut boşlukları kesince timeline dakikalarca kısalıyor ama elde duran cue'lar eski
+       zamanlarda kalıyor. placeCaptions bunu soruyor (cuesStale), emojiEkle ise hiç okumuyordu:
+       panel önce yapay zekâya PARA ödüyor, sonra 300'e kadar PNG'yi kesim ÖNCESI zamanlara
+       koyuyordu — hepsi kesilen süre kadar kaymış, tek uyarı yok. Aynı ekrandaki komşu düğme
+       aynı durumda soruyor; emojinin sormaması tutarsızlıktı. */
+    if (state.cuesStale) {
+      var devamBayatE = await uiConfirm(
+        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\n" +
+        "Kesim timeline'ı kısalttığı için emojiler de altyazılar gibi KAYAR — dakikalarca olabilir.\n\n" +
+        "Doğrusu altyazıyı yeniden üretmek. Yine de devam edeyim mi?", "Emoji");
+      if (!devamBayatE) { yaz("İptal edildi — altyazıyı yeniden üret, sonra emoji ekle.", "var(--warn)"); return; }
+    }
+
     var anahtar = "";
     try { anahtar = VUR.anahtarOku(extRoot); }
     catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle (emoji duyguyu ondan seçiyor)", "var(--bad)"); return; }
@@ -1933,14 +2124,17 @@
       });
       var soru = (a1Kayit && a1Kayit.kar)
         ? ("Bu videoyu " + a1Kayit.kar.ad + " mi çekti?\n\n" +
-           "Değilse “Hayır” de: Altyazı ekranındaki EN ÜSTTEKİ isim kutusuna doğru adı yaz " +
-           "(Tofi / Moni), sonra Emoji Ekle'ye tekrar bas.")
+           "Değilse “Hayır” de ve hemen bu ekrandaki “Bu videoda kim hangi kanalda?” " +
+           "listesinden A1'in karakterini seç, sonra Emoji Ekle'ye tekrar bas.")
         : ("Eşleşme doğru mu?\n\n(A1'den emoji alacak cümle çıkmadı. İsimler Altyazı " +
            "ekranındaki kanal listesinden geliyor.)");
       var onayA1 = await uiConfirm("Emoji karakterleri şöyle eşleşti:\n\n" + satirlar.join("\n") +
                                    "\n\n" + soru, "Emoji");
       if (!onayA1) {
-        yaz("İptal edildi — kanal isimlerini düzelt (Altyazı ekranındaki liste), sonra tekrar bas.",
+        /* ⚠ MESAJ KULLANICININ BULUNDUĞU EKRANI GÖSTERİR. Eskiden Altyazı ekranındaki isim
+           kutusunu tarif ediyordu; o kutu Kaynak Ses "Herkes" değilken EKRANDA HİÇ YOK ve
+           kullanıcı çıkmaza giriyordu. Düzeltmenin doğru yeri artık bu ekranda. */
+        yaz("İptal edildi — yukarıdaki kanal listesinden doğru karakterleri seç, sonra tekrar bas.",
             "var(--warn)");
         return;
       }
@@ -1990,7 +2184,7 @@
       /* En olası sebep host.jsx'in eski olması (emojiKanallariJSON yeni eklendi ve host
          yalnız Premiere açılırken yükleniyor) — tahmin ettirme, SÖYLE. */
       yaz("Video kanalları okunamadı: " + (e2.message || e2) +
-          " — Premiere'i TAMAMEN kapatıp aç (panel kapat-aç yetmez).", "var(--bad)");
+          " — paneli kapatıp aç. Sürmüyorsa Ayrıntılar log'una bak — sebep genelde kilitli kanal, emoji klasörü yolu ya da proje bin'i.", "var(--bad)");
       logLine("Emoji: emojiKanallariJSON okunamadı — " + (e2.message || e2));
       return;
     }
@@ -2461,7 +2655,11 @@
   function wireEmojiTest() {
     var inp = $("emojiKlasor"), bSec = $("btnEmojiKlasor"), bTest = $("btnEmojiTest");
     var dur = $("emojiTestDurum"), cik = $("emojiTestCikti");
-    if (!inp || !bTest) return;
+    /* ⚠ ERKEN DÖNÜŞ YALNIZ KLASÖR KUTUSUNA BAKAR. Eskiden `!bTest` de vardı: #btnEmojiTest
+       kodun kendi yorumunda "geçici, ölçüm bitince kaldırılacak" diye işaretli bir ölçüm
+       düğmesi. O silinirse Emoji Ekle · Emojileri Sil · Yenile · Yeniden Kur · animasyon
+       menüsü — HİÇBİRİ bağlanmıyor, düğmeler görünüyor ama basınca hiçbir şey olmuyordu. */
+    if (!inp) return;
     inp.value = lsGet("emoji.klasor", "") || emojiKlasorVarsayilan();
     inp.addEventListener("change", function () {
       lsSet("emoji.klasor", inp.value.trim());
@@ -2520,6 +2718,20 @@
 
     /* wireEmojiSiklik() KALDIRILDI — sıklık seçicisi yok, değer sabit (bkz. EMOJI_SIKLIK). */
     wireEmojiPreset();
+    /* Emoji ekranındaki "Yenile": kanal listesi + klasör durumu birlikte tazelenir.
+       Kullanıcı Altyazı'da isim değiştirip ya da Senkron'la kanal ekleyip buraya dönebiliyor. */
+    var bYen = $("btnEmojiYenile");
+    if (bYen) bYen.addEventListener("click", function () {
+      /* ⚠ ÜÇÜNÜ BİRDEN TAZELE. Eskiden yalnız kanal listesi + klasör durumu çağrılıyordu ve
+         klasör durumu #emojiKlasorDurum'a yazıyor — o eleman AYARLAR ekranında, yani
+         kullanıcı Emoji ekranındayken uyarıyı GÖREMİYORDU ("6 resim bu klasörde yok" başka
+         bir ekrana düşüyordu). Animasyon menüsü de bir kez, açılışta doluyordu: kullanıcı
+         Preset ekranında bir preset öğretip buraya gelince menüde YOKTU ve "Yenile" onu
+         tazelemiyordu; sildiği preset ise ölü ad olarak menüde kalıyordu. */
+      try { emojiKanalKarCiz(); } catch (e) {}
+      try { emojiKlasorDurumYaz(); } catch (e2) {}
+      try { wireEmojiPreset(true); } catch (e3) {}
+    });
     var bEkle = $("btnEmojiEkle"), bSil = $("btnEmojiSil");
     if (bEkle) bEkle.addEventListener("click", function () {
       emojiEkle().catch(function (e) { logLine("Emoji hatası: " + (e.message || e)); });
@@ -5034,6 +5246,17 @@
         var eInp = $("emojiKlasor");
         if (eInp && !eInp.value) eInp.value = lsGet("emoji.klasor", "") || emojiKlasorVarsayilan();
       } catch (eEi) {}
+      /* ⚠ EMOJİ TARAFI DA BURADA TAZELENMEK ZORUNDA — İKİ AYRI HATA BUNDAN DOĞUYORDU:
+         Sıra şu: wirePreset/wireEmojiTest lisans kilitliyken çalışıyor, varsayilanlariKur
+         ise ANCAK kod girildikten sonra bu blokta çalışıyor.
+         1) Animasyon menüsü (#emojiPreset) preset'ler daha KURULMADAN dolduruluyordu —
+            ikinci kullanıcının İLK oturumunda menüde "Emoji Sağ Taraf" hiç görünmüyordu ve
+            paneli kapatıp açmadan kullanamıyordu.
+         2) Emoji klasörü durum satırı, klasör HENÜZ YOKKEN okunuyordu → temiz kurulumda
+            kırmızı "Klasör okunamadı" yazıyor, hemen ardından 46 resim kuruluyor ama satır
+            güncellenmiyordu. Kullanıcı çalışan bir paneli bozuk sanıyordu. */
+      try { wireEmojiPreset(true); } catch (eEp) {}
+      try { emojiKlasorDurumYaz(); } catch (eEd) {}
       var oturumIsi;
       try { oturumIsi = offerSessionRestore(); } catch (eSes) {}
       return Promise.resolve(oturumIsi)["catch"](function () {});

@@ -512,14 +512,32 @@ function _haritadaBul(harita, yol) {
    NEDEN VAR: yol eslesmesi tutmazsa dosya "projede yok" sanilir; eski kod da onu YENIDEN
    import ederdi. Bu yedek, tek bir eslesme aksakliginin yuzlerce emojiyi dusurmesini
    ve gereksiz import turlarini engelliyor. */
+function _sonIkiParca(yol) {
+    /* "C:/a/b/Emoji/ayna/Korkmus Dora.png" -> "ayna/korkmus dora.png"
+       "C:/a/b/Emoji/Korkmus Dora.png"      -> "emoji/korkmus dora.png"          */
+    var y = String(yol).replace(/\\/g, "/").toLowerCase();
+    var p = y.split("/");
+    if (p.length < 2) return y;
+    return p[p.length - 2] + "/" + p[p.length - 1];
+}
 function _binAdBul(bin, yol) {
     if (!bin || !yol) return null;
-    var ad = String(yol).replace(/^.*[\\\/]/, "").toLowerCase(), i, ch, p;
+    /* ⚠ SON İKİ PARÇA — YALNIZ DOSYA ADI YETMEZ, AYNA KOPYASI AYNI ADI TASIYOR.
+       js/pngayna.js aynayi <Emoji>\\ayna\\ altina AYNI adla yaziyor ("Korkmus Dora.png").
+       Yalniz ada bakan bir arama, SAG taraf icin ozgun resmi ararken SOL taraf icin
+       uretilmis AYNALANMIS kopyayi bulabiliyordu — emoji ters bakardi ve panel "basarili"
+       derdi. Somut senaryo: 1. calistirmada Mimi A3'te (sol, ayna bin'e girer), sonra
+       kullanici Emoji ekranindan A1'i Mimi yapar (artik sag, ozgun gerekir); ozgun yol
+       bin'de yoksa ad yedegi aynayi dondururdu.
+       Ust klasor adini da katmak ikisini kesin ayiriyor ("ayna/..." ile "emoji/...").
+       ⚠ Bu fonksiyon zaten YALNIZ emoji bin'i icinde ariyor — proje genelinde ad eslesmesi
+       yanlis klibi koydurur (bkz. _binYolBul'un basindaki not). */
+    var hedef = _sonIkiParca(yol), i, ch, p;
     try {
         for (i = 0; i < bin.children.numItems; i++) {
             ch = bin.children[i];
             p = ""; try { p = String(ch.getMediaPath()); } catch (e0) { p = ""; }
-            if (p && p.replace(/^.*[\\\/]/, "").toLowerCase() === ad) return ch;
+            if (p && _sonIkiParca(p) === hedef) return ch;
         }
     } catch (e) {}
     return null;

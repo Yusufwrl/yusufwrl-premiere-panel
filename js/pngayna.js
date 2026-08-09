@@ -264,20 +264,38 @@ function aynaYolu(kok, kaynakYol) {
      sRGB/pHYs chunk'lari artik korunuyor — v2) kaynak PNG'nin mtime'i degismedigi icin eski,
      eksik kopyalar SONSUZA KADAR kullanilmaya devam ederdi. Ikinci kullanicida bu hic fark
      edilmezdi. Surum degisince butun ayna klasoru bir kez yeniden uretilir (11 dosya, ~1 sn). */
+  /* ⚠ SURUM DAMGASI ESKIYSE ONBELLEGIN TAMAMI ATILIR — TEK DOSYA DEGIL.
+     Ilk halinde damga, ilk dosya uretilirken yaziliyordu; ikinci dosyada damga artik guncel
+     okundugu icin o dosya "taze" sayilip ESKI SURUMLE uretilmis kopya donuyordu. Yani
+     AYNA_SURUM'u artirmak sol taraftaki 30+ resmin yalnizca BIRINI yeniliyordu — geri kalani
+     sonsuza kadar eski kalirdi ve kullanici bunu ancak "bir emoji dogru renkte, otekiler
+     degil" diye fark ederdi (fark edebilirse).
+     Cozum: damga eskiyse ayna KLASORUNU bir kez tamamen bosalt, damgayi HEMEN yaz. Boylece
+     her dosya "hedef yok" dalina duser ve yeni surumle uretilir. Silinen sey yalnizca
+     panelin kendi urettigi onbellek — kaynak resimlere dokunulmuyor. */
   var surumYol = path.join(klasor, ".surum");
   var surumTut = false;
   try { surumTut = (String(fs.readFileSync(surumYol, "utf8")).trim() === String(AYNA_SURUM)); }
   catch (eS) { surumTut = false; }
+  if (!surumTut) {
+    try {
+      var eskiler = fs.readdirSync(klasor);
+      for (var ei = 0; ei < eskiler.length; ei++) {
+        if (!/\.png$/i.test(eskiler[ei])) continue;
+        try { fs.unlinkSync(path.join(klasor, eskiler[ei])); } catch (eU) {}
+      }
+    } catch (eR) {}
+    try { fs.writeFileSync(surumYol, String(AYNA_SURUM), "utf8"); } catch (eSw) {}
+  }
 
   var tazele = true;
   try {
-    if (surumTut && fs.existsSync(hedef)) {
+    if (fs.existsSync(hedef)) {
       var sk = fs.statSync(kaynakYol), sh = fs.statSync(hedef);
       tazele = !(sh.size > 0 && sh.mtime >= sk.mtime);
     }
   } catch (e3) { tazele = true; }
   if (!tazele) return { yol: hedef, uretildi: false, hata: "" };
-  if (!surumTut) { try { fs.writeFileSync(surumYol, String(AYNA_SURUM), "utf8"); } catch (eSw) {} }
 
   var r = aynala(kaynakYol, hedef);
   if (!r.ok) return { yol: "", uretildi: false, hata: r.hata };

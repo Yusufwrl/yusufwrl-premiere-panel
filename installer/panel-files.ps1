@@ -52,10 +52,13 @@ $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
 #         calisiyor ve panelin icinde bir isi yok. Panel yalniz Worker'in ADRESINI biliyor
 #         (js/lisans.js SUNUCU_HOST); ADMIN_TOKEN ve diger secret'lar Cloudflare'de durur,
 #         hicbiri panele gomulmez.
+# testler: surum oncesi denetim paketi (node testler\tumtest.js). Panele GITMEZ — Premiere'de
+#          isi yok, yalnizca gelistirme sirasinda calisir. Bu klasoru listeye eklemeyi
+#          UNUTTUGUMU testin kendisi yakaladi ("hicbir listede olmayan oge: testler").
 $PanelIgnore = @(".git", ".gitignore", ".claude", ".debug", "installer", "KUR.bat",
                  "CLAUDE.md", "DAGITIM.md", "KULLANIM.md", "INCELEME-RAPORU.md",
                  "GELISTIRICI-MODU.reg", "deploy-dev.ps1", "install-dev.ps1", "sunucu",
-                 "panel.zip", "TESLIM.md")
+                 "panel.zip", "TESLIM.md", "testler")
 
 # Repo kokunde, hicbir listede olmayan ust duzey oge var mi? (Sessizce disarida kalmasin.)
 function Test-PanelFileList {

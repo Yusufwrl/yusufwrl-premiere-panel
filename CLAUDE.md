@@ -77,7 +77,21 @@ Konuşma olmayan boşlukları bulup timeline'dan ripple-delete eder. **Boşluk =
 - Bir kanalın sesi hazırlanamazsa analiz düşmez ama **sessizce de geçilmez** — log'a "ATLANDI" düşer, çünkü o kanaldaki konuşma kesilir.
 - Kesim maliyeti boşluk SAYISIYLA büyür: "En kısa boşluk" 0.1 sn binlerce kesim üretip saatlerce sürebilir; 0.3 sn neredeyse aynı kazancı çok daha hızlı verir.
 
+## Sürüm öncesi denetim — `node testler\tumtest.js`
+**Her sürümden önce çalıştır.** Premiere GEREKMEZ; saf dosya + saf hesap. 41 kontrol: sürüm üç dosyada senkron mu · emoji paketi kaynakla aynı mı (`emoji-esitle.ps1` unutuldu mu) · ad çözümleme ve havuzlar · PNG aynalama + yan chunk'lar (sRGB/pHYs) · altyazı köprüsü uç durumları + 500 turluk fuzz · emoji sıra numaralandırması (emoji yanlış kişiye gitmesin) · host.jsx ES3 taraması · HTML↔app.js id bağlantıları · dağıtım zinciri.
+- **Yeni bir hata bulunduğunda buraya bir test EKLE.** Buradaki her kontrol gerçekten yaşanmış bir hatadan doğdu; hiçbiri teorik değil.
+- `testler` klasörü `$PanelIgnore`'da — panele GİTMEZ. (Bu eksiği testin kendisi yakaladı: "hiçbir listede olmayan öğe: testler".)
+- **Kapsam dışı (bilerek):** Premiere API'si gerektiren her şey — klip yerleştirme, keyframe, caption track. Onlar ancak kullanıcının makinesinde ölçülüyor.
+
 ## Emoji (tepki resmi) — `js/emoji.js` · app.js `emojiEkle` · host.jsx `emojiYerlestir`/`emojiTemizle`/`emojiKanallariJSON`
+- **KENDİ EKRANINDA (`viewEmoji`, 9 Ağustos 2026)** — Altyazı kartından çıkarıldı. Sebep yer darlığı değil: emoji hangi sesin kime ait olduğuna bağlı ve o bilgi Altyazı ekranındaki isim kutularına gömülüydü; yanlış eşleşme ancak videoyu izlerken fark ediliyordu.
+  - Ekranın asıl işi **"Bu videoda kim hangi kanalda?"** listesi: her ses kanalının karşısında bir karakter seçici (otomatik / karakterler / emoji yok) ve altında tek satırlık özet (`A1→Tofi · A2→Moni · A3→Mimi`). Basmadan önce görülüyor.
+  - Varsayılan hâlâ **kanal adından** türetiliyor; liste onu **ezebilir** ve seçim `emojiCumleleriTopla`'da ad eşleşmesinin ÖNÜNDE uygulanıyor (yoksa ekran süs olurdu).
+  - ⚠ **Anahtar SEKANSA ÖZEL** (`emoji.kanalKar.<sekansKimlik>.<idx>`): kanal numarasının anlamı kadroya göre değişiyor (A4 bir videoda Sage, ötekinde Niko). Kalıcı saklamak sonraki videoda sessizce yanlış yüzü koyardı — aynı ders AutoCut'ta `acCh → acCh2_` göçüyle, emoji eşleşmesinde ADLA saklamayla alınmıştı.
+  - Seçilen karakter klasörden silinmişse seçim geçersiz sayılıp normal ad yoluna dönülür (sessiz düşüş yok).
+- ⚠ **EMOJİ YANLIŞ KİŞİYE GİDİYORDU — PARÇA NUMARALANDIRMASI** (ParsMazi, 9 Ağustos 2026; v1.9.15'te düzeltildi). `duygulariSec` cümleleri 250'lik parçalar hâlinde gönderiyor ve satırları **global** sıra numarasıyla yazıyordu (`"251 [moni] …"`). Model 250 satırlık listeyi 1'den numaraladığında (bir listeyi numaralamanın en doğal yolu) cevabındaki "1" panelde **1. cümleye** düşüyordu — başka parçanın, başka konuşmacının cümlesine. **Panelde hiçbir doğrulama yoktu.**
+  **ÖLÇÜLDÜ** (400 cümle: 250 Tofi + 150 Moni, 2 parça): 150 cümle iki kez seçildi, 150 cümle hiç seçilmedi; Moni'nin 150 cümlesinin tamamı emojisiz kaldı ve onun için seçilen duygular Tofi'ye yazıldı. **Kısa videoda (tek parça) HİÇ görünmüyor** — geliştiricinin test oturumu tek parçaydı, o yüzden aylarca fark edilmedi.
+  **Düzeltme:** her parça kendi içinde `1..N` numaralanıyor, cevap `dilim[numara-1]` ile geri eşlenip GERÇEK sıra yazılıyor, aralık dışı numara atılıp SAYILIYOR. Cevap bozuksa emoji *az* çıkar ama **yanlış kişiye gitmez.** Testi `testler\tumtest.js` içinde.
 Konuşanın duygusuna göre **sağ alt köşeye** karakterin tepki resmi (PNG) koyar. Varlıklar: `Youtube\Edit\Emoji` → `<Duygu> <Karakter>.png` (5 duygu × 4 karakter). Duygu/karakter kümesi **klasörden türetilir**, koda gömülmez.
 - **ÖLÇÜLMÜŞ Premiere değerleri** (26.3.0): Position **NORMALİZE 0..1** (piksel DEĞİL) · still varsayılanı **5 sn**, `Time.ticks` ile ezilir · Scale yüzde · PNG boyutları farklı (Tofi 2000², diğerleri 1000²) → **ölçek dosya başına** hesaplanır.
 - **Boyut KULLANICI ONAYLI, DOKUNMA:** `EMOJI_ORAN = 0.574` (kare yüksekliğinin %57'si). Kullanıcı elle ayarlayıp ekran görüntüsüyle onayladı; ilk denemedeki %22 + 54 px "çok küçük ve içeride" diye reddedildi.
