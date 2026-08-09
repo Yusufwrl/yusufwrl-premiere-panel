@@ -1735,20 +1735,55 @@
 
       var secim = sel.value;
       var son = secim === "__yok__" ? null : (secim ? emojiKarakterAra(tarama, secim) : kendi);
-      cozulen.push({ idx: k.idx, ad: k.ad, kar: son, yok: secim === "__yok__" });
+
+      /* ── O KARAKTERİN KAÇ RESMİ VAR (kullanıcı isteği, 9 Ağustos 2026: "kimin kaç tane
+         emojisi kullanılabilir olduğu yazsın, düzgün import edilmiş mi ve videoda
+         kullanılacak mı bilelim").
+         Sayı = o karakterin klasördeki TOPLAM dosyası (varyantlar dahil), yani gerçekten
+         ekrana çıkabilecek resim sayısı. Çeşitlilik kuralı bu havuzla sınırlı: havuz küçükse
+         "aynı resim çok yakında tekrar etti" diye emoji ELENİYOR. 0 ise o kanal hiç emoji
+         alamaz — kırmızı, çünkü sebebi (resim yok) ancak burada görülebilir. */
+      var resimSay = 0;
+      if (son) {
+        (tarama.karakterDuygu[son.key] || []).forEach(function (d) {
+          var vl = tarama.matris[d + "|" + son.key];
+          resimSay += (vl && vl.length) ? vl.length : 0;
+        });
+      }
+      var sy = document.createElement("span");
+      sy.className = "dict-status";
+      sy.style.cssText = "min-width:104px";
+      if (secim === "__yok__") { sy.textContent = "emoji yok"; sy.style.opacity = "0.55"; }
+      else if (!son) { sy.textContent = "karakter seçilmedi"; sy.style.color = "var(--warn)"; }
+      else if (!resimSay) { sy.textContent = "0 resim!"; sy.style.color = "var(--bad)"; }
+      else sy.textContent = resimSay + " resim · " + (tarama.karakterDuygu[son.key] || []).length + " tepki";
+      row.appendChild(sy);
+
+      cozulen.push({ idx: k.idx, ad: k.ad, kar: son, yok: secim === "__yok__", resim: resimSay });
     });
 
     /* ÖZET: kullanıcı basmadan önce tek bakışta görsün. Eşleşmeyen varsa SARI. */
     var eksik = cozulen.filter(function (x) { return !x.kar && !x.yok; });
+    /* ÖZET SATIRI resim sayısını da taşır: "A2→Moni(13)". Kullanıcı tek bakışta hem kimin
+       hangi kanalda olduğunu hem o kişinin kaç resmi olduğunu görüyor — "düzgün import
+       edilmiş mi" sorusunun cevabı bu sayı. */
     var satir = cozulen.map(function (x) {
-      return "A" + (x.idx + 1) + "→" + (x.yok ? "yok" : (x.kar ? x.kar.ad : "?"));
+      return "A" + (x.idx + 1) + "→" + (x.yok ? "yok" : (x.kar ? (x.kar.ad + "(" + x.resim + ")") : "?"));
     }).join(" · ");
+    var resimsiz = cozulen.filter(function (x) { return x.kar && !x.resim; });
     if (eksik.length) {
       dyaz("⚠ " + satir + "  —  " + eksik.length + " kanalın karakteri seçilmedi; " +
            "yanındaki menüden seç (ya da “emoji yok” de).", "var(--warn)");
+    } else if (resimsiz.length) {
+      /* Karakter seçili ama o karakterin klasörde hiç resmi yok — kanal sessizce emojisiz
+         kalırdı. Sebep genelde eksik import ya da yanlış adlandırılmış dosya. */
+      dyaz("⚠ " + satir + "  —  " + resimsiz.map(function (x) { return x.kar.ad; }).join(", ") +
+           " için klasörde HİÇ resim yok; o kanal(lar) emoji almaz. " +
+           "Ayarlar → “Emojileri Yeniden Kur”u dene.", "var(--bad)");
     } else {
-      dyaz("✓ " + satir + "  ·  klasörde " + tarama.dosyalar.length + " resim, " +
-           tarama.karakterler.length + " karakter.", "var(--muted)");
+      dyaz("✓ " + satir + "  ·  klasörde toplam " + tarama.dosyalar.length + " resim, " +
+           tarama.karakterler.length + " karakter, " + tarama.duygular.length + " tepki çeşidi.",
+           "var(--muted)");
     }
   }
 
@@ -2409,6 +2444,26 @@
          aday alınıyordu; artık aynı SEÇİM PENCERESİ içindeki adaylar bir grup sayılıp
          gruptan o ana kadar EN AZ emoji almış karakterinki tercih ediliyor. Emoji SAYISI
          neredeyse aynı kalır, yalnız kimin emojisi olduğu dengelenir. */
+      /* ── KONUK HEDEFİ: HER 2 CÜMLEDEN 1'İ ──
+         `karCumleSay` = o karakterin kaç ADAY cümlesi var (yapay zekânın işaretledikleri).
+         `emojiAcik` = hedefin ne kadar altında kaldığı. Kanal sahiplerinde (Tofi/Moni ve A1)
+         hedef YOK — onlar zaten çok konuşuyor; hedef koymak konuğun önüne geçmelerine yol
+         açardı. Açık negatifse 0 sayılır, yani hedefi tutturan konuk sıradan sıraya döner. */
+      var EMOJI_KONUK_HEDEF = 0.5;
+      var karCumleSay = {};
+      adaylar.forEach(function (x) {
+        var kk = x.c.kar.key;
+        karCumleSay[kk] = (karCumleSay[kk] || 0) + 1;
+      });
+      function emojiAcik(karKey) {
+        /* Sağ taraf = kanal sahibi (Tofi/Moni) ya da A1. A1 bilgisi cue'da (c.a1) ama burada
+           karakter anahtarı var; sahiplik listesi yeterli — A1 zaten çok konuşan taraf. */
+        if (emojiSagMi(karKey, false)) return 0;
+        var hedef = (karCumleSay[karKey] || 0) * EMOJI_KONUK_HEDEF;
+        var acik = hedef - (karSay[karKey] || 0);
+        return acik > 0 ? acik : 0;
+      }
+
       var ai = 0, aj, grup, gi, t0, kondu;
       while (ai < adaylar.length) {
         if (adaylar[ai].c.bas < sonBitis + EMOJI_GAP) { atlanan.yakin++; ai++; continue; }
@@ -2416,8 +2471,22 @@
         while (aj < adaylar.length && adaylar[aj].c.bas < t0 + EMOJI_SECIM_PENCERE) {
           grup.push(adaylar[aj]); aj++;
         }
+        /* ── KONUK ÖNCELİĞİ: HER 2 CÜMLEDEN 1'İ ──
+           (kullanıcı isteği, 9 Ağustos 2026: "Tofi/Moni dışındaki kızlar için, uyuşuyorsa
+           emoji her zaman kullanılmaya çalışılsın, 2 cümlede 1 kesin olsun".)
+           Konuklar (Dora, Mimi…) az konuşuyor; aynı pencerede kanal sahibiyle yarışınca
+           videoda az görünüyorlardı. Artık sıralama ham sayıya değil **AÇIĞA** bakıyor:
+           açık = (o karakterin cümlesi × hedef) − şimdiye kadar konan. Hedefin altındaki
+           konuk her zaman öne geçiyor.
+           ⚠ FİT KAYBI YOK: sıra yalnızca AYNI PENCEREDEKİ adaylar arasında değişiyor ve
+           adayların hepsini yapay zekâ zaten işaretledi. Uymayan bir cümle öne çekilmiyor.
+           ⚠ KANAL SAHİBİNE HEDEF KONMUYOR: onlar zaten çok konuşuyor, hedef koymak konuğun
+           önüne geçmelerine yol açardı. */
         grup.sort(function (a, b) {
-          var fa = karSay[a.c.kar.key] || 0, fb = karSay[b.c.kar.key] || 0;
+          var ka = a.c.kar.key, kb = b.c.kar.key;
+          var aa = emojiAcik(ka), ab = emojiAcik(kb);
+          if (aa !== ab) return ab - aa;          // açığı BÜYÜK olan önce (hedefin altındaki konuk)
+          var fa = karSay[ka] || 0, fb = karSay[kb] || 0;
           if (fa !== fb) return fa - fb;          // az emoji almış karakter önce
           return a.c.bas - b.c.bas;               // eşitse en erken
         });
