@@ -130,7 +130,15 @@ function parseText(text, oncekiler) {
         for (var q = 0; q < LABELLER.length; q++) if (_norm(LABELLER[q]) === _norm(r)) { renk = q; bulundu = true; break; }
       }
       if (!bulundu) renkHatasi = r;      // ne sayı ne bilinen renk adı — sessizce Violet'e DÜŞME
-      ln = ln.slice(0, rm.index).trim();
+      /* ⚠ ADI YALNIZ RENK GERÇEKTEN TANINIRSA KES. Eskiden kesme koşulsuzdu: satır sonundaki
+         HER köşeli parantez renk sanılıp addan atılıyordu. Ama buraya Discord'un GÖRÜNEN ADI
+         yazılıyor ve görünen adlar klan etiketi taşıyabiliyor — "Player[TR]" adı "Player"a
+         düşüyor, Craig dosyası "3-Player[TR].m4a" geldiğinde bul() eşleştiremiyor ve kişi
+         "bilinmeyen"e düşüp kanalına HİÇ yerleştirilmiyordu. Kullanıcı adı panelde doğru
+         yazdığı hâlde sebebini göremiyordu: renkHatasi işareti var ama arayüzdeki renk
+         uyarısı kaldırılmış durumda, yani hiçbir yerde gösterilmiyor.
+         Tanınmayan parantez artık adın parçası sayılır; "[Blue]"/"[3]" eskisi gibi çalışır. */
+      if (bulundu) ln = ln.slice(0, rm.index).trim();
     }
     var ix = ln.indexOf(":");
     var kar = (ix >= 0 ? ln.slice(0, ix) : ln).trim();

@@ -18,6 +18,7 @@ installer/YusufwrlKur.exe
 # lisans.json = bu makinenin lisansi (sifre BIR KEZ girilsin diye). Repoya girmemeli:
 # icinde HWID karmasi var ve her makinede farkli.
 /lisans.json
+/lisans.json.bak
 
 # Motor ASLA repoya girmez (~3 GB)
 engine/

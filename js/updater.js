@@ -35,7 +35,12 @@ var KULLANICI_DOSYALARI = ["engine-root.txt", "diarize-device.txt", "sozluk.json
                            /* lisans.json: bu makinenin lisansi. Guncelleme ezerse arkadas
                               sifreyi HER guncellemede yeniden girer — kullanici "bir kere
                               girmesi yetsin" dedi, o yuzden korunanlar arasinda. */
-                           "lisans.json"];
+                           "lisans.json",
+                           /* lisans.json.bak: kayitYaz artik atomik (.tmp -> rename) ve
+                              eskisini .bak'a aliyor; ana dosya bozulursa kayitOku oradan
+                              kurtariyor. Ezilirse "ariza kalici kilit uretmesin" korumasi
+                              tam da guncelleme aninda kaybolurdu. */
+                           "lisans.json.bak"];
 
 /*
  * config.json listenin PARCASI DEGIL — yalnizca burada ve installer\kur.ps1'de korunur.
@@ -177,9 +182,14 @@ function paketKoku(stage) {
  * guncellemede geri aliniyordu ve sebebi kullanici icin gorunmezdi.)
  * Doner: eklenen yeni anahtar sayisi.
  */
-function configBirlestir(paketKok, extRoot) {
-  var yeniYol = path.join(paketKok, "config.json");
+/* paketAd (istege bagli): paket tarafindaki dosyanin ADI. Varsayilan "config.json" —
+   oto-guncelleme yolu boyle cagiriyor. Kurulum exe'si ayni dosyayi "config.pkg.json" adiyla
+   da kuruyor ve panel acilista onu bu fonksiyona veriyor (bkz. app.js configPaketTazele). */
+function configBirlestir(paketKok, extRoot, paketAd) {
+  var yeniYol = path.join(paketKok, paketAd || "config.json");
   if (!fs.existsSync(yeniYol)) return 0;
+  /* Paket dosyasi hedefin KENDISI ise (ayni klasor, ayni ad) yapacak bir sey yok. */
+  if (path.resolve(yeniYol) === path.resolve(path.join(extRoot, "config.json"))) return 0;
   var hedef = path.join(extRoot, "config.json");
   var yeni = readJson(yeniYol, null);
   if (!yeni) return 0;                                   // pakette bozuk -> kullanicininkine dokunma
@@ -197,14 +207,20 @@ function configBirlestir(paketKok, extRoot) {
      degisikligi MEVCUT kullanicilara ASLA ulastiramaz: panel "motor bulunamadi" der ve
      tek cozum kullanicinin config.json'i elle duzenlemesi olur. O yuzden paketten zorlanir. */
   var PAKETTEN = ["engineExe", "ffmpegExe", "workDir", "stylesDir"];
-  var degisti = (eklenen > 0);
+  var degisti = (eklenen > 0), zorlanan = [];
   for (var j = 0; j < PAKETTEN.length; j++) {
     var pk = PAKETTEN[j];
     if (Object.prototype.hasOwnProperty.call(yeni, pk) && eski[pk] !== yeni[pk]) {
-      eski[pk] = yeni[pk]; degisti = true;
+      eski[pk] = yeni[pk]; degisti = true; zorlanan.push(pk);
     }
   }
   if (degisti) fs.writeFileSync(hedef, JSON.stringify(eski, null, 2), "utf8");
+  /* ⚠ PROGRAM YOLU ZORLAMASI IZ BIRAKIR. Fonksiyon yalnizca "eklenen anahtar" sayisini
+     donduruyordu; motor yolu degistiginde (asil is bu) donus 0 kaliyor ve cagiran taraf
+     hicbir sey yazmiyordu. "Motor bulunamadi" hatasi arastirilirken yolun NE ZAMAN ve NEYE
+     gore degistigi hicbir kayitta gorunmuyordu. Sayac ayri bir alanda: donus tipi degismesin
+     (iki cagiran da sayi bekliyor). */
+  configBirlestir.sonZorlanan = zorlanan;
   return eklenen;
 }
 
@@ -276,6 +292,16 @@ async function checkForUpdate(extRoot, ui) {
       try { fs.unlinkSync(path.join(extRoot, ".debug")); } catch (_) {}
       var yeniAnahtar = configBirlestir(kok, extRoot);
       if (yeniAnahtar) log("config.json: " + yeniAnahtar + " yeni ayar eklendi (seninkiler korundu).");
+      // Program yolu degistiyse SOYLE — "motor bulunamadi" arastirilirken tek iz bu.
+      var _zorlanan = configBirlestir.sonZorlanan || [];
+      if (_zorlanan.length) log("config.json: program yolu tazelendi -> " + _zorlanan.join(", "));
+      /* ⚠ EXE'DEN KALAN config.pkg.json'u SIL — IKINCI EMNIYET.
+         O dosyayi yalniz kurulum exe'si koyuyor ve panel acilista uygulayip siliyor. Ama
+         silme basarisiz olduysa (dosya kilitli) diskte kalir; zip guncellemesi program
+         yollarini burada dogru tazeler, panel bir sonraki acilista BAYAT dosyadan eski
+         degerlere geri cekerdi. copyDir hicbir seyi silmedigi icin bu temizlik burada
+         yapilmak zorunda. */
+      try { fs.unlinkSync(path.join(extRoot, "config.pkg.json")); } catch (_cp) {}
       fs.writeFileSync(path.join(extRoot, "version.json"), JSON.stringify({ version: clean }, null, 2));
     } catch (eKopya) {
       // Geri al: yedekteki eski dosyalari uzerine yaz. version.json henuz yazilmadigi icin
@@ -302,4 +328,7 @@ async function checkForUpdate(extRoot, ui) {
   }
 }
 
-module.exports = { checkForUpdate: checkForUpdate, cmpVer: cmpVer };
+/* configBirlestir DISA ACIK: app.js acilista "config.pkg.json" ile cagiriyor (exe kurulumu
+   o adla da kuruyor). Yoksa program yollari YALNIZ oto-guncelleme yolunda tazeleniyordu ve
+   exe ile kurulan/guncellenen kullanici motor duzeni degisikligini HIC almiyordu. */
+module.exports = { checkForUpdate: checkForUpdate, cmpVer: cmpVer, configBirlestir: configBirlestir };

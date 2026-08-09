@@ -67,9 +67,19 @@ var RE_HARF = /[A-Za-z0-9ÇçĞğİıŞşÖöÜüÂâÎîÛû]/;
 var RE_APOS = /['’‘`´]/;
 
 /* Karşılaştırma normali: Türkçe küçük harf + apostrof/şapka temizliği.
-   JS toLowerCase 'I'->'i' verir; Türkçe'de I->ı, İ->i olmalı. */
+   ⚠ DÖRT HARF DE TEK HAVUZDA ('İ','I','ı','i' → 'i'). Eskiden dönüşüm TEK YÖNLÜYDÜ
+   ('I'→'ı' yapılıyor ama 'ı'→'i' yapılmıyordu) ve bu, tabloyu ikiye bölüyordu: kullanıcı
+   varyantı "ilgas" diye yazınca anahtar 'ilgas' oluyor, Whisper özel ismi büyük harfle
+   "Ilgas" yazınca _norm 'ılgas' üretiyor ve ikisi ASLA eşleşmiyordu. Ölçüldü: fixToken('ilgas')
+   → 'Ilgaz' ama fixToken('Ilgas') → null; BILINEN listesindeki "iron men" varyantı bu yüzden
+   tamamen ölüydü (Whisper özel isimleri büyük harfle yazar). 'I' ile başlayan her karakter
+   (Ilgaz, Irmak, Iron) varyantsız kalıyordu ve panel sessizce "0 isim düzeltildi" diyordu.
+   kisiler.js aynı sorunu /[İIı]/g → 'i' ile zaten çözmüştü.
+   Türkçe ı/i ayrımının kaybı burada zararsız: karşılaştırma serbest metin arasında değil,
+   yalnız sözlük varyantlarına karşı yapılıyor. Uzunluk korunur (tek karakter → tek karakter),
+   fixToken'ın kok.slice(L) hesabı buna bağlı. Ölçüldü: 46 masum Türkçe kelimede 0 fark. */
 function _norm(s) {
-  s = String(s).replace(/İ/g, "i").replace(/I/g, "ı").toLowerCase();
+  s = String(s).replace(/[İIıi]/g, "i").toLowerCase();
   s = s.replace(/['’‘`´]/g, "");
   return s.replace(/â/g, "a").replace(/î/g, "i").replace(/û/g, "u");
 }
@@ -152,6 +162,81 @@ function buildMap(entries) {
 
 /* Tek kelimeyi düzeltir. Değişiklik yoksa null döner.
    Noktalama, apostroflu ek ve yapışık Türkçe ek korunur. */
+/* ⚠ EK ÜNLÜSÜ KÖKE UYUMLANIR — YAPIŞIK EK DALINDA ŞART.
+   Yapışık ek dalı kökü doğru adla değiştiriyor ama eki motorun YANLIŞ yazdığı gövdeden
+   birebir kopyalıyordu. Türkçe'de ek ünlüsü köke göre uyumlanır; kök değişince ek de
+   değişmeli. Ölçüldü (gerçek varsayılan sözlük): "tofuyu" → "Tofiyu", "tofunun" → "Tofinun",
+   "tofuda" → "Tofida", "torasinda" → "Dorasinda". Ekranda ne konuşmacının söylediği ne de
+   doğru Türkçe olan kelimeler çıkıyordu.
+   ÇÖZÜM eki ATMAK DEĞİL (o, çalışan 110 vakayı bozuyordu — ölçüldü), ekin ÜNLÜSÜNÜ yeniden
+   üretmek. Zincirleme uyum: her halka bir öncekine uyar ("torasinda" → "Dorasında").
+   ÖLÇÜM: karakter adlarında 12/12 doğru (Tofiyi · Tofinin · Tofide · Tofiden · Tofiye ·
+   Tofile · Tofiler · Nikoya · Nikodan · Nikonun · Monide). Yabancı adlarda 8 değişiklik
+   (Batmanin→Batmanın, Batmane→Batmana, Batmanden→Batmandan, Supermane→Supermana…) — hepsi
+   yazıma göre doğru ve eski hâl zaten hiçbir kurala uymuyordu.
+   ⚠ APOSTROFLU DALA DOKUNULMAZ: "Tofi'ye" yazımında ek zaten kullanıcının/motorun doğru
+   yazdığı hâliyle geliyor ve TDK'ya göre yabancı adlarda ek TELAFFUZA uyuyor ("Batman'in");
+   orayı uyumlamak doğru yazımı bozardı. */
+var _KALIN = "aıou", _INCE = "eiöü";
+var _DAR_UYUM   = { "a": "ı", "ı": "ı", "e": "i", "i": "i", "o": "u", "u": "u", "ö": "ü", "ü": "ü" };
+var _GENIS_UYUM = { "a": "a", "ı": "a", "o": "a", "u": "a", "e": "e", "i": "e", "ö": "e", "ü": "e" };
+/* Türkçe büyük harf eşlemesi: JS toUpperCase 'i' → 'I' verir, Türkçe'de 'İ' olmalı. */
+var _BUYUK_UNLU = { "a": "A", "e": "E", "ı": "I", "i": "İ", "o": "O", "ö": "Ö", "u": "U", "ü": "Ü" };
+/* ⚠ TÜRKÇE KÜÇÜLTME — ham toLowerCase BURADA KULLANILAMAZ. JS kuralıyla 'I' → 'i' oluyor
+   (Türkçe'de 'ı' olmalı) ve 'İ' → 'i' + U+0307 yani İKİ karakter; ikincisi _KALIN/_INCE
+   içinde hiç bulunamıyor, ünlü sayılmıyor ve tarama bir önceki ünlüye kayıyor. Kalın/ince
+   kararı yanlış olunca ekin TAMAMI yanlış uyumlanır.
+   _norm BURADA KULLANILAMAZ: o ı/i'yi tek havuzda topluyor ve tam da bu ayrımı yok ediyor. */
+function _trKucuk(c) {
+  if (c === "I") return "ı";
+  if (c === "İ") return "i";
+  return String(c).toLowerCase();
+}
+function _sonUnlu(s) {
+  for (var i = String(s).length - 1; i >= 0; i--) {
+    var c = _trKucuk(String(s).charAt(i));
+    if (_KALIN.indexOf(c) >= 0 || _INCE.indexOf(c) >= 0) return c;
+  }
+  return "";
+}
+/* ⚠ ÜNLÜ UYUMUNA GİRMEYEN EKLER — TDK. Bunlar her kökten sonra AYNI kalır:
+     -gil  : "annemgil", "Ayşegil", "dayımgil"   (uyumlansa "gılda" gibi var olmayan ek çıkar)
+     -ki   : "yarınki", "akşamki"                (yalnız "bugünkü" istisna)
+     -ken  : "koşarken", "bakarken"
+     -leyin: "sabahleyin", "akşamleyin"
+   Doğrulamayı "_ekZinciri ile sına" diye yapmak YETMİYOR: _norm artık ı/i'yi tek havuzda
+   topladığı için "gılda" normalize edilince "gilda" oluyor ve zincir testini geçiyor. */
+var _UYUMSUZ_EK = /(gil|ki|ken|leyin)/i;
+function _ekUyumla(ek, kokUnlu) {
+  if (!kokUnlu || !ek) return ek;
+  /* ⚠ UYUMSUZ HALKA EKİN TAMAMINI DEĞİL, ORADAN SONRASINI muaf tutar.
+     Eskiden ek içinde "ki/gil/ken/leyin" geçmesi EKİN TAMAMINI uyumlamadan geçiriyordu:
+     "tofudaki" → "Tofidaki" (doğrusu "Tofideki") — "-ki" gerçekten uyuma girmez ama ondan
+     ÖNCEKİ "-da" girer. Aynı kök üzerinde tutarsızlık görünüyordu: "tofuda" doğru çevriliyor,
+     "tofudaki" çevrilmiyordu.
+     Şimdi uyumlama uyumsuz halkanın BAŞLADIĞI yerde duruyor: öncesi uyumlanır, halka ve
+     sonrası özgün kalır. Ölçüldü: "tofudaki"→"Tofideki" · "tofununki"→"Tofininki" ·
+     "dorragilde"→"Doragilde" (korunuyor) · "torandaki"→"Dorandaki" (korunuyor).
+     ⚠ Arama büyük/küçük harfe DUYARSIZ ve ÖZGÜN dizge üzerinde: toLowerCase()'lenmiş kopyada
+     index aramak 'İ' iki kod birimine açıldığı için kayabilirdi. */
+  var kes = String(ek).search(_UYUMSUZ_EK);
+  var on = (kes >= 0) ? String(ek).slice(0, kes) : String(ek);
+  var arka = (kes >= 0) ? String(ek).slice(kes) : "";
+  var out = "", u = kokUnlu, i, c, lc, y;
+  for (i = 0; i < on.length; i++) {
+    c = on.charAt(i); lc = _trKucuk(c);
+    if ("ae".indexOf(lc) >= 0) y = _GENIS_UYUM[u];
+    else if ("ıiuü".indexOf(lc) >= 0) y = _DAR_UYUM[u];
+    else { out += c; continue; }
+    /* ⚠ KASA KORUNUR. Tablolar yalnız küçük harf içeriyor; ünsüzler özgün kasasıyla
+       kopyalandığı için BÜYÜK harfli bir ekte sonuç alacalı bir dizgeye dönüşüyordu
+       ("TOFULARDAN" → "TofiLeRDeN"). Türkçe büyük harf eşlemesi ayrı tabloda: 'i' → 'İ'. */
+    out += (c !== lc && _BUYUK_UNLU[y]) ? _BUYUK_UNLU[y] : y;
+    u = y;
+  }
+  return out + arka;
+}
+
 function fixToken(tok, map) {
   if (!map) return null;
   var p = _bol(tok);
@@ -169,13 +254,54 @@ function fixToken(tok, map) {
   if (!dogru && !ek) {
     for (var L = nk.length - 1; L >= 3; L--) {
       var onek = nk.slice(0, L), kalan = nk.slice(L);
-      if (map.tek[onek] && _ekZinciri(kalan, 3)) { dogru = map.tek[onek]; ek = kok.slice(L); break; }
+      if (map.tek[onek] && _ekZinciri(kalan, 3)) {
+        dogru = map.tek[onek];
+        /* Ek DOĞRU ADIN son ünlüsüne uyumlanır (bkz. yukarıdaki not) — yanlış gövdeden değil.
+           ⚠ UYUMLANMIŞ EK GEÇERLİ Mİ DİYE SINANIR. Türkçe'de her ek ünlü uyumuna girmez:
+           "-gil" uyumsuzdur ("annemgil", "Ayşegil"), yani körlemesine uyumlamak "gilde"yi
+           "gılda"ya çevirip var olmayan bir ek üretiyordu ("dorragilde" → "Doragılda").
+           Uyumlanmış biçim geçerli bir ek zinciri değilse özgün ek olduğu gibi kalır —
+           _EK tablosu zaten hangi biçimlerin var olduğunun tek kaynağı. */
+        var _hamEk = kok.slice(L);
+        var _uyumlu = _ekUyumla(_hamEk, _sonUnlu(dogru));
+        ek = _ekZinciri(_norm(_uyumlu), 3) ? _uyumlu : _hamEk;
+        break;
+      }
     }
   }
   if (!dogru) return null;
 
   var yeni = p.on + dogru + ek + p.son;
   return (yeni === String(tok)) ? null : yeni;   // zaten doğruysa "düzeltme" sayma
+}
+
+/* İKİ KELİME GERÇEKTEN YAN YANA MI? İkili birleştirme eskiden yalnız "dizide komşu mu" ve
+   "normalize metinler anahtara uyuyor mu" diye bakıyordu; ARADAKİ ZAMANA ve segment kimliğine
+   hiç bakmıyordu. Varsayılan sözlükteki ikili anahtarların çoğu Türkçe'de tek başına geçebilen
+   kısa hecelerden oluşuyor ("mi mi", "to fi", "mo ni", "do ra", "ni ko"). Ölçüldü: videonun
+   41. saniyesindeki "…geldi mi?" ile 95. saniyesindeki "Mi ne?" tek kelimeye kaynayıp
+   {word:"Mimi", start:41.0, end:95.4} oluyordu — 54 saniyelik bir kelime. Sonuç yalnız yanlış
+   metin değil: birleşen kelime words[i]'nin seg'ini koruduğu için cue'nun cumleId'si YANLIŞ
+   cümleyi gösteriyor, ileri fırlayan end ise buildCues'un boşluk/segment bölmesini o noktada
+   devre dışı bırakıyor.
+   ⚠ TAVAN İKİ KADEMELİ, TEK SAYI DEĞİL. Tabloda gerçekten AYRI söylenen çok kelimeli adlar
+   da var ("kaptan amerika", "dead pool", "iron men", "bet men"); yavaş konuşmada aralarındaki
+   boşluk 0.3 sn'yi rahatça aşar ve tek düşük tavan o düzeltmeleri sessizce öldürürdü. Bu yüzden
+   iki parçası da <=3 harf olan hece bölünmeleri için 0.30, gerçek çok kelimeli adlar için
+   buildCues'un GAP'iyle aynı 0.70 kullanılıyor.
+   Zaman alanı yoksa (fixText yolu — düz metinde damga yok) eski davranış aynen korunur. */
+var _IKILI_HECE = 0.30, _IKILI_AD = 0.70;
+function _ikiliBitisik(w1, w2, na, nb) {
+  /* Farklı Whisper segmentleri = farklı cümleler. null ise bilgi yok, engelleme. */
+  if (w1.seg != null && w2.seg != null && w1.seg !== w2.seg) return false;
+  var bos = Number(w2.start) - Number(w1.end);
+  if (!isFinite(bos)) return true;
+  /* ⚠ EŞİK 3 DEĞİL 2. Üç harf tavanı "bet men"i (Batman) HECE kovasına düşürüyordu: yorum
+     onu açıkça "gerçekten AYRI söylenen çok kelimeli ad" sayıyor ama kod 0.30 sn uyguluyor
+     ve 0.40 sn ara ile söylendiğinde birleştirmiyordu (ölçüldü — düzeltme öncesi boşluk ne
+     olursa olsun birleşiyordu, yani regresyondu). Gerçek hece bölünmelerinin HEPSİ 2+2:
+     to fi · mo ni · do ra · mi mi · ni ko. */
+  return bos <= ((na.length <= 2 && nb.length <= 2) ? _IKILI_HECE : _IKILI_AD);
 }
 
 /* Whisper kelime listesini (flattenWords çıktısı) YERİNDE düzeltir; düzeltme sayısını döner.
@@ -187,9 +313,19 @@ function fixWords(words, map) {
     // önce ikili dene: model ismi bölmüş olabilir ("To" + "fi")
     if (i + 1 < words.length) {
       var a = _bol(words[i].word), b = _bol(words[i + 1].word);
-      var dogru = map.ikili[_norm(a.govde) + " " + _norm(b.govde)];
-      if (dogru) {
-        words[i].word = a.on + dogru + b.son;
+      var na = _norm(a.govde), nb = _norm(b.govde);
+      var dogru = map.ikili[na + " " + nb];
+      if (dogru && _ikiliBitisik(words[i], words[i + 1], na, nb)) {
+        /* ⚠ a.son KORUNUR AMA CÜMLE SINIRI SAYILAN İŞARETLER ATILIR.
+           İlk parçanın noktalaması birleşik kelimenin SONUNA taşınıyor; buildCues tam orayı
+           okuyup (`/[!?…:]$/` ya da sonda nokta) cue'yu FLUSH ediyor. Yani "To." + "fi"
+           birleşince "Tofi." oluyor ve arkasından SAHTE bir cümle sonu doğuyor — ölçüldü:
+           maxWords=2 iken "Tofi geldi" olması gereken cue "Tofi" (tek kelime, 0.42 sn) diye
+           bölünüyor, yani projenin özellikle savaştığı "yetim tek-kelimelik cue" sınıfı geri
+           geliyordu. Ayrıca "To?" + "fi!" → "Tofi?!" oluyordu (cleanPunct ! ve ? korur).
+           Virgül/nokta zaten cleanPunct tarafından siliniyor, yani onları taşımanın ölçülen
+           kazancı SIFIR; parantez/tırnak gibi zararsız işaretler korunuyor. */
+        words[i].word = a.on + dogru + String(a.son).replace(/[.!?…:,]/g, "") + b.son;
         words[i].end = words[i + 1].end;
         words.splice(i + 1, 1);
         n++;

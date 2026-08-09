@@ -352,7 +352,15 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
       const m = String(metin).match(/\{[\s\S]*\}/);
       if (m) { try { j = JSON.parse(m[0]); } catch (e3) { j = null; } }
     }
-    if (!j || !j.secimler) {
+    /* ⚠ TİP KONTROLÜ ŞART, "var mı" YETMEZ. `!j.secimler` yalnız yok/null/boş'u eler;
+       {"secimler": {...}} ya da {"secimler":"yok"} bu kapıdan GEÇER ve bir satır sonra
+       .forEach TypeError atar. O istisna parça döngüsünün try'ı DIŞINDA kaldığı için
+       (try yalnız istekGonder'i sarıyor) tüm duygulariSec reject eder: "bir parça düşerse
+       tümü düşmesin" tasarımı tam da bozuk-cevap senaryosunda devre dışı kalır ve o ana
+       kadar ödenmiş bütün istekler çöpe gider. Şemasız geri düşüş (HTTP 400 → vurucu.js
+       output_config'i siliyor) cevabı hiç kısıtlamadığı için bu yol gerçekten ulaşılabilir.
+       vurucu.js `_secimleriAyristir` aynı kontrolü zaten yapıyor; burada düşmüştü. */
+    if (!j || Object.prototype.toString.call(j.secimler) !== "[object Array]") {
       hataliParca++;
       sonHata = "Yapay zekânın cevabı okunamadı (JSON bozuk)";
       log("[emoji] parça " + (p + 1) + " cevabı okunamadı.");
@@ -362,6 +370,9 @@ async function duygulariSec(VUR, anahtar, cumleler, duygular, opts, damga, log) 
     /* MODEL LISTE DISINA CIKARSA AT. Sema enum kullaniyor ama semasiz geri dusulmus
        olabilir; bilinmeyen bir duygu adi icin dosya yoktur ve sessizce bos klip olurdu. */
     j.secimler.forEach((s) => {
+      /* Eleman de nesne olmak zorunda: {"secimler":[null]} ya da [3] aynı çökmeyi üretirdi
+         (s.sira null üzerinde patlar). vurucu.js:646'daki kapının aynısı. */
+      if (!s || typeof s !== "object") { siraDisi++; return; }
       /* ⚠ NUMARA PARÇA İÇİNDE VE ARALIKTA OLMAK ZORUNDA — DOĞRULAMASIZ KABUL YASAK.
          Emojinin yanlış kişiye gitmesinin sebebi tam olarak buydu: gelen numara hiç
          denetlenmeden indekse yazılıyordu. Aralık dışı numara artık ATILIR ve SAYILIR;

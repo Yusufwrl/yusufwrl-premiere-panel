@@ -63,7 +63,7 @@ New-Item -ItemType Directory -Path $extRoot -Force | Out-Null
 # config.json bu listede DEGIL: pakette gelir, asagida BIRLESTIRILIYOR (bkz. satir ~90).
 $koru  = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json",
            "assemblyai-key.txt", "anthropic-key.txt", "presetler.json", "presetler.bak.json",
-           "lisans.json")
+           "lisans.json", "lisans.json.bak")
 $yedek = Join-Path $env:TEMP ("panel_koru_" + [guid]::NewGuid().ToString("N"))
 $korunan = @()
 

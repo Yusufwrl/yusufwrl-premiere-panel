@@ -352,6 +352,622 @@ function bitir() {
     else ok("repo kökündeki her öğe bir listede");
   })();
 
+  /* ---- 10. SÖZLÜK: BÜYÜK/KÜÇÜK "I" ASİMETRİSİ ---- */
+  /* GERÇEK HATA: _norm 'I'yı 'ı'ya çeviriyor ama 'ı'yı 'i'ye çevirmiyordu, yani tablo ikiye
+     bölünüyordu. Kullanıcı varyantı "ilgas" yazınca anahtar 'ilgas'; Whisper özel ismi büyük
+     harfle "Ilgas" yazınca _norm 'ılgas' üretiyor ve ikisi ASLA eşleşmiyordu. BILINEN
+     listesindeki "iron men" varyantı bu yüzden tamamen ölüydü. */
+  baslik("Sözlük (büyük harfli varyant da eşleşmeli)");
+  (function () {
+    var SZ;
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); }
+    catch (e) { hata("sozluk.js yüklenemedi", e.message); return; }
+    var harita = SZ.buildMap(SZ.defaults());
+    dogru("sözlük haritası kuruldu", !!harita);
+    if (!harita) return;
+    /* Whisper özel isimleri BÜYÜK harfle yazar — asıl gerçek dünya durumu bu. */
+    esit("küçük harfli varyant düzeliyor", SZ.fixToken("toffy", harita), "Tofi");
+    esit("BÜYÜK harfli varyant da düzeliyor", SZ.fixToken("Toffy", harita), "Tofi");
+    esit("zincirlenmiş ek + büyük harf", SZ.fixToken("Toffy'ye", harita), "Tofi'ye");
+    /* MASUM TÜRKÇE KELİMELER BOZULMAMALI — havuz birleştirmenin bedeli ölçülür. */
+    var masum = ["ışık", "ilik", "ılık", "sınır", "sinir", "minik", "mimik", "monitör",
+                 "halk", "tor", "kısa", "ilişki", "imkân", "ithal", "iyi", "ısı", "için"];
+    var bozulan = masum.filter(function (k) { return SZ.fixToken(k, harita) !== null; });
+    esit("masum Türkçe kelimeler bozulmuyor", bozulan, []);
+
+    /* ── EK ÜNLÜ UYUMU ──
+       GERÇEK HATA: yapışık ek dalı kökü doğru adla değiştiriyor ama eki motorun YANLIŞ
+       yazdığı gövdeden birebir kopyalıyordu: "tofuyu" → "Tofiyu", "torasinda" → "Dorasinda".
+       Ekranda ne konuşmacının söylediği ne de doğru Türkçe olan kelimeler çıkıyordu. */
+    var ekVaka = [
+      ["tofuyu", "Tofiyi"], ["tofunun", "Tofinin"], ["tofuda", "Tofide"],
+      ["tofudan", "Tofiden"], ["torasinda", "Dorasında"], ["nikuya", "Nikoya"],
+      ["moneylerin", "Monilerin"], ["tofularla", "Tofilerle"],
+      /* Zincirlenmiş ek BOZULMAMALI (CLAUDE.md'de açıkça korunan davranış). */
+      ["tofulerden", "Tofilerden"], ["toffyyle", "Tofiyle"],
+      /* ⚠ ÜNLÜ UYUMUNA GİRMEYEN EK (TDK): -gil her kökten sonra AYNI kalır. Körlemesine
+         uyumlamak "gilde"yi "gılda"ya çevirip var olmayan bir ek üretiyordu. */
+      ["dorragilde", "Doragilde"], ["tofuyken", "Tofiyken"]
+    ];
+    var ekYanlis = [];
+    ekVaka.forEach(function (v) {
+      var r = SZ.fixToken(v[0], harita);
+      if (r !== v[1]) ekYanlis.push(v[0] + ": " + r + " (beklenen " + v[1] + ")");
+    });
+    esit("ek ünlüsü köke uyumlanıyor (uyumsuz ekler hariç)", ekYanlis, []);
+  })();
+
+  /* ---- 11. SÖZLÜK: İKİLİ BİRLEŞTİRME ZAMANA BAKMALI ---- */
+  /* GERÇEK HATA: "mi mi" (Mimi), "to fi", "do ra" gibi kısa ikili anahtarlar Türkçe'de tek
+     başına geçebiliyor. Birleştirme yalnız "dizide komşu mu" diye bakıyordu; 41. saniyedeki
+     "…geldi mi?" ile 95. saniyedeki "Mi ne?" tek kelimeye kaynayıp 54 saniyelik bir kelime
+     üretiyordu. Ama GERÇEK iki kelimeli adlar ("kaptan amerika") hâlâ birleşmeli. */
+  baslik("Sözlük (ikili birleştirme — zaman ve segment)");
+  (function () {
+    var SZ;
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); } catch (e) { hata("sozluk.js", e.message); return; }
+    var harita = SZ.buildMap(SZ.defaults());
+    if (!harita) { hata("harita kurulamadı"); return; }
+    function kel(w, s, e, seg) { return { word: w, start: s, end: e, seg: seg }; }
+
+    var bitisik = [kel("mi", 10.0, 10.2, 0), kel("mi", 10.25, 10.5, 0)];
+    SZ.fixWords(bitisik, harita);
+    esit("bitişik hece birleşiyor", bitisik.length === 1 && /Mimi/.test(bitisik[0].word), true);
+
+    var uzak = [kel("mi", 41.0, 41.2, 3), kel("mi", 95.0, 95.4, 21)];
+    SZ.fixWords(uzak, harita);
+    esit("54 sn arayla olan İKİ kelime birleşMİYOR", uzak.length, 2);
+
+    var farkliSeg = [kel("mi", 10.0, 10.2, 0), kel("mi", 10.25, 10.5, 1)];
+    SZ.fixWords(farkliSeg, harita);
+    esit("farklı Whisper segmenti birleşMİYOR", farkliSeg.length, 2);
+
+    /* GERÇEK çok kelimeli ad: yavaş konuşmada araları 0.3 sn'yi aşar, yine birleşmeli. */
+    var ad2 = [kel("kaptan", 5.0, 5.5, 2), kel("amerika", 6.0, 6.8, 2)];
+    SZ.fixWords(ad2, harita);
+    esit("çok kelimeli gerçek ad (0.5 sn ara) hâlâ birleşiyor",
+         ad2.length === 1 && /Captain America/i.test(ad2[0].word), true);
+
+    /* ⚠ "bet men" ÜÇ HARFLİ ama gerçek bir çok kelimeli ad — hece kovasına DÜŞMEMELİ.
+       Eşik <=3 iken 0.40 sn ara ile birleşmiyordu (regresyon); eşik <=2 ile düzeldi. */
+    var ad3 = [kel("bet", 5.0, 5.5, 2), kel("men", 5.9, 6.3, 2)];
+    SZ.fixWords(ad3, harita);
+    esit("bet men (0.40 sn ara) hâlâ birleşiyor",
+         ad3.length === 1 && /Batman/i.test(ad3[0].word), true);
+
+    /* ⚠ İLK PARÇANIN NOKTALAMASI CÜMLE SINIRI ÜRETMEMELİ. "To." + "fi" birleşince "Tofi."
+       oluyor ve buildCues orada cue'yu flush edip yetim tek-kelimelik cue üretiyordu. */
+    var nk = [kel("To.", 3.0, 3.2, 1), kel("fi", 3.25, 3.5, 1)];
+    SZ.fixWords(nk, harita);
+    esit("birleşen kelimede sahte cümle sonu yok",
+         nk.length === 1 && nk[0].word === "Tofi", true);
+    /* Sondaki noktalama (b.son) KORUNUR — gerçek cümle sonu bilgisi o. */
+    var nk2 = [kel("To", 3.0, 3.2, 1), kel("fi.", 3.25, 3.5, 1)];
+    SZ.fixWords(nk2, harita);
+    esit("ikinci parçanın noktalaması korunuyor",
+         nk2.length === 1 && nk2[0].word === "Tofi.", true);
+  })();
+
+  /* ---- 12. KİŞİLER: KLAN ETİKETİ ADIN PARÇASI ---- */
+  /* GERÇEK HATA: satır sonundaki HER [..] renk sanılıp addan kesiliyordu. Dosyaya Discord'un
+     GÖRÜNEN ADI yazılıyor ve görünen adlar klan etiketi taşıyabiliyor: "Player[TR]" → "Player"
+     düşüyor, Craig dosyası "3-Player[TR].m4a" eşleşmiyor, kişi kanalına hiç konmuyordu. */
+  baslik("Kişiler (klan etiketi renk sanılmasın)");
+  (function () {
+    var KS;
+    try { KS = require(path.join(KOK, "js", "kisiler.js")); } catch (e) { hata("kisiler.js", e.message); return; }
+    var a = KS.parseText("Niko: Player[TR]");
+    esit("tanınmayan [..] adın parçası kalıyor", a.length === 1 ? a[0].adlar : null, ["Player[TR]"]);
+    var b = KS.parseText("Moni: e [Blue]");
+    esit("gerçek renk adı hâlâ ayrışıyor", b.length === 1 ? b[0].adlar : null, ["e"]);
+    dogru("gerçek renk değeri okunuyor", b.length === 1 && b[0].renk > 0, "renk: " + (b[0] && b[0].renk));
+    var c = KS.parseText("Dora: kiz [3]");
+    esit("sayısal renk hâlâ ayrışıyor", c.length === 1 ? [c[0].adlar, c[0].renk] : null, [["kiz"], 3]);
+  })();
+
+  /* ---- 13. PNG: APNG SESSİZCE BOZULMASIN ---- */
+  /* GERÇEK HATA: animasyon chunk'ları (acTL/fcTL/fdAT) yan chunk sayılıp IDAT'ın ÖNÜNE
+     taşınıyor, fdAT içindeki piksel verisi aynalanmadan kalıyordu — geçersiz APNG üretilip
+     ok:true dönüyordu. Artık açıkça reddediliyor (çağıran özgün resmi koyuyor). */
+  baslik("PNG aynalama (APNG reddi)");
+  (function () {
+    var AY, zlib = require("zlib");
+    try { AY = require(path.join(KOK, "js", "pngayna.js")); } catch (e) { hata("pngayna.js", e.message); return; }
+    function crc32(buf) {
+      var t = [], c, n, k;
+      for (n = 0; n < 256; n++) { c = n; for (k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+      var r = 0xffffffff;
+      for (var i = 0; i < buf.length; i++) r = t[(r ^ buf[i]) & 0xff] ^ (r >>> 8);
+      return (r ^ 0xffffffff) >>> 0;
+    }
+    function chunk(tip, veri) {
+      var u = Buffer.alloc(4); u.writeUInt32BE(veri.length, 0);
+      var g = Buffer.concat([Buffer.from(tip, "ascii"), veri]);
+      var c = Buffer.alloc(4); c.writeUInt32BE(crc32(g), 0);
+      return Buffer.concat([u, g, c]);
+    }
+    // 2x1 RGBA, tek IDAT + acTL (APNG işareti)
+    var ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(2, 0); ihdr.writeUInt32BE(1, 4);
+    ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+    var ham = Buffer.from([0, 255, 0, 0, 255, 0, 0, 255, 255]);   // filtre 0 + 2 piksel
+    var actl = Buffer.alloc(8); actl.writeUInt32BE(2, 0); actl.writeUInt32BE(0, 4);
+    var apng = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr), chunk("acTL", actl),
+      chunk("IDAT", zlib.deflateSync(ham)), chunk("IEND", Buffer.alloc(0))
+    ]);
+    /* Geçici klasör REPO İÇİNE değil sistem tmp'sine — repo'yu kirletmesin ve iki test
+       koşusu birbirinin dosyasını görmesin (benzersiz ad). */
+    var tmpDir = path.join(require("os").tmpdir(), "yw-apng-test-" + process.pid);
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) {}
+    var src = path.join(tmpDir, "apng.png"), dst = path.join(tmpDir, "apng_ayna.png");
+    fs.writeFileSync(src, apng);
+    var r = AY.aynala(src, dst);
+    dogru("APNG açıkça REDDEDİLİYOR (sessizce bozulmuyor)", r && r.ok === false,
+          "dönen: " + JSON.stringify(r));
+    dogru("reddedilen APNG için çıktı dosyası YAZILMIYOR", !fs.existsSync(dst));
+    // düz PNG hâlâ çalışıyor
+    var duz = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(ham)), chunk("IEND", Buffer.alloc(0))
+    ]);
+    var src2 = path.join(tmpDir, "duz.png"), dst2 = path.join(tmpDir, "duz_ayna.png");
+    fs.writeFileSync(src2, duz);
+    var r2 = AY.aynala(src2, dst2);
+    dogru("APNG olmayan PNG hâlâ aynalanıyor", r2 && r2.ok === true, "dönen: " + JSON.stringify(r2));
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+  })();
+
+  /* ---- 14. CSS: [hidden] ÖZNİTELİĞİNİ EZEN SINIF ---- */
+  /* GERÇEK HATA (yedi kez): tarayıcının [hidden]{display:none} kuralı UA kaynaklı; senin
+     yazdığın .sinif{display:grid} AUTHOR kaynaklı ve her zaman kazanıyor. JS'te el.hidden=true
+     çalışıyor, DOM'da öznitelik görünüyor ama eleman ekranda kalıyor. */
+  baslik("CSS ([hidden] ezen sınıf kalmadı mı)");
+  (function () {
+    var html, css, app;
+    try {
+      html = fs.readFileSync(path.join(KOK, "index.html"), "utf8");
+      css = fs.readFileSync(path.join(KOK, "css", "style.css"), "utf8");
+      app = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+    } catch (e) { hata("dosya okunamadı", e.message); return; }
+
+    var yonetilen = {};
+    var re1 = /\$\(\s*["']([\w-]+)["']\s*\)\s*\.hidden\s*=/g, m;
+    while ((m = re1.exec(app))) yonetilen[m[1]] = 1;
+    var re2 = /<[^>]*\bid="([\w-]+)"[^>]*\bhidden\b[^>]*>/g;
+    while ((m = re2.exec(html))) yonetilen[m[1]] = 1;
+    // degiskene alinip .hidden yazilanlar
+    var deg = {}, re3 = /(?:var|let|const)\s+([\w$]+)\s*=\s*\$\(\s*["']([\w-]+)["']\s*\)/g;
+    while ((m = re3.exec(app))) deg[m[1]] = m[2];
+    var re4 = /([\w$]+)\.hidden\s*=/g;
+    while ((m = re4.exec(app))) { if (deg[m[1]]) yonetilen[deg[m[1]]] = 1; }
+
+    function siniflar(id) {
+      var mm = new RegExp('<[^>]*\\bid="' + id + '"[^>]*>').exec(html);
+      if (!mm) return null;
+      var cm = mm[0].match(/\bclass="([^"]*)"/);
+      return cm ? cm[1].trim().split(/\s+/) : [];
+    }
+    function displayVar(sec) {
+      var esc = sec.replace(/-/g, "\\-");
+      var re = new RegExp("\\" + esc + "\\s*(?:,[^{]*)?\\{([^}]*)\\}", "g"), mm, bul = null;
+      while ((mm = re.exec(css))) {
+        var dm = mm[1].match(/display\s*:\s*([\w-]+)/);
+        if (dm && dm[1] !== "none") bul = dm[1];
+      }
+      return bul;
+    }
+    function hiddenKurali(sec) {
+      return new RegExp("\\" + sec.replace(/-/g, "\\-") + "\\[hidden\\]").test(css);
+    }
+    var bozuk = [];
+    Object.keys(yonetilen).forEach(function (id) {
+      var cl = siniflar(id);
+      if (cl === null) return;
+      if (displayVar("#" + id) && !hiddenKurali("#" + id)) bozuk.push("#" + id);
+      cl.forEach(function (s) {
+        if (displayVar("." + s) && !hiddenKurali("." + s)) bozuk.push(id + " → ." + s);
+      });
+    });
+    esit("hidden ile yönetilen elemanların hepsi gerçekten gizlenebiliyor", bozuk, []);
+  })();
+
+  /* ---- 15. KORUNAN KULLANICI DOSYALARI BEŞ YERDE AYNI MI ---- */
+  /* GERÇEK RİSK: liste beş ayrı dosyada elle tutuluyor. Biri unutulursa kullanıcının
+     sözlüğü/lisansı/preset'leri güncellemede ya da yeniden kurulumda SESSİZCE siliniyor. */
+  baslik("Korunan kullanıcı dosyaları (beş liste tutarlı mı)");
+  (function () {
+    function oku(p) { try { return fs.readFileSync(path.join(KOK, p), "utf8"); } catch (e) { return ""; } }
+    /* PowerShell yorumlarını temizle — yorumdaki apostrof/parantez ayrıştırmayı bozuyor. */
+    function ps1YorumSil(t) {
+      return t.split(/\r?\n/).map(function (satir) {
+        var cikti = "", tirnak = null;
+        for (var i = 0; i < satir.length; i++) {
+          var c = satir.charAt(i);
+          if (tirnak) { cikti += c; if (c === tirnak) tirnak = null; continue; }
+          if (c === '"' || c === "'") { tirnak = c; cikti += c; continue; }
+          if (c === "#") break;
+          cikti += c;
+        }
+        return cikti;
+      }).join("\n");
+    }
+    function ps1Dizi(metin, ad) {
+      var t = ps1YorumSil(metin);
+      var mm = t.match(new RegExp("\\$" + ad + "\\s*=\\s*@\\(([\\s\\S]*?)\\)"));
+      if (!mm) return null;
+      return (mm[1].match(/"[^"]*"|'[^']*'/g) || []).map(function (x) { return x.slice(1, -1); });
+    }
+    var A = ps1Dizi(oku("installer/panel-files.ps1"), "PanelUserFiles");
+    var D = ps1Dizi(oku("installer/kur.ps1"), "koru");
+    var issM = oku("installer/installer.iss").match(/Excludes:\s*"([^"]+)"/);
+    var C = issM ? issM[1].split(",").map(function (s) { return s.trim(); }) : [];
+    var updM = oku("js/updater.js").replace(/\/\*[\s\S]*?\*\//g, "")
+                 .match(/KULLANICI_DOSYALARI\s*=\s*\[([\s\S]*?)\]/);
+    var U = updM ? (updM[1].match(/"[^"]+"/g) || []).map(function (x) { return x.slice(1, -1); }) : null;
+    var G = oku(".gitignore").split(/\r?\n/).map(function (s) { return s.trim().replace(/^\//, ""); });
+
+    dogru("$PanelUserFiles okundu", !!(A && A.length), "bulunamadı");
+    if (!A) return;
+    function icinde(dizi, x) { return dizi && dizi.indexOf(x) >= 0; }
+    var eksikler = [];
+    A.forEach(function (f) {
+      if (!icinde(C, f)) eksikler.push(f + " → installer.iss");
+      if (!icinde(D, f)) eksikler.push(f + " → kur.ps1");
+      if (!icinde(G, f)) eksikler.push(f + " → .gitignore");
+      if (!icinde(U, f)) eksikler.push(f + " → updater.js");
+    });
+    esit("korunan dosyalar dört listede de var", eksikler, []);
+    /* config.json BİLEREK dışarıda: pakete GİRMESİ gerekiyor (yoksa panel hiç açılmaz). */
+    var fazla = (C || []).filter(function (f) { return f !== "config.json" && A.indexOf(f) < 0; })
+                  .concat((D || []).filter(function (f) { return A.indexOf(f) < 0; }))
+                  .concat((U || []).filter(function (f) { return A.indexOf(f) < 0; }));
+    esit("listelerde fazladan dosya yok", fazla, []);
+    /* ⚠ installer.iss'te config.json Excludes'ta AMA ayrı bir Source satırıyla gelmeli —
+       yoksa temiz kurulumda panel HİÇ açılmaz (loadConfig patlar). */
+    var iss = oku("installer/installer.iss");
+    if (iss.indexOf("config.json") >= 0 && /Excludes:[^"]*"[^"]*config\.json/.test(iss)) {
+      dogru("config.json Excludes'ta ise AYRI Source satırı var",
+            /Source:\s*"staging\\panel\\config\.json"/.test(iss),
+            "config.json dışlanmış ama ayrı satırla kopyalanmıyor — temiz kurulumda panel açılmaz!");
+    }
+  })();
+
+  /* ---- 16. WORKER: YÖNETİM SAYFASININ KENDİ JS'İ ---- */
+  /* GERÇEK RİSK: ADMIN_HTML bir template literal, yani içindeki 110 satırlık tarayıcı JS'i
+     `node --check worker.js` için sadece bir METİN. Orada bir sözdizimi hatası hiçbir
+     kontrole takılmadan yayına çıkar ve yönetim sayfası tümden ölür. */
+  baslik("Lisans sunucusu (yönetim sayfasının gömülü JS'i)");
+  (function () {
+    var src, vm = require("vm");
+    try { src = fs.readFileSync(path.join(KOK, "sunucu", "worker.js"), "utf8"); }
+    catch (e) { hata("worker.js okunamadı", e.message); return; }
+    var bas = src.indexOf("const ADMIN_HTML = `");
+    if (bas < 0) { not("ADMIN_HTML bulunamadı — kontrol atlandı"); return; }
+    var icBas = src.indexOf("`", bas) + 1, i = icBas, son = -1;
+    while (i < src.length) {
+      if (src.charAt(i) === "\\") { i += 2; continue; }
+      if (src.charAt(i) === "`") { son = i; break; }
+      i++;
+    }
+    if (son < 0) { hata("ADMIN_HTML template literal kapanmıyor"); return; }
+    var htmlIc = src.slice(icBas, son).replace(/\\`/g, "`").replace(/\\\\/g, "\\").replace(/\\\$/g, "$");
+    var bloklar = (htmlIc.match(/<script>[\s\S]*?<\/script>/g) || [])
+                    .map(function (b) { return b.replace(/^<script>/, "").replace(/<\/script>$/, ""); });
+    dogru("yönetim sayfasında script bloğu var", bloklar.length > 0);
+    var kotu = [];
+    bloklar.forEach(function (kod, ix) {
+      try { new vm.Script(kod); } catch (e) { kotu.push("blok " + (ix + 1) + ": " + e.message); }
+    });
+    esit("gömülü JS sözdizimi geçerli", kotu, []);
+    var tum = bloklar.join("\n");
+    /* ⚠ INLINE onclick GERİ EKLENMESİN: id/ad oraya gömülünce tek tırnaklı bir isim
+       ("Ali'nin PC") geçersiz JS üretiyor ve bütün düğmeler SESSİZCE ölüyordu. HTML kaçışı
+       bunu düzeltmez (tarayıcı karakter referanslarını handler'ı derlemeden ÖNCE çözer). */
+    esit("inline onclick yok (data-* + delegasyon)", (tum.match(/onclick=/g) || []).length, 0);
+    dogru("esc() yardımcısı var", /function\s+esc\s*\(/.test(tum));
+  })();
+
+  /* ---- 17. host.jsx: SİLİNMİŞ TUZAK FONKSİYONU GERİ GELMESİN ---- */
+  /* _yiginSure bütün parametrelerin zamanlarını tek mn/mx çiftinde topluyor ve yalnız YIĞIN
+     çıpasına bakıyordu; karışık çıpalı (giriş+çıkış) preset'te geri uzanımı hiç görmüyor ve
+     kısa klipte çıkış animasyonunu klip dışına yazdırıyordu. Yerine _yiginUzanim geldi. */
+  baslik("Preset motoru (silinmiş tuzak fonksiyonu geri gelmedi)");
+  (function () {
+    var h;
+    try { h = fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"); }
+    catch (e) { hata("host.jsx okunamadı", e.message); return; }
+    dogru("_yiginSure tanımı geri gelmemiş", !/function\s+_yiginSure\s*\(/.test(h));
+    dogru("_yiginUzanim mevcut", /function\s+_yiginUzanim\s*\(/.test(h));
+    dogru("sığdırma İKİ yönü de ölçüyor", /uz\.ileri/.test(h) && /uz\.geri/.test(h));
+    /* Kafa modunda parametre çıpası ZAMANSAL öteleme üretmemeli. */
+    /* ⚠ TANIMI DEĞİL ÇAĞRIYI DENETLE. Eski regex `_paramlariYaz([^)]*kafaVar)` hem
+       `function _paramlariYaz(..., kafaVar)` TANIMINI hem çağrıyı eşliyordu; yani parametre
+       eklenip ÇAĞRIDA geçirilmese bile test yeşil kalırdı — tam da yakalaması gereken hata. */
+    dogru("_paramlariYaz tanımı kafaVar alıyor", /function\s+_paramlariYaz\([^)]*kafaVar\s*\)/.test(h));
+    var cagriM = h.match(/_paramlariYaz\(\s*taze\.components\[[\s\S]{0,240}?\);/);
+    dogru("presetYaz ÇAĞRISI kafaVar'ı geçiriyor", !!cagriM && /kafaVar\s*\)/.test(cagriM[0]),
+          cagriM ? ("çağrı: " + cagriM[0].replace(/\s+/g, " ").slice(0, 160)) : "çağrı bulunamadı");
+    dogru("kafa modunda capaDelta sıfırlanıyor", /if\s*\(kafaVar\)\s*capaDelta\s*=\s*0/.test(h));
+    /* Ses klibi süzgeci ÜÇ yolda da olmalı (efektUygula, presetYaz, animasyonUygula). */
+    esit("_sesKlibiMi süzgeci üç uygulama yolunda da var",
+         (h.match(/if\s*\(_sesKlibiMi\(sec\[\w+\]\)\)/g) || []).length >= 3, true);
+  })();
+
+  /* ---- 17b. LİSANS: KİLİT AŞMA YOLLARI KAPALI MI ---- */
+  /* Buradaki iki kontrol de bu denetimde AÇILAN (ve kapatılan) gerçek açıklardan doğdu:
+     · "ham:" ön ekli bir lisans.json'un HER bilgisayarda açılması (joker kimlik),
+     · iptal edilmiş bir lisansın ana dosya silinerek yedekten iptalsiz dirilmesi.
+     Ağ GEREKMEZ — durumOku senkron ve kayitYaz saf dosya işi. */
+  baslik("Lisans (kilit aşma yolları)");
+  (function () {
+    var LIS, os = require("os");
+    try { LIS = require(path.join(KOK, "js", "lisans.js")); }
+    catch (e) { hata("lisans.js yüklenemedi", e.message); return; }
+    if (typeof LIS.kayitYaz !== "function") { not("kayitYaz dışa açık değil — ölçüm atlandı"); return; }
+
+    var dir = path.join(os.tmpdir(), "yw-lisans-test-" + process.pid);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+    fs.mkdirSync(dir, { recursive: true });
+    var yol = path.join(dir, "lisans.json");
+    var H = LIS.hwid();
+    function durum() { var r = LIS.durumOku(dir); return r.durum + "/" + r.sebep; }
+
+    if (!H) { not("bu makinede HWID okunamadı — lisans ölçümü atlandı"); return; }
+
+    /* Temel: doğru kimlik açar, başka makine kilitler. */
+    LIS.kayitYaz(dir, { hwid: H });
+    esit("doğru kimlikle açılıyor", durum(), "acik/tamam");
+    LIS.kayitYaz(dir, { hwid: "sha256-baska-makine-karmasi-0123456789" });
+    esit("başka makinenin kaydı kilitliyor", durum(), "kilit/baskapc");
+
+    /* ⚠ JOKER KİMLİK: "ham:" ön ekli, bu makineyle HİÇ ilgisi olmayan bir kayıt AÇMAMALI.
+       Simetrik biçim kontrolü ("_hamH !== _hamK") tam da bunu üretiyordu: tek bir dosya
+       bütün bilgisayarlarda geçerli oluyordu ve hedefin karmasını bilmeye bile gerek yoktu. */
+    LIS.kayitYaz(dir, { hwid: "ham:11111111-2222-3333-4444-555555555555" });
+    esit("alakasız \"ham:\" kayıt HER makinede AÇMIYOR", durum(), "kilit/baskapc");
+
+    /* ⚠ İPTAL YEDEKTEN DİRİLMESİN. kayitYaz eskisini .bak'a alıyor; iptal yazılırken .bak
+       iptalSİZ kalırsa kullanıcı ana dosyayı silip kilidi aşıyordu. */
+    try { fs.unlinkSync(yol + ".bak"); } catch (e) {}
+    LIS.kayitYaz(dir, { hwid: H });                    // 1. yazma (iptalsiz)
+    var k2 = LIS.kayitOku(dir); k2.iptal = true;
+    LIS.kayitYaz(dir, k2);                             // 2. yazma = ping'in iptal yazması
+    esit("iptal okunuyor", durum(), "kilit/iptal");
+    var bakVar = false;
+    try { bakVar = JSON.parse(String(fs.readFileSync(yol + ".bak", "utf8"))).iptal === true; } catch (e) {}
+    dogru(".bak DA iptalli (yedekten dirilme kapalı)", bakVar);
+    try { fs.unlinkSync(yol); } catch (e) {}           // kullanıcı ana dosyayı siliyor
+    esit("ana dosya silinince iptal AŞILMIYOR", durum(), "kilit/iptal");
+
+    /* ⚠ YENİDEN AKTİVASYON: .bak BAYAT İPTAL TUTMAMALI. Yönetici lisansı tekrar açıp
+       kullanıcı yeniden aktive ettiğinde ana dosya temizleniyor; .bak sonsuza kadar iptalli
+       kalırsa ana dosya bir gün bozulduğunda kayitOku o iptalli kaydı geri yazıp paneli
+       KALICI kilitler — "teknik arıza asla kilit üretmez" kuralının ihlali. */
+    LIS.kayitYaz(dir, { hwid: H });
+    esit("yeniden aktivasyon sonrası açılıyor", durum(), "acik/tamam");
+    var bakTemiz = true;
+    try { bakTemiz = !JSON.parse(String(fs.readFileSync(yol + ".bak", "utf8"))).iptal; } catch (e) {}
+    dogru(".bak bayat iptal TUTMUYOR", bakTemiz);
+
+    /* Bozuk ana dosya yedekten kurtarılmalı — "arıza kalıcı kilit üretmesin" kuralı. */
+    fs.writeFileSync(yol, "{bozuk json", "utf8");
+    esit("bozuk ana dosya yedekten kurtarılıyor", durum(), "acik/tamam");
+    dogru("kurtarılan kayıt ana dosyaya geri yazıldı",
+          fs.existsSync(yol) && JSON.parse(String(fs.readFileSync(yol, "utf8"))).hwid === H);
+
+    /* ⚠ SALT-OKUNUR lisans.json İPTALİ ETKİSİZLEŞTİREMEZ. `attrib +R` tek adımlık bir saldırı:
+       ping iptali ana dosyaya yazamıyor. Yazma sırası yanlışken (.bak rename'den ÖNCE) bu
+       başarısızlık yedekteki iptali de SİLİYORDU. Artık .bak rename'den SONRA yazılıyor ve
+       iptal, rename başarısız olsa bile yedeğe işleniyor. */
+    LIS.kayitYaz(dir, { hwid: H });
+    var roOk = true;
+    try { require("child_process").execSync('attrib +R "' + yol + '"'); } catch (e) { roOk = false; }
+    if (!roOk) not("attrib çalıştırılamadı — salt-okunur ölçümü atlandı");
+    else {
+      var k3 = LIS.kayitOku(dir); k3.iptal = true;
+      var yaz3 = LIS.kayitYaz(dir, k3);
+      esit("salt-okunur hedefte kayitYaz DÜRÜSTÇE false dönüyor", yaz3, false);
+      var bakIptal = false;
+      try { bakIptal = JSON.parse(String(fs.readFileSync(yol + ".bak", "utf8"))).iptal === true; } catch (e) {}
+      dogru("iptal yedeğe YİNE DE işlendi (attrib +R bypass kapalı)", bakIptal);
+      try { require("child_process").execSync('attrib -R "' + yol + '"'); } catch (e) {}
+      try { fs.unlinkSync(yol); } catch (e) {}
+      esit("ana dosya silinince yedekten iptal okunuyor", durum(), "kilit/iptal");
+    }
+
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+  })();
+
+  /* ---- 17a. SENKRON PLAN DOSYASI SÖZLEŞMESİ (panel yazar ↔ host okur) ---- */
+  /* Plan dosyası iki dosyanın elle uyması gereken tek biçim. Bir taraf değişip diğeri kalırsa
+     ses YANLIŞ kanala gider ya da hiç gitmez — Premiere olmadan görülemez. */
+  baslik("Senkron plan dosyası (panel ↔ host biçimi)");
+  (function () {
+    var a, h;
+    try {
+      a = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"));
+      h = String(fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"));
+    } catch (e) { hata("dosya okunamadı", e.message); return; }
+
+    /* Normal satır: yol|kanal|başlangıç|ad → host `p.length < 4` ile eliyor. */
+    dogru("panel 4 alanlı satır yazıyor",
+          a.indexOf('satirlar.push(p.konacakYol + "|" + p.kanal + "|"') >= 0);
+    dogru("host 4 alan bekliyor", /p\.length\s*<\s*4/.test(h));
+
+    /* ⚠ #REZERVE: yerleştirilmeyen ama dokunulmaması gereken kanal (oyun sesi, kilitli,
+       hizalanamayan). Host bunu isler/yollar'a KOYMADAN yalnız rezervasyon için kullanmalı —
+       boş `yol` alanı importFiles'i düşürürdü. */
+    dogru("panel #REZERVE satırı yazıyor", a.indexOf('"#REZERVE|"') >= 0);
+    dogru("host #REZERVE satırını tanıyor", h.indexOf('"#REZERVE|"') >= 0);
+    /* ⚠ BLOK SINIRI GERÇEKTEN ÖLÇÜLÜR. Eski hâl `h.slice(rIx, rIx+280)` içinde herhangi bir
+       `continue;` arıyordu ve KOMŞU satırların continue'sunu yakalıyordu — yani rezerve dalı
+       continue'yu kaybetse bile test yeşil kalırdı. Şimdi if bloğunun kendi gövdesi ayrıştırılıp
+       hem `disRezerve` yazımı hem `continue` ORADA aranıyor. */
+    var rIx = h.indexOf('indexOf("#REZERVE|")');
+    var govde = "";
+    if (rIx >= 0) {
+      var acIx = h.indexOf("{", rIx), derin = 0, j2;
+      for (j2 = acIx; j2 >= 0 && j2 < h.length; j2++) {
+        if (h.charAt(j2) === "{") derin++;
+        else if (h.charAt(j2) === "}") { derin--; if (derin === 0) { govde = h.slice(acIx, j2 + 1); break; } }
+      }
+    }
+    dogru("rezerve dalının gövdesi ayrıştırıldı", !!govde, "if bloğu bulunamadı");
+    dogru("host rezerve satırını isler'e koymadan atlıyor (kendi gövdesinde continue)",
+          /continue\s*;/.test(govde), "gövde: " + govde.replace(/\s+/g, " ").slice(0, 140));
+    dogru("host rezerve kanalını rezervasyon kümesine yazıyor", /disRezerve\[/.test(govde));
+    /* Rezerve satırı normal ayrıştırmaya DÜŞMEMELİ: gövdede isler.push olmamalı. */
+    dogru("rezerve dalı isler'e push ETMİYOR", govde.indexOf("isler.push") < 0);
+
+    /* ⚠ ASIL YAZMA DALI REZERVASYONA BAKMAMALI — yoksa hiçbir kayıt kendi hedefine yazamaz
+       (rezerve kümesi bütün plan kanallarını içeriyor). Yalnız YEDEK arama atlamalı. */
+    var wIx = h.indexOf("seq.audioTracks[it.kanal].overwriteClip");
+    var yazmaDali = wIx >= 0 ? h.slice(Math.max(0, wIx - 400), wIx + 200) : "";
+    dogru("asıl yazma dalı rezervasyona BAKMIYOR", wIx >= 0 && yazmaDali.indexOf("rezerve[") < 0);
+    var yIx = h.indexOf("var yBul = -1");
+    var yedekDongu = yIx >= 0 ? h.slice(yIx, yIx + 700) : "";
+    dogru("yedek arama rezervasyonu atlıyor", /if\s*\(rezerve\["k"\s*\+\s*y\]\)\s*continue;/.test(yedekDongu));
+    dogru("yedek kanal da rezerve ediliyor", /rezerve\["k"\s*\+\s*yBul\]\s*=\s*true/.test(h));
+  })();
+
+  /* ---- 17c. CONFIG BİRLEŞTİRME (exe ile kurulumda program yolları tazeleniyor mu) ---- */
+  /* GERÇEK BOŞLUK: config.json exe kurulumunda `onlyifdoesntexist` ile korunuyor (kullanıcının
+     device/model/fontName ayarı ezilmesin), ama configBirlestir YALNIZCA oto-güncelleme
+     yolunda çalışıyordu. Yani motor düzeni değişip yeni exe gönderildiğinde program yolları
+     mevcut kullanıcıya HİÇ ulaşmıyordu; belirti "motor bulunamadı", sebebi görünmez.
+     Çözüm: exe aynı dosyayı "config.pkg.json" adıyla da kuruyor, panel açılışta birleştiriyor. */
+  baslik("Config birleştirme (exe kurulumunda program yolları)");
+  (function () {
+    var UPD, os = require("os");
+    try { UPD = require(path.join(KOK, "js", "updater.js")); }
+    catch (e) { hata("updater.js yüklenemedi", e.message); return; }
+    dogru("configBirlestir dışa açık", typeof UPD.configBirlestir === "function");
+    if (typeof UPD.configBirlestir !== "function") return;
+
+    var d = path.join(os.tmpdir(), "yw-cfg-test-" + process.pid);
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) {}
+    fs.mkdirSync(d, { recursive: true });
+    /* Kullanıcının mevcut config'i: elle değiştirilmiş device + ESKİ motor yolu. */
+    fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({
+      device: "cpu", model: "large-v3", fontName: "Poetsen One",
+      engineExe: "%ENGINE%/ESKI/whisper.exe", workDir: "%ENGINE%/work"
+    }, null, 2), "utf8");
+    /* Paketten gelen yeni sürüm: motor düzeni değişmiş + yeni anahtar. */
+    fs.writeFileSync(path.join(d, "config.pkg.json"), JSON.stringify({
+      device: "cuda", model: "large-v3", fontName: "Poetsen One",
+      engineExe: "%ENGINE%/YENI/whisper.exe", workDir: "%ENGINE%/work",
+      stylesDir: "%ENGINE%/styles", yeniAyar: 42
+    }, null, 2), "utf8");
+
+    var eklenen = UPD.configBirlestir(d, d, "config.pkg.json");
+    var son = JSON.parse(String(fs.readFileSync(path.join(d, "config.json"), "utf8")));
+    esit("KULLANICI ayarı korunuyor (device)", son.device, "cpu");
+    esit("PROGRAM YOLU paketten tazeleniyor (engineExe)", son.engineExe, "%ENGINE%/YENI/whisper.exe");
+    esit("eksik program yolu ekleniyor (stylesDir)", son.stylesDir, "%ENGINE%/styles");
+    esit("yeni anahtar ekleniyor", son.yeniAyar, 42);
+    esit("eklenen anahtar sayısı doğru", eklenen, 2);
+    /* Her açılışta çalışacağı için idempotent OLMAK ZORUNDA. */
+    var once = String(fs.readFileSync(path.join(d, "config.json"), "utf8"));
+    UPD.configBirlestir(d, d, "config.pkg.json");
+    esit("ikinci çağrı hiçbir şey değiştirmiyor", String(fs.readFileSync(path.join(d, "config.json"), "utf8")), once);
+    /* Paket dosyası yoksa (zip yolu) dokunmamalı. */
+    fs.unlinkSync(path.join(d, "config.pkg.json"));
+    esit("paket dosyası yoksa 0 döner", UPD.configBirlestir(d, d, "config.pkg.json"), 0);
+    /* ⚠ config.pkg.json KORUNAN listelere GİRMEMELİ — korunursa hiç tazelenmez. */
+    var pf = "";
+    try { pf = String(fs.readFileSync(path.join(KOK, "installer", "panel-files.ps1"), "utf8")); } catch (e) {}
+    dogru("config.pkg.json korunan dosya listesinde DEĞİL", pf.indexOf("config.pkg.json") < 0);
+
+    /* ⚠⚠ BAYATLIK NÖBETÇİSİ — ASIL REGRESYON BUYDU.
+       config.pkg.json'u YALNIZ exe kuruyor; zip paketinde yok ve updater'ın copyDir'i hiçbir
+       şeyi silmiyor. Dosya diskte KALIRSA: zip güncellemesi config.json'daki program yollarını
+       doğru tazeliyor, panel bir sonraki açılışta aynı yolları BAYAT dosyadan ESKİ değerlere
+       geri çekiyordu (ölçüldü) — yani özellik, önlemek için yazıldığı hatayı zip yoluna, ikinci
+       kullanıcının kullandığı yola taşıyordu.
+       İKİ emniyet var ve ikisi de burada denetleniyor:
+         1. app.js birleştirdikten SONRA dosyayı SİLİYOR (tek kullanımlık).
+         2. updater.js zip güncellemesinde kalıntıyı siliyor. */
+    var appSrc = "", updSrc = "";
+    try { appSrc = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); } catch (e) {}
+    try { updSrc = String(fs.readFileSync(path.join(KOK, "js", "updater.js"), "utf8")); } catch (e) {}
+    dogru("app.js birleştirdikten sonra config.pkg.json'u SİLİYOR",
+          /unlinkSync\(\s*_pkgYol\s*\)/.test(appSrc));
+    dogru("updater.js zip güncellemesinde kalıntıyı siliyor",
+          /unlinkSync\(path\.join\(extRoot,\s*"config\.pkg\.json"\)\)/.test(updSrc));
+    /* Davranışsal ölçüm: bayat dosya varken bile ikinci birleştirme aynı değeri üretmeli
+       (idempotent). Asıl koruma silme, bu ek emniyet. */
+    fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ engineExe: "%ENGINE%/v2/w.exe" }, null, 2), "utf8");
+    fs.writeFileSync(path.join(d, "config.pkg.json"), JSON.stringify({ engineExe: "%ENGINE%/v1/w.exe" }, null, 2), "utf8");
+    UPD.configBirlestir(d, d, "config.pkg.json");
+    var geri = JSON.parse(String(fs.readFileSync(path.join(d, "config.json"), "utf8"))).engineExe;
+    not("bayat paket dosyası bırakılırsa yolu geri alır (" + geri + ") — bu yüzden SİLİNİYOR");
+    /* installer.iss onu ignoreversion ile kurmalı. */
+    var iss = "";
+    try { iss = String(fs.readFileSync(path.join(KOK, "installer", "installer.iss"), "utf8")); } catch (e) {}
+    dogru("installer.iss config.pkg.json'u ignoreversion ile kuruyor",
+          /DestName:\s*"config\.pkg\.json"[^\n]*ignoreversion/.test(iss));
+
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) {}
+  })();
+
+  /* ---- 18. POWERSHELL: BOM'SUZ DOSYADA DİZGE İÇİ ASCII-DIŞI KARAKTER ---- */
+  /* GERÇEK HATA (bu denetimde ben ürettim): bir throw mesajına uzun tire (—) koymak
+     publish-github.ps1'i TAMAMEN ayrıştırılamaz hâle getirdi. Sebep: dosya BOM'suz UTF-8 ama
+     Windows PowerShell 5.1 BOM'suz .ps1'i ANSI (cp1254) okuyor; U+2014'ün UTF-8 baytlarından
+     0x94, cp1254'te KAPATAN AKILLI TIRNAK (U+201D) oluyor ve PowerShell onu geçerli bir dizge
+     sonlandırıcı sayıyor. Dizge orada bitiyor, devamı kod olarak ayrıştırılıyor ve betik TEK
+     SATIR bile çalışmadan ölüyor. Yorum satırlarındaki uzun tire zararsız (yorum ayrıştırılmaz).
+     BOM'lu dosyalar bağışık — o yüzden kontrol yalnız BOM'suzlara uygulanır. */
+  baslik("PowerShell (BOM'suz betikte dizge içi ASCII-dışı karakter)");
+  (function () {
+    var ps1 = [];
+    ["", "installer"].forEach(function (alt) {
+      var d = alt ? path.join(KOK, alt) : KOK;
+      try {
+        fs.readdirSync(d).forEach(function (f) {
+          if (/\.ps1$/i.test(f)) ps1.push({ ad: (alt ? alt + "/" : "") + f, yol: path.join(d, f) });
+        });
+      } catch (e) {}
+    });
+    dogru(".ps1 dosyaları bulundu (" + ps1.length + ")", ps1.length > 0);
+    var riskli = [];
+    ps1.forEach(function (p) {
+      var buf;
+      try { buf = fs.readFileSync(p.yol); } catch (e) { return; }
+      var bomlu = (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF);
+      if (bomlu) return;                       // BOM varsa PowerShell UTF-8 okur, bağışık
+      var metin = buf.toString("utf8");
+      metin.split(/\r?\n/).forEach(function (satir, ix) {
+        /* Yorumu at: satırın ilk # işaretinden sonrası (dizge içindeki # hariç) ayrıştırılmaz. */
+        var kod = "", tirnak = null;
+        for (var i = 0; i < satir.length; i++) {
+          var c = satir.charAt(i);
+          if (tirnak) { kod += c; if (c === tirnak) tirnak = null; continue; }
+          if (c === '"' || c === "'") { tirnak = c; kod += c; continue; }
+          if (c === "#") break;
+          kod += c;
+        }
+        /* ⚠ TEHLİKE HER ASCII-DIŞI KARAKTER DEĞİL, YALNIZ cp1254'te TIRNAĞA DÖNÜŞENLER.
+           "ü" (U+00FC → C3 BC) zararsız: iki bayt da cp1254'te harf. Ama uzun tire
+           (U+2014 → E2 80 94) son baytıyla U+201D "kapatan çift tırnak" üretiyor ve dizgeyi
+           erkenden bitiriyor. cp1254'te tırnak olan baytlar: 0x91 ' · 0x92 ' · 0x93 " · 0x94 ".
+           En sık suçlular: — (U+2014), – (U+2013), ‑ (U+2011). */
+        var TIRNAK_BAYT = { 0x91: 1, 0x92: 1, 0x93: 1, 0x94: 1 };
+        var dz = kod.match(/"[^"]*"|'[^']*'/g) || [];
+        dz.forEach(function (d) {
+          var b = Buffer.from(d, "utf8"), kotu = [];
+          for (var bi = 0; bi < b.length; bi++) if (TIRNAK_BAYT[b[bi]]) kotu.push("0x" + b[bi].toString(16));
+          if (kotu.length) riskli.push(p.ad + ":" + (ix + 1) + " → " + kotu.join(",") +
+                                       " (dizgeyi erken kapatır) " + d.slice(0, 50));
+        });
+      });
+    });
+    esit("BOM'suz .ps1 dizgelerinde ASCII-dışı karakter yok", riskli, []);
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");

@@ -139,10 +139,25 @@ function _probeAudioCount(mediaPath, ffmpegExe) {
     var buf = "", proc;
     try { proc = spawn(ffmpegExe, ["-hide_banner", "-i", mediaPath], { windowsHide: true, cwd: path.dirname(ffmpegExe) }); }
     catch (e) { resolve(1); return; }
+    /* ⚠ BU SUREC DE KAYDA GIRER. Dosyadaki diger butun ffmpeg'ler run() uzerinden aciliyor ve
+       run _procs'a kaydediyor; cancelAll YALNIZ _procs icindekileri taskkill ediyor. Probe
+       run'i atlayip dogrudan spawn ettigi icin kayitsizdi: 200+ tekil medyali bir projede
+       kullanici "Iptal"e bassa bile _probeMany butun gruplari acmaya devam ediyordu. */
+    _procs.push(proc);
+    function unreg() { var ix = _procs.indexOf(proc); if (ix >= 0) _procs.splice(ix, 1); }
     proc.stdout.on("data", function (d) { buf += d; });
     proc.stderr.on("data", function (d) { buf += d; });
-    proc.on("error", function () { resolve(1); });
+    proc.on("error", function () { unreg(); resolve(1); });
     proc.on("close", function () {
+      unreg();
+      /* ⚠ OLDURULEN PROBE ONBELLEGE YAZILMAZ — ZEHIRLI ONBELLEK TUZAGI.
+         Sureci kayda almak tek basina daha kotu bir hata dogururdu: cancelAll onu oldurunce
+         "close" yine tetikleniyor, buf BOS kaliyor ve asagidaki satir _sesAkisSayisi'na 1
+         yaziyor. Onbellek modul omru boyunca hic temizlenmedigi icin kullanici iptal edip
+         tekrar bastiginda o zehirli 1 okunuyor, _sIdx = Math.min(sIdx, 0) = 0 oluyor ve
+         A2/A3 uretimi SESSIZCE A1 mikrofonunun akisindan ses aliyor — yani "arkadaslarin
+         altyazisi senin sesinden" cikardi, ustelik hata da vermeden. */
+      if (proc._iptalEdildi) { resolve(1); return; }
       var m = buf.match(/Stream #\d+:\d+[^\n]*: Audio:/g);
       _sesAkisSayisi[mediaPath] = (m && m.length) ? m.length : 1;
       resolve(_sesAkisSayisi[mediaPath]);
@@ -201,6 +216,13 @@ function _chunkSize(clips) {
    konumlandırılmış WAV üretir, sonra parçalar amix (mixWavs) ile birleştirilir. */
 async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) {
   const sIdx = Number.isInteger(streamIndex) ? streamIndex : 0;
+  /* ⚠ IPTAL SUREC ARALARINDA DA KONTROL EDILIR. cancelAll yalnizca O AN calisan ffmpeg'leri
+     olduruyor; sonraki adim yeni bir surec dogurdugunda kimse onu durdurmuyordu ve akis
+     sonuna kadar kosuyordu. Damga, iptalden SONRA dogan her adimi durdurur. */
+  const _btDamga = iptalDamgasi();
+  function _btIptalKontrol() {
+    if (iptalEdildiMi(_btDamga)) { const h = new Error("İptal edildi"); h.iptal = true; throw h; }
+  }
   /* Medya yolu okunamayan klipler ELENİR — ama sessizce değil. host.jsx getMediaPath/duration
      çağrılarını try/catch'e alıp hata olursa mediaPath="" bırakıyor; bu iç içe sekans (nested
      sequence), birleştirilmiş klip ve çevrimdışı medyada OLAĞAN. Eskiden bu klipler tek kelime
@@ -248,6 +270,7 @@ async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) 
      dosyada olmayan akış hiç istenmez — o klip için mevcut son akış kullanılır. */
   if (sIdx > 0) {
     const sayilar = await _probeMany(tekilYollar, ffmpegExe);   // tekil yol listesi yukarıda çıkarıldı
+    _btIptalKontrol();   // probe'lar iptalde 1 dönüyor; o değerlerle render'a devam ETME
     let dusen = 0;
     for (let vj = 0; vj < valid.length; vj++) {
       const n = sayilar[valid[vj].mediaPath] || 1;
@@ -270,12 +293,14 @@ async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) 
   const parts = [];
   try {
     for (let start = 0, ci = 0; start < valid.length; start += chunkN, ci++) {
+      _btIptalKontrol();   // her parçadan ÖNCE: iptal sonrası yeni ffmpeg doğmasın
       const chunk = valid.slice(start, start + chunkN);
       const partWav = path.join(dir, base + "__part" + ci + ".wav");
       await _renderTimelineChunk(chunk, ffmpegExe, partWav, sIdx);
       parts.push(partWav);
       if (onLog) onLog("[ffmpeg] parça " + (ci + 1) + "/" + Math.ceil(valid.length / chunkN) + " (" + chunk.length + " klip)\n");
     }
+    _btIptalKontrol();
     await mixWavs(parts, ffmpegExe, outWav);
   } finally {
     for (let i = 0; i < parts.length; i++) { try { fs.unlinkSync(parts[i]); } catch (e) {} }
@@ -736,7 +761,22 @@ function buildCues(words, maxWords, censor, maxChars, onLog) {   // censor: fals
     /* Birleştirme kelime tavanını AŞAMAZ (burası da metni tek satıra kaynatıyor). Sığmıyorsa
        aşağıdaki "erken başlat" dalı çakışmayı zaten çözüyor, yani metin kaybolmuyor. */
     var kelimeSigar = (_kelimeSay(cA.text) + _kelimeSay(cB.text)) <= maxWords;
-    if (ayniKisi && kelimeSigar && (cA.text.length + 1 + cB.text.length) <= MAX_CHARS) {
+    /* ⚠ İKİ AYRI CÜMLENİN KELİMELERİ TEK CUE'YA KAYNAMASIN. Yukarıdaki segment bölmesi
+       (`w.seg !== prev.seg` → flush) tam da "bir cue iki cümleden kelime taşımasın, cumleId
+       gerçekten KESİN olsun" diye eklenmişti; yetim-birleştirme döngüsü de bu kuralı koruyor.
+       Ama bu MIN_GORUNUR birleştirmesinde kontrol YOKTU: cB'nin metni cA'nın içine yazılıyor,
+       cA'nın cumleId'si (ÖNCEKİ segment) olduğu gibi kalıyordu. Ölçüldü (maxWords=2):
+       "Evet"(seg 0) + "Ama."(seg 1) → {"text":"Evet Ama","cumleId":"…-1:0"} — segment 1'in
+       kelimesi segment 0'ın kimliğiyle ekrana çıkıyor. Bedeli üç yerde görünüyor: vurucu.js
+       cue'ları YALNIZ cumleId ile gruplandığı için sonraki cümlenin ilk kelimesi önceki
+       cümleyle birlikte ekranda kalıyor, emoji süresi yanlış cümle aralığından ölçülüyor ve
+       cumleBirlestir köprüsü yanlış cümle sınırında karar veriyor.
+       Tetikleyici nadir değil: motorun ürettiği SIFIR süreli kelime damgaları (bkz. flattenWords)
+       tam da iki cue'yu 0.25 sn'den yakın başlatıyor.
+       Reddedilince akış aşağıdaki "cue'yu ERKEN başlat" dalına düşüyor — metin KAYBOLMUYOR.
+       Fuzz (5000 senaryo): çapraz-segment cue 118 → 0, metin farkı 0. */
+    var ayniCumle = (!cA.cumleId || !cB.cumleId) ? true : (cA.cumleId === cB.cumleId);
+    if (ayniKisi && ayniCumle && kelimeSigar && (cA.text.length + 1 + cB.text.length) <= MAX_CHARS) {
       cA.text = cA.text + " " + cB.text;
       cA.end = Math.max(cA.end, cB.end);
       cues.splice(z + 1, 1);
@@ -1669,6 +1709,9 @@ async function trimAudioCopy(inFile, outFile, startSec, ffmpegExe) {
  */
 async function analyzeSilence(cfg, voiceWav, onLog, opts) {
   opts = opts || {};
+  /* Bu çalıştırma başlarken iptal sayacı kaçtı (transcribe:1569 ile aynı desen).
+     Aşağıdaki ön-filtre catch'i reddin sebebini bununla ayırt ediyor. */
+  const _asDamga = iptalDamgasi();
   const sensitivity = (opts.sensitivity != null) ? opts.sensitivity : 14;
   const minSilence = (opts.minSilence != null) ? opts.minSilence : 0.5;
   // Asimetrik kenar payı (A8): konuşma başlangıcından önce daha çok "nefes" bırak (leadIn),
@@ -1692,6 +1735,16 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
   try {
     await run(ffmpeg, ["-i", voiceWav, "-af", pre + "volumedetect", "-f", "null", "-"], function (l) { vd += l; }, { cwd: ffDir });
   } catch (ePre) {
+    /* ⚠ IPTALI "FILTRE DESTEKLENMIYOR" SANMA — YOKSA IPTAL DUGMESI HIC CALISMIYOR.
+       cancelAll() calisan ffmpeg'i taskkill ile olduruyor ve run() bu yuzden REJECT ediyor.
+       Bu catch reddin SEBEBINE bakmadigi icin iptali "demek ki bu ffmpeg surumu highpass/
+       lowpass desteklemiyor" diye yorumluyor, log'a YANLIS sebebi yaziyor ve ffmpeg'i IKINCI
+       KEZ baslatiyordu. Ikinci surec cancelAll'dan SONRA dogdugu icin _procs bos, kimse onu
+       oldurmuyor; akis boskluk taramasina gecip normal bitiyor ve panel "Bitti — N bosluk
+       bulundu" diyordu. Ustelik analiz artik on-filtresiz esikle yapildigi icin bulunan
+       bosluklar da normal kosudakinden FARKLI cikiyordu.
+       Kontrol LOG'DAN ONCE: yanlis teshis ekrana hic yazilmasin. transcribe:1577'deki desen. */
+    if (iptalEdildiMi(_asDamga) || (ePre && ePre.iptal)) throw ePre;
     if (onLog) onLog("[autocut] ön-filtre uygulanamadı, filtresiz devam.\n");
     pre = ""; vd = "";
     await run(ffmpeg, ["-i", voiceWav, "-af", "volumedetect", "-f", "null", "-"], function (l) { vd += l; }, { cwd: ffDir });

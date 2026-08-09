@@ -153,6 +153,11 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .btn-primary:active { transform: translateY(1px) scale(.995); }
 .btn-primary:disabled { filter: grayscale(.4) brightness(.65); cursor: default; box-shadow: none; }
 .btn-primary:disabled::before { display: none; }
+/* display:inline-flex, tarayıcının [hidden]{display:none} kuralını EZER — bu satır olmadan
+   #snkUygula'nın hidden'ı hiç işlemiyordu: "Uygula" düğmesi Craig klasörü seçilmeden de
+   görünüyor, basılınca "Yerleştirilecek ses dosyası yok." diyordu. Aynı tuzağın altıncı
+   tekrarı (.btn-ghost, .lisans-kilit, .prog-badge, .recolor-status, .modal-overlay). */
+.btn-primary[hidden] { display: none; }
 /* white-space:nowrap eskiden "SONUÇ" bölümünün içinde ayrı bir .btn-ghost kuralındaydı;
    oysa GLOBAL etki ediyordu (Kanalları Tara, Klasör Seç, modal İptal…). Niyet zaten global:
    buton yazısı sarmak yerine satır sarsın. Tek yerde toplandı, bölüm başlığı artık yanıltmıyor. */
@@ -231,6 +236,9 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 /* ---------- GERİ BUTONU ---------- */
 .back-btn { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; margin-right: 6px; flex-shrink: 0;
   background: rgba(45,37,66,.5); border: 1px solid var(--border); color: var(--accent-2); cursor: pointer; transition: all .18s; }
+/* display:grid, [hidden]'ı ezer — bu satır olmadan app.js'teki
+   $("backBtn").hidden = (id === "viewHome") hiç işlemiyor ve geri oku ANA EKRANDA da duruyor. */
+.back-btn[hidden] { display: none; }
 .back-btn:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateX(-2px); }
 .back-btn:active { transform: scale(.94); }
 

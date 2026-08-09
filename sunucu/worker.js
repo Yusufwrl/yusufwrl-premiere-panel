@@ -333,6 +333,14 @@ async function apiEkle(request, env) {
 }
 
 async function apiSifreYenile(request, env) {
+  /* ⚠ PEPPER KAPISI apiEkle'deki gibi EN BASTA. Eskiden burada yoktu ve hmac() secret'i
+     String(secret) ile kullandigi icin PEPPER undefined iken HATA FIRLATMIYOR, anahtar
+     olarak duz "undefined" metnini kullaniyordu: islem 200 ile "basarili" gorunuyor, eski
+     pw: isaretcisi SILINIYOR ve geri donusu olmuyordu. Aktivasyon tarafi PEPPER yokken 500
+     dondugu icin ne eski ne yeni sifre calisiyor — yonetici yesil kutuda yeni sifreyi
+     goruyor, arkadas giremiyor ve lisansi elle yeniden olusturmak gerekiyordu.
+     Kapi kayitOku'dan da ONCE: ne KV yazmasi ne de eski isaretcinin silinmesi olsun. */
+  if (!env.PEPPER) return cevap({ ok: false, hata: "kurulum", mesaj: "PEPPER secret'i yok." }, 500);
   const g = await govde(request);
   const kayit = await kayitOku(env, g.id);
   if (!kayit) return cevap({ ok: false, hata: "yok", mesaj: "Lisans bulunamadi." }, 404);
@@ -657,6 +665,33 @@ async function cagir(yol, yontem, govde){
 
 function tarih(s){ if(!s) return "-"; var d=new Date(s); return isNaN(d)? "-" : d.toLocaleString("tr-TR"); }
 
+/* ⚠ METIN GOMMEDEN ONCE KACIS. l.ad (yoneticinin yazdigi isim) ve c.ad (panelin gonderdigi
+   COMPUTERNAME) hicbir islem gormeden innerHTML'e giriyordu. '<' iceren bir makine adi
+   satirin HTML'ini komple bozuyor. */
+function esc(s){
+  return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+         .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* ⚠ DUGMELER INLINE onclick DEGIL, VERI OZNITELIGI + TEK DELEGASYON.
+   Eskiden id/ad dogrudan bir onclick string literaline gomuluyordu: "Ali'nin PC" gibi tek
+   tirnakli bir isimde uretilen onclick GECERSIZ JS oluyor ve tiklamada SESSIZCE hicbir sey
+   olmuyordu (konsola bir syntax hatasi duser, sayfada iz yok) — yonetici lisansi iptal
+   edemiyor, sebebini de goremiyordu.
+   ⚠ Yalnizca HTML kacisi (esc) bu satiri DUZELTMEZDI: tarayici oznitelik degerindeki karakter
+   referanslarini handler'i derlemeden ONCE cozuyor, yani &#39; yine ' olup ayni hatayi
+   uretirdi. HTML kacisi ile JS-dizgi kacisi ayri katmanlar; tek dogru cozum inline kodu
+   birakmak. */
+document.addEventListener("click", function(e){
+  var b = e.target && e.target.closest ? e.target.closest("button[data-ac]") : null;
+  if (!b) return;
+  var ac = b.getAttribute("data-ac"), id = b.getAttribute("data-id");
+  if (ac === "cihazsil") cihazSil(id, b.getAttribute("data-kisa"));
+  else if (ac === "sifre") sifreYenile(id);
+  else if (ac === "durum") durum(id, b.getAttribute("data-durum"));
+  else if (ac === "sil") lisansSil(id, b.getAttribute("data-ad"));
+});
+
 async function yenile(){
   var j = await cagir("/api/lisanslar");
   if (!j.ok) return;
@@ -667,28 +702,30 @@ async function yenile(){
   j.liste.forEach(function(l){
     var tr = document.createElement("tr");
     var cih = l.cihazlar.map(function(c){
-      return "<div>" + (c.ad || "?") + " <span class='kucuk'>#" + c.kisa + " " + (c.ulke||"") +
-             "</span> <button class='gri' onclick=\\"cihazSil('" + l.id + "','" + c.kisa + "')\\">sil</button></div>";
+      return "<div>" + esc(c.ad || "?") + " <span class='kucuk'>#" + esc(c.kisa) + " " + esc(c.ulke||"") +
+             "</span> <button class='gri' data-ac='cihazsil' data-id='" + esc(l.id) +
+             "' data-kisa='" + esc(c.kisa) + "'>sil</button></div>";
     }).join("") || "<span class='kucuk'>henuz giris yok</span>";
     var eski = l.sonSurum && enYeni && l.sonSurum !== enYeni;
     tr.innerHTML =
-      "<td><b>" + l.ad + "</b><div class='kucuk'>" + (l.not||"") + "</div>" +
-        "<div class='kucuk'>sifre " + l.pwIlk4 + "&hellip; &middot; " + tarih(l.olusturma) + "</div></td>" +
-      "<td><span class='rozet " + (l.durum==="aktif"?"aktif":"iptal") + "'>" + l.durum + "</span></td>" +
+      "<td><b>" + esc(l.ad) + "</b><div class='kucuk'>" + esc(l.not||"") + "</div>" +
+        "<div class='kucuk'>sifre " + esc(l.pwIlk4) + "&hellip; &middot; " + tarih(l.olusturma) + "</div></td>" +
+      "<td><span class='rozet " + (l.durum==="aktif"?"aktif":"iptal") + "'>" + esc(l.durum) + "</span></td>" +
       "<td>" + cih + "</td>" +
       "<td>" + tarih(l.sonGoruldu) + "</td>" +
-      "<td>" + (l.sonSurum || "-") + (eski ? " <span class='kucuk'>(eski)</span>" : "") + "</td>" +
-      "<td>" + l.toplamGiris + "</td>" +
+      "<td>" + esc(l.sonSurum || "-") + (eski ? " <span class='kucuk'>(eski)</span>" : "") + "</td>" +
+      "<td>" + esc(l.toplamGiris) + "</td>" +
       "<td class='satir'>" +
-        "<button class='gri' onclick=\\"sifreYenile('" + l.id + "')\\">sifre</button>" +
-        "<button class='gri' onclick=\\"durum('" + l.id + "','" + (l.durum==="aktif"?"iptal":"aktif") + "')\\">" + (l.durum==="aktif"?"kapat":"ac") + "</button>" +
-        "<button class='kirmizi' onclick=\\"lisansSil('" + l.id + "','" + l.ad + "')\\">sil</button>" +
+        "<button class='gri' data-ac='sifre' data-id='" + esc(l.id) + "'>sifre</button>" +
+        "<button class='gri' data-ac='durum' data-id='" + esc(l.id) + "' data-durum='" +
+          (l.durum==="aktif"?"iptal":"aktif") + "'>" + (l.durum==="aktif"?"kapat":"ac") + "</button>" +
+        "<button class='kirmizi' data-ac='sil' data-id='" + esc(l.id) + "' data-ad='" + esc(l.ad) + "'>sil</button>" +
       "</td>";
     g.appendChild(tr);
   });
   var jl = await cagir("/api/gunluk");
   bas("gunluk").innerHTML = (jl.olaylar||[]).map(function(o){
-    return tarih(o.z) + " &middot; " + o.t + " &middot; " + (o.ad||"") + " " + (o.surum? ("("+o.surum+")") : "");
+    return tarih(o.z) + " &middot; " + esc(o.t) + " &middot; " + esc(o.ad||"") + " " + (o.surum? ("("+esc(o.surum)+")") : "");
   }).join("<br>") || "kayit yok";
 }
 
@@ -697,14 +734,18 @@ async function lisansEkle(){
   if (!ad) return alert("Isim yaz.");
   var j = await cagir("/api/lisans-ekle","POST",{ ad: ad, not: bas("yeniNot").value, maxCihaz: bas("yeniCihaz").value });
   if (!j.ok) return alert(j.mesaj || "Olmadi");
-  bas("yeniSifre").innerHTML = "<div class='sifre'>" + j.sifre + "</div><div class='kucuk'>Bu sifre BIR KERE gorunur — kopyala ve " + ad + "'e yolla.</div>";
+  bas("yeniSifre").innerHTML = "<div class='sifre'>" + esc(j.sifre) + "</div><div class='kucuk'>Bu sifre BIR KERE gorunur — kopyala ve " + esc(ad) + "'e yolla.</div>";
   bas("yeniAd").value=""; bas("yeniNot").value="";
   yenile();
 }
 async function sifreYenile(id){
   if (!confirm("Yeni sifre uretilsin mi? Eski sifre calismaz, kurulu bilgisayar etkilenmez.")) return;
   var j = await cagir("/api/sifre-yenile","POST",{ id: id });
-  if (j.ok) bas("yeniSifre").innerHTML = "<div class='sifre'>" + j.sifre + "</div><div class='kucuk'>Yeni sifre — bir kere gorunur.</div>";
+  /* ELSE DALI SART: eskiden yalniz "if (j.ok)" vardi, basarisizlikta hicbir sey olmuyor ve
+     hicbir mesaj cikmiyordu — yonetici dugmeye basip duruyor, sebebini goremiyordu.
+     lisansEkle'deki kalibin aynisi. */
+  if (!j.ok) return alert(j.mesaj || "Olmadi");
+  bas("yeniSifre").innerHTML = "<div class='sifre'>" + esc(j.sifre) + "</div><div class='kucuk'>Yeni sifre — bir kere gorunur.</div>";
 }
 async function durum(id, d){ await cagir("/api/durum","POST",{ id:id, durum:d }); yenile(); }
 async function cihazSil(id, kisa){

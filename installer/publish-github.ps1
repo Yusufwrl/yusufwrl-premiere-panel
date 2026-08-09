@@ -76,9 +76,42 @@ $json = ($up | ConvertTo-Json -Depth 5)
 Write-Host "update.json repo -> $repo"
 
 # 2) panel.zip uret (guncel update.json ile)
+# DIKKAT: cocuk surecin BASARISIZLIGI ebeveyni durdurmaz. $ErrorActionPreference="Stop"
+# cocuga GECMEZ ve $LASTEXITCODE okunmazsa hata sessizce gecilir. Tek kapi Test-Path idi;
+# ama pack-panel eski zip'i ancak Copy-Panel BASARIYLA bittikten SONRA siliyor, yani
+# paketleme cokerse ESKI panel.zip diskte kaliyor, Test-Path TRUE donuyor ve betik o eski
+# zip'i yeni tag'in altina yukluyordu. Sonucu panelde hicbir belirti vermiyor: arkadas
+# guncellemeyi goruyor, ESKI kodu indiriyor, updater version.json'a TAG'den gelen yeni
+# surumu yaziyor ve panel bir daha ASLA guncelleme almiyor (uzak <= yerel).
+# Iki kapi birden: (a) uretim oncesi eskiyi SIL, (b) cikis kodunu kontrol et.
 $zip = Join-Path $PSScriptRoot "panel.zip"
+if (Test-Path $zip) { Remove-Item $zip -Force }
 powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "pack-panel.ps1") -Zip $zip
+# ⚠ DIZGE ICINDE ASCII DISI KARAKTER KULLANMA (uzun tire, akilli tirnak...). Bu dosya BOM'suz
+# UTF-8; Windows PowerShell 5.1 BOM'suz .ps1'i ANSI (cp1254) okuyor ve uzun tirenin (U+2014)
+# UTF-8 baytlarindan 0x94 cp1254'te KAPATAN AKILLI TIRNAK oluyor. PowerShell onu gecerli bir
+# dizge sonlandirici sayiyor, dizge orada bitiyor ve devami kod olarak ayristiriliyor:
+# betik TEK SATIR bile calismadan "Unexpected token" ile oluyordu. Yorum satirlarindaki
+# uzun tire zararsiz. Kontrol: [Parser]::ParseFile ile (testler\tumtest.js'te var).
+if ($LASTEXITCODE -ne 0) { throw "pack-panel.ps1 basarisiz (cikis kodu $LASTEXITCODE) - panel.zip uretilmedi." }
 if (-not (Test-Path $zip)) { throw "panel.zip uretilemedi" }
+# Paket GERCEKTEN bu surum mu? Yanlis etiketli paket bagimsiz bir hata, ayni sonucu verir.
+# Okuma basarisiz olursa YAYIN DURMAZ (bu bir ek kapi, ana kapi degil) — yalnizca not dusulur.
+$zipVer = $null
+try {
+  Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+  $zf = [System.IO.Compression.ZipFile]::OpenRead($zip)
+  try {
+    $vEntry = $zf.Entries | Where-Object { $_.FullName -eq "version.json" }
+    if ($vEntry) {
+      $sr = New-Object System.IO.StreamReader($vEntry.Open())
+      try { $zipVer = ($sr.ReadToEnd() | ConvertFrom-Json).version } finally { $sr.Dispose() }
+    }
+  } finally { $zf.Dispose() }
+} catch { Write-Host "NOT: zip icindeki surum dogrulanamadi ($($_.Exception.Message))" -ForegroundColor Yellow }
+if ($zipVer -and $zipVer -ne $ver) {
+  throw "panel.zip icindeki surum ($zipVer) yayinlanan surumden ($ver) FARKLI - paket bayat."
+}
 
 # 3) git init + commit (ilk sefer) / degisiklikleri commit
 if (-not (Test-Path (Join-Path $proj ".git"))) { git init -b main | Out-Null }
@@ -100,7 +133,17 @@ if ((Invoke-Gh repo view $repo) -ne 0) {
   else          { gh repo create $repo --public  --source "." --remote origin --push }
   Write-Host "Repo olusturuldu ve push edildi." -ForegroundColor Green
 } else {
-  $hasOrigin = $false; git remote get-url origin 1>$null 2>$null; if ($LASTEXITCODE -eq 0) { $hasOrigin = $true }
+  # DIKKAT: burada da "2>$null" YOK — satir 85-88'deki tuzagin ta kendisi. PS 5.1'de
+  # $ErrorActionPreference="Stop" altinda native bir komutun stderr'ini yonlendirmek
+  # NativeCommandError FIRLATIR ve yonlendirme bunu ENGELLEMEZ. `git remote get-url origin`
+  # remote yokken "error: No such remote 'origin'" yaziyor, yani betik tam da o durumu
+  # duzeltmek icin yazilmis `git remote add origin` satirina GELMEDEN oluyordu:
+  # zip uretilmis, commit atilmis, push ve release HIC yapilmamis halde yarim kaliyordu.
+  $eskiEAP2 = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  git remote get-url origin 2>&1 | Out-Null
+  $hasOrigin = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = $eskiEAP2
   if (-not $hasOrigin) { git remote add origin "https://github.com/$repo.git" }
   git push -u origin main
   Write-Host "Degisiklikler push edildi." -ForegroundColor Green

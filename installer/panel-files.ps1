@@ -42,7 +42,11 @@ $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
                     "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
                     "presetler.json",
                     "presetler.bak.json",
-                    "lisans.json")
+                    "lisans.json",
+                    # lisans.json.bak: js\lisans.js kayitYaz artik ATOMIK yaziyor ve eskisini
+                    # .bak'a aliyor; kayitOku ana dosya bozuksa oradan kurtariyor. Korunmazsa
+                    # yeniden kurulumda yedek gider ve kurtarma yolu kapanir.
+                    "lisans.json.bak")
 
 # Panele girmemesi NORMAL olan ust duzey ogeler (gelistirme/dagitim/dokuman dosyalari).
 # Test-PanelFileList bunlari "unutulmus" saymaz.

@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.9.17"
+#define AppVersion "1.9.18"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}
@@ -50,11 +50,39 @@ Type: files; Name: "{app}\.debug"
 ; BU BES DOSYA HER YERDE AYNI: .gitignore, installer\panel-files.ps1 ($PanelUserFiles;
 ; pack-panel.ps1 ve deploy-dev.ps1 listeyi oradan okur), installer\kur.ps1 ($koru),
 ; js\updater.js (KULLANICI_DOSYALARI) ve burasi -> BESINI birden guncelle.
-; DIKKAT: config.json bu listede DEGIL ve buraya EKLENMEZ. Pakette gelir ve temiz
-; kurulumda gerekir; dislanirsa panel hic acilmaz (js\pipeline.js loadConfig patlar).
-; Guncellemede korunmasi js\updater.js configBirlestir() ve kur.ps1 ile saglaniyor.
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,lisans.json"; \
+; DIKKAT: config.json bu listede DEGIL. Pakette gelmesi SART — temiz kurulumda yoksa panel
+; hic acilmaz (js\pipeline.js loadConfig patlar). Ama wildcard satirindan DISLANIP hemen
+; asagida onlyifdoesntexist ile AYRI konuyor:
+;   ⚠ ESKIDEN buradaki yorum "guncellemede korunmasi kur.ps1 ile saglaniyor" diyordu ama
+;   installer.iss kur.ps1'i HIC calistirmiyor ([Code] bolumunde yalnizca WriteEngineRoot ve
+;   InstallFontPerUser var); kur.ps1 sadece elle dagitilan KUR.bat senaryosunda kosuyor.
+;   Yani teslim edilen tek dosya olan exe'de config birlestirme yolu YOKTU ve ignoreversion
+;   bayragi dosyayi HER kurulumda uzerine yaziyordu: kullanicinin elle degistirdigi degerler
+;   (device=cpu, model, fontName) sessizce paketteki hallerine donuyordu. Belirtisi dolayli
+;   ("GPU yokken tekrar cuda deniyor"), sebebi gorunmez.
+;   Inno Pascal Script'te JSON birlestirici YAZILMADI — bilerek: dilde JSON ayristirici yok,
+;   elle yazilan birlestirici bozuk cikti uretirse panel HIC acilmaz, yani onlemeye calistigindan
+;   daha buyuk bir hata dogururdu.
+;   ⚠ ESKI YORUM YANLISTI: "configBirlestir zaten bir sonraki acilista ekliyor" DOGRU DEGIL.
+;   O fonksiyon YALNIZCA oto-guncelleme yolunda (js\updater.js checkForUpdate, uzak surum >
+;   yerel surum iken, paket indirildikten SONRA) calisiyordu; panel acilisinda calisan bir yol
+;   YOKTU. Yani exe ile yeniden kurulumda program yollari (engineExe/ffmpegExe/workDir/
+;   stylesDir) TAZELENMIYORDU: motor duzeni degisirse yeni exe o degisikligi mevcut
+;   kullaniciya ULASTIRMIYOR, belirti "motor/stil bulunamadi" oluyor ve sebebi gorunmuyordu.
+;   ✅ KAPATILDI: asagidaki ikinci Source satiri ayni dosyayi "config.pkg.json" adiyla da
+;   kuruyor ve panel acilista (js\app.js initCEP) birlestirip dosyayi SILIYOR. Birlestirme
+;   JS tarafinda, zaten test edilmis kodla yapiliyor.
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,lisans.json,lisans.json.bak,config.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
+; config.json: temiz kurulumda gelir, yeniden kurulumda kullanicininki KORUNUR.
+Source: "staging\panel\config.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; ⚠ AYNI DOSYA "config.pkg.json" ADIYLA DA KURULUR — HER kurulumda tazelenir (ignoreversion).
+;   Panel acilista (js\app.js initCEP) bunu js\updater.js configBirlestir() ile kullanicinin
+;   config.json'una birlestiriyor: yeni anahtarlar eklenir ve program yollari
+;   (engineExe/ffmpegExe/workDir/stylesDir) PAKETTEN zorlanir. Boylece onlyifdoesntexist'in
+;   bedeli (motor duzeni degisikliginin mevcut kullaniciya hic ulasmamasi) kapaniyor.
+;   Bu dosya KORUNAN-DOSYA LISTELERINE EKLENMEZ — korunursa hic tazelenmez, amaci kalkar.
+Source: "staging\panel\config.json"; DestDir: "{app}"; DestName: "config.pkg.json"; Flags: ignoreversion
 ; --- Motor (Faster-Whisper-XXL + styles) -> secilen klasor ---
 ;     KOSULLU: motor staging\engine altinda VARSA exe'ye gomulur, YOKSA bu satir hic
 ;     derlenmez ve kurulum yalniz paneli kurar.

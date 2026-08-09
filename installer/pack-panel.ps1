@@ -83,5 +83,17 @@ if ($Zip) {
   Write-Host "panel.zip olustu: $Zip"
 }
 if (-not $Stage -and -not $Zip) {
-  Write-Host "Kullanim: pack-panel.ps1 -Zip .\panel.zip   veya   -Stage .\staging\panel"
+  # ⚠ SESSIZ NO-OP DEGIL, HATA. Eskiden burasi yalnizca kullanim satirini basip cikis kodu
+  # 0 ile donuyordu; ama CLAUDE.md ve /surum-yayinla skill'i bu betigi tam da ARGUMANSIZ
+  # cagiriyordu. Yani "zip uret" diye belgelenen komut hicbir sey uretmiyor, kirmizi da
+  # gostermiyordu: kullanici zip'i hazir saniyor, installer\panel.zip ise eski surumden
+  # kalma oluyordu.
+  # ⚠ ARGUMANSIZ CAGIRAN IKI BELGE VARDI; ikisi de bu degisiklikle BIRLIKTE guncellendi:
+  #   · .claude\skills\surum-yayinla\SKILL.md — argumansiz 3. adim KALDIRILDI (publish-github.ps1
+  #     zip'i zaten kendisi uretiyor: eskiyi siler, -Zip cagirir, cikis kodunu ve zip icindeki
+  #     surumu dogrular); yerine "node testler\tumtest.js" denetim adimi kondu.
+  #   · CLAUDE.md — komuta "-Zip .\installer\panel.zip" eklendi.
+  # Kalan cagiranlar zaten argumanli: publish-github.ps1 (-Zip), STAGING-README.txt (-Stage),
+  # DAGITIM.md (-Stage ve -Zip). Yeni bir cagiran eklerken argumani UNUTMA.
+  throw "Arguman gerekli: -Zip <yol> ve/veya -Stage <klasor>   (or: pack-panel.ps1 -Zip .\panel.zip)"
 }

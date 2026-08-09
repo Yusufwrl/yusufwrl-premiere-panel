@@ -30,8 +30,9 @@ var IMZA = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 /* AYNA ONBELLEK SURUMU — bu dosyadaki URETIM mantigi degisince ARTIR.
    <Emoji>\ayna\.surum icinde tutulur; farkliysa butun kopyalar yeniden uretilir.
    v1: ilk surum (yalniz IHDR/PLTE/tRNS/IDAT/IEND yaziliyordu)
-   v2: sRGB · pHYs · gAMA gibi yan chunk'lar korunuyor (renk ve cozunurluk ozgunle ayni) */
-var AYNA_SURUM = 2;
+   v2: sRGB · pHYs · gAMA gibi yan chunk'lar korunuyor (renk ve cozunurluk ozgunle ayni)
+   v3: APNG (acTL/fcTL/fdAT) sessizce bozulmak yerine acikca reddediliyor */
+var AYNA_SURUM = 3;
 
 /* CRC32 (PNG belirtimindeki tablo). Bir kez kurulur. */
 var _crcTablo = null;
@@ -174,6 +175,17 @@ function aynala(kaynakYol, hedefYol) {
     if (tip === "IHDR") ihdr = veri;
     else if (tip === "IDAT") idat.push(veri);
     else if (tip === "IEND") break;
+    /* ⚠ APNG ACIKCA REDDEDILIR — SESSIZCE BOZMAKTANSA OZGUNU KOY.
+       Animasyon chunk'lari (acTL kare sayisi · fcTL kare denetimi · fdAT kare verisi) yan
+       chunk sayilip kopyalaniyordu; ama yazma tarafi butun yan chunk'lari KOSULSUZ IDAT'tan
+       ONCE yaziyor, yani IDAT'tan sonra gelen fdAT ciktida IDAT'in onune geciyor VE icindeki
+       piksel verisi aynalanmadan kaliyordu. Olculdu: acTL+IDAT+fdAT iceren dosyada aynala()
+       ok:true donuyor ve chunk sirasi "acTL, fdAT, IDAT" cikiyor — gecersiz APNG.
+       Chunk'lari ATMAK da yanlis olurdu: dosya gecerli bir statik PNG'ye doner ama kullanicinin
+       animasyonu sessizce yok edilir. Reddedince cagiran taraf (app.js) ozgun resmi koyup
+       "kismi basari" olarak SARI raporluyor — yani zaten ele alinmis bir yola dusuyor. */
+    else if (tip === "acTL" || tip === "fcTL" || tip === "fdAT")
+      return { ok: false, hata: "animasyonlu PNG (APNG) aynalanamiyor" };
     else if (!ATILAN_CHUNK[tip]) yanChunklar.push({ tip: tip, veri: veri });   // PLTE, tRNS, sRGB, pHYs, gAMA…
     ofs += 12 + uzunluk;
   }
@@ -227,15 +239,24 @@ function aynala(kaynakYol, hedefYol) {
   parcalar.push(_chunkYaz("IDAT", yeniVeri));
   parcalar.push(_chunkYaz("IEND", Buffer.alloc(0)));
 
+  var gecici = hedefYol + ".tmp";
   try {
     /* ONCE GECICI DOSYAYA, SONRA TASI. Yarida kesilen bir yazma (panel kapanmasi, disk
        dolmasi) gecerli gorunen ama bozuk bir PNG birakirdi ve bir dahaki calistirmada
        "zaten var" diye yeniden uretilmezdi — kalici bozukluk. */
-    var gecici = hedefYol + ".tmp";
     fs.writeFileSync(gecici, Buffer.concat(parcalar));
     try { if (fs.existsSync(hedefYol)) fs.unlinkSync(hedefYol); } catch (eD) {}
     fs.renameSync(gecici, hedefYol);
-  } catch (e4) { return { ok: false, hata: "yazilamadi: " + (e4.message || e4) }; }
+  } catch (e4) {
+    /* ⚠ YARIM DOSYAYI BIRAKMA. rename basarisiz olursa (hedef Premiere'de acik, izin, disk)
+       .tmp diskte kaliyordu ve hicbir yerde silinmiyordu; surum temizligi de yalniz .png
+       siliyor. 2000px emoji basina birkac yuz KB'lik cop birikiyor ve kullanici emoji
+       klasorunu actiginda (panel o yolu "Emoji klasoru" diye gosteriyor) yarim dosyalari
+       goruyordu. `gecici` fonksiyon kapsaminda ve try'dan ONCE atandigi icin burada her
+       zaman tanimli. */
+    try { fs.unlinkSync(gecici); } catch (eT) {}
+    return { ok: false, hata: "yazilamadi: " + (e4.message || e4) };
+  }
 
   return { ok: true, hata: "", w: genislik, h: yukseklik };
 }
@@ -281,7 +302,8 @@ function aynaYolu(kok, kaynakYol) {
     try {
       var eskiler = fs.readdirSync(klasor);
       for (var ei = 0; ei < eskiler.length; ei++) {
-        if (!/\.png$/i.test(eskiler[ei])) continue;
+        // .tmp DE SILINIR: gecmisten kalan yarim yazma artiklari da bu turda toplansin.
+        if (!/\.(png|tmp)$/i.test(eskiler[ei])) continue;
         try { fs.unlinkSync(path.join(klasor, eskiler[ei])); } catch (eU) {}
       }
     } catch (eR) {}

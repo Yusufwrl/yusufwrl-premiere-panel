@@ -195,9 +195,22 @@ function senkronUygula(planDosyaPath) {
         if (!seq) return "err:Aktif sekans yok";
         var raw = _readFileUTF8(planDosyaPath);
         var lines = raw.split(/\r?\n/);
-        var isler = [], yollar = [], i;
+        var isler = [], yollar = [], i, disRezerve = {};
         for (i = 0; i < lines.length; i++) {
             var ln = lines[i]; if (!ln) continue;
+            /* ⚠ "#REZERVE|<kanal>" — YERLESTIRILMEYEN ama DOKUNULMAMASI GEREKEN kanal.
+               Oyun sesi satirinin `dosya` alani olmadigi icin plan dosyasina hic yazilmiyordu;
+               host o kanali bilmiyor, rezerve edemiyor ve yedek kanal arayisi (plandaki butun
+               kanallari atladigi icin) tam da ONA ulasiyordu: kullanicinin oyun sesini elle
+               tasiyacagi bos kanala bir Craig kaydi konuyor, kullanici sonradan oyun sesini
+               oraya surukleyince arkadasinin sesini sessizce eziyordu.
+               Bu satir `isler`/`yollar` listelerine GIRMEZ — bos `yol` alani importFiles'i
+               dusururdu. Yalnizca rezervasyon kumesine yazilir. */
+            if (ln.indexOf("#REZERVE|") === 0) {
+                var rk = parseInt(ln.slice(9), 10);
+                if (!isNaN(rk) && rk >= 0) disRezerve["k" + rk] = true;
+                continue;
+            }
             var p = ln.split("|"); if (p.length < 4) continue;
             var is = { yol: p[0], kanal: parseInt(p[1], 10), bas: parseFloat(p[2]),
                        ad: p.slice(3).join("|") };
@@ -291,6 +304,54 @@ function senkronUygula(planDosyaPath) {
             catch (ei) { return "err:Dosyalar projeye alınamadı: " + ei.toString(); }
         }
 
+        /* ⚠ YERLESTIRME BASARISI KLIP SAYISIYLA OLCULEMEZ — KIMLIKLE OLCULUR.
+           Eski test `sonra > once` idi ve yalnizca hedef kanal BOSKEN guvenilir. Ama
+           senkronUygula tasarim geregi DOLU kanala da yaziyor (A2'de OBS'in karisik Discord
+           sesi duruyor; panelin "A2 temizligi" akisi bunun kaniti). Yeni klip mevcut klibi TAM
+           ortuyorsa Premiere onu DEGISTIRIYOR, klip sayisi ayni kaliyor (1 -> 1) ve kod bunu
+           "kanal tipi uyumsuz" sanip yedek kanal arayisina giriyordu: hem A2'deki eski ses
+           gercekten silinmis oluyor hem AYNI kayittan IKINCI bir kopya baska kanala konuyordu
+           (timeline'da cift/yankili ses). Yeni klip birden cok klibi orterse sayi DUSER, yani
+           "sonra !== once" de yetmez. Tek dogru olcut: istenen zamanda, istenen MEDYADAN bir
+           klip gercekten var mi. */
+        function _snkKlipVarMi(track, bas, yol) {
+            var TOL = 0.05, j, c, cs, mp, hedef = _norm(yol), n = 0;
+            try { n = track.clips.numItems; } catch (eN) { return false; }
+            for (j = 0; j < n; j++) {
+                c = null;
+                try { c = track.clips[j]; } catch (eC) { c = null; }
+                if (!c) continue;
+                cs = -1;
+                try { cs = c.start.seconds; } catch (eS) { cs = -1; }
+                if (cs < 0 || Math.abs(cs - bas) > TOL) continue;
+                mp = "";
+                try { mp = c.projectItem.getMediaPath(); } catch (eM) { mp = ""; }
+                /* Yol _norm'dan gecirilir: ham dizgi karsilastirmasi OneDrive/Turkce/junction
+                   yollarinda yanlis-negatif verip yedek kanal dalini geri acardi. */
+                if (mp && _norm(mp) === hedef) return true;
+            }
+            return false;
+        }
+
+        /* ⚠ PLAN HEDEFLERI REZERVE EDILIR — YEDEK ARAYISI SIRADAKININ KANALINI KAPMASIN.
+           "Yalniz BOS kanal" kurali yalnizca O ANI olcuyordu, plan capinda rezervasyon yoktu.
+           Plan satirlari kanal sirasina gore isleniyor (A2, A3, A4…) ve yedek arayisi HEP
+           yukari (it.kanal+1) bakiyor — yani basarisiz bir satirin dustugu bos kanal
+           neredeyse her zaman SIRADA BEKLEYEN bir sonraki satirin hedef kanali oluyor. O satir
+           geldiginde kanal artik dolu; overwriteClip uzerine yaziyor ve az once yerlesen Craig
+           kaydini yok ediyor.
+           ⚠ OYUN SESI KANALI DA KAPSANIR — panel onu "#REZERVE|<kanal>" satiriyla bildiriyor
+           (bkz. yukaridaki plan ayristirmasi). Oyun sesi satirinin `dosya` alani olmadigi icin
+           `yerlesecek` filtresinden eleniyor ve normal bir plan satiri olarak YAZILAMIYOR;
+           bos `yol` alanli satir yazmak da yasak (yollar listesine girip importFiles'i
+           dusururdu). Ayni yolla kilitli kanallar ve hizalanamayan kayitlarin hedefleri de
+           rezerve ediliyor. Bu satir olmadan yedek arayisi (plandaki butun kanallari
+           atladigi icin) tam da oyun sesi kanalina ulasiyordu. */
+        var rezerve = {}, ri, rk2;
+        for (ri = 0; ri < isler.length; ri++) rezerve["k" + isler[ri].kanal] = true;
+        // Plan disi rezervasyonlar (oyun sesi kanali) — yukaridaki "#REZERVE|" satirlarindan.
+        for (rk2 in disRezerve) if (Object.prototype.hasOwnProperty.call(disRezerve, rk2)) rezerve[rk2] = true;
+
         /* tasinan: istenen kanal reddedince BASKA kanala konanlar. Sonuc mesajina yaziliyor —
            sessizce baska yere koymak "sesim nerede" sorusunu doguruyordu. */
         var konan = 0, hata = 0, ilkHata = "", tasinan = [];
@@ -308,19 +369,13 @@ function senkronUygula(planDosyaPath) {
                 hata++; if (!ilkHata) ilkHata = it.ad + ": A" + (it.kanal + 1) + " kanalı yok";
                 continue;
             }
-            var once = 0;
-            try { once = seq.audioTracks[it.kanal].clips.numItems; } catch (e3) {}
-
             /* SADECE kanal seviyesi kullanilir. Sekans seviyesindeki
                seq.overwriteClip(item, time, vIdx, aIdx) bicimi dokumante DEGIL (4 parametreli
                imza insertClip'e ait) ve klibi Premiere'de HEDEFLENMIS kanala koyabiliyor —
                bu da A1'deki OBS mikrofon kaydinin uzerine yazmak demek. */
-            var oldu = false;
-            try { oldu = seq.audioTracks[it.kanal].overwriteClip(pi, it.bas); } catch (e4) { oldu = false; }
+            try { seq.audioTracks[it.kanal].overwriteClip(pi, it.bas); } catch (e4) {}
 
-            var sonra = 0;
-            try { sonra = seq.audioTracks[it.kanal].clips.numItems; } catch (e6) {}
-            if (sonra > once) konan++;
+            if (_snkKlipVarMi(seq.audioTracks[it.kanal], it.bas, it.yol)) konan++;
             else {
                 /* ⚠ KANAL TIPI UYUMSUZ — YEDEK KANAL ARA, PES ETME.
                    Premiere'de her ses kanalinin bir TIPI var (mono/stereo/5.1) ve MONO bir
@@ -336,16 +391,34 @@ function senkronUygula(planDosyaPath) {
                    hangi kanalda kim var bilemez. */
                 var yBul = -1, y, yOnce, ySonra;
                 for (y = it.kanal + 1; y < seq.audioTracks.numTracks && yBul < 0; y++) {
+                    // Plandaki BASKA bir kaydin hedefi ya da bu turda yedek olarak kullanilmis
+                    // bir kanal ise DOKUNMA — yoksa o kaydin sesi ezilir.
+                    if (rezerve["k" + y]) continue;
                     yOnce = -1;
                     try { yOnce = seq.audioTracks[y].clips.numItems; } catch (e7) { yOnce = -1; }
                     if (yOnce !== 0) continue;                     // dolu ya da okunamadi -> DOKUNMA
                     try { seq.audioTracks[y].overwriteClip(pi, it.bas); } catch (e8) {}
-                    ySonra = 0;
-                    try { ySonra = seq.audioTracks[y].clips.numItems; } catch (e9) {}
+                    /* ⚠ BURADA SAYIM TESTI KULLANILIR, KIMLIK TESTI DEGIL — BILEREK.
+                       Kimlik testi (_snkKlipVarMi) asil dalda ZORUNLU cunku orada hedef kanal
+                       DOLU olabiliyor ve tam ortusen overwrite klip sayisini degistirmiyor.
+                       Ama yedek dongusu YALNIZ BOS kanali deniyor (yOnce === 0), yani 0 -> 1
+                       artisi yerlesmeyi kusursuz olcuyor ve sayim testi burada yanilmaz.
+                       Kimlik testine gecmek yeni bir hata dogurmustu: _snkKlipVarMi tek bir
+                       olcute — getMediaPath() dizge esitligine — bagli ve o karsilastirmanin
+                       kirilganligi bu dosyada zaten belgeli (OneDrive/Turkce yol, junction,
+                       UNC, Premiere'in farkli normalize etmesi; `_bul` icin bu yuzden ad-yedegi
+                       var, _snkKlipVarMi'nin oyle bir yedegi YOK). Yanlis-negatifte yBul < 0
+                       kaliyor, dongu BIR SONRAKI bos kanali deniyor ve overwriteClip yeniden
+                       calisiyor: onceki klip silinmedigi icin timeline'da her turda bir kopya
+                       daha birikiyor. Olculdu: 8 kanalli sekansta ayni kayit 6 KEZ konuyor ve
+                       host yine de "hicbir ses yerlestirilemedi" donuyor. */
+                    ySonra = -1;
+                    try { ySonra = seq.audioTracks[y].clips.numItems; } catch (e9) { ySonra = -1; }
                     if (ySonra > yOnce) yBul = y;
                 }
                 if (yBul >= 0) {
                     konan++;
+                    rezerve["k" + yBul] = true;   // yedek de rezerve: sonraki satir buraya yazmasin
                     tasinan.push(it.ad + " -> A" + (yBul + 1));
                 } else {
                     hata++;
@@ -1547,12 +1620,36 @@ function _keyDene(pr, sn, bicim, arAlt, arUst) {
     var snap = _keySnapshot(pr);
     try { pr.addKey(z); } catch (e1) { _keyGeriAl(pr, snap); return false; }
     var kk = null; try { kk = pr.getKeys(); } catch (e2) { _keyGeriAl(pr, snap); return false; }
-    var bulundu = false, q, s;
+    var bulundu = false, q, s, w, eski;
     if (kk) {
         for (q = 0; q < kk.length; q++) {
             s = _zamanSn(kk[q]);
             if (isNaN(s) || Math.abs(s - sn) >= 0.02) continue;
             if (s < arAlt - 0.02 || s > arUst + 0.02) continue;   // KLIP ARALIGI SARTI
+            /* ⚠ KEY ZATEN ORADAYSA BU BIR OLCUM DEGIL. Aralik sarti yanlis TABANI eliyor ama
+               "key zaten vardi" durumunu elemiyordu: snapshot okunuyor olmasina ragmen yalniz
+               TEMIZLIK icin kullaniliyor, basari testinde hic sorgulanmiyordu. Sonuc: addKey
+               hicbir sey yapmasa bile _keyDene true donuyor.
+               Gercek senaryo: kullanici preset'i bir klibe uygular (calisir), begenmez, AYNI
+               klibe ikinci kez basar. Ikinci basista parametrede birinci uygulamanin
+               keyframe'leri duruyor; ornekleme 30 fps'te key'leri 0.033 sn arayla koydugu ve
+               buradaki tolerans 0.02 oldugu icin probe zamani buyuk olasilikla var olan bir
+               key'e denk geliyor. Yanlis olcum klip basina BIR KEZ yapilip (strateji.olculdu)
+               o klipteki butun parametrelere dayatildigi icin geri alinamiyor ve sonraki butun
+               yazimlar sessizce dusuyordu. Kullanicinin gordugu belirti: "ilk seferde oldu,
+               ayni klibe tekrar basinca hic olmuyor".
+               Tolerans 0.005 = _keyGeriAl'inkiyle AYNI olmali, yoksa "eski" saydigimiz key'i
+               geri alma da tutarsiz olur. snap null ise (getKeys okunamadi) eski davranis.
+               Yanlis-negatif zararsiz: strateji olculemezse _paramlariYaz'daki aday dongusu
+               bicim=null ile calisiyor ve hicbir aday kaybolmuyor — yalniz klip basina bir
+               kezlik strateji kazanimi kaybolur. */
+            if (snap) {
+                eski = false;
+                for (w = 0; w < snap.length; w++) {
+                    if (!isNaN(snap[w]) && Math.abs(snap[w] - s) < 0.005) { eski = true; break; }
+                }
+                if (eski) continue;
+            }
             bulundu = true; break;
         }
     }
@@ -2586,7 +2683,9 @@ function _statikTuttu(pr, beklenen) {
 /* capa      : YIGIN capasi (eski kayitlar icin yedek)
    hedefSure : hedef klibin suresi — parametrenin capasi yigininkinden FARKLIYSA zaman
                tabanini bu kadar oteleriz (bkz. asagidaki delta). */
-function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa, hedefSure) {
+/* kafaVar (11. arguman, istege bagli): "oynatma kafasina uygula" modu. Verilmezse eski
+   davranis birebir korunur — eski cagri yerleri icin ES3'te fazladan parametre sorun degil. */
+function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa, hedefSure, kafaVar) {
     var ps = null, i, j;
     try { ps = hedefBilesen.properties; } catch (e) { if (rapor) rapor.push("properties-yok"); return 0; }
     if (!ps) { if (rapor) rapor.push("properties-bos"); return 0; }
@@ -2674,6 +2773,19 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
         var hs = (typeof hedefSure === "number" && hedefSure > 0) ? hedefSure : 0;
         var capaDelta = 0;
         if (hs && pCapa !== (capa || "bas")) capaDelta = (pCapa === "son") ? hs : -hs;
+        /* ⚠ KAFA MODUNDA ZAMANSAL OTELEME YAPILMAZ — HER PARAMETRE KAFAYA YAPISIR.
+           presetYaz kafa modunda zamansal cipayi capaOfs = kafaSn - t0 ile kuruyor; capaDelta
+           ise AYRI bir zamansal kaydirma ve presetYaz ona kafa modunda oldugunu soylemiyordu.
+           Sonuc: cipasi yigininkinden FARKLI olan her parametre kafanin bir KLIP SURESI
+           otesine/berisine yaziliyordu. Kullanicinin gercek yigini tam da karisik (ayni yiginda
+           hem "Pop In 1" capa=bas hem "Asagiya Pop Out" capa=son — presetOkuJSON'daki not
+           bunu olcumle belgeliyor): 10 dakikalik tek parca gameplay klibinde kafayi 02:00'a
+           koyup uygulayinca giris keyframe'leri dogru yere, cikis keyframe'leri 02:00+600 sn'ye
+           yani klibin DISINA gidiyor ve Premiere onlari sessizce klip sinirina yigiyordu.
+           ⚠ YALNIZ capaDelta sifirlanir; pCapa'ya DOKUNULMAZ. pCapa ayni fonksiyonda zamansal
+           OLMAYAN iki karar icin daha kullaniliyor (dizi-fark tabani ve D10 oransal olcek
+           kapisi); onu notrlemek 3122-3128'de belgelenmis regresyonu geri getirirdi. */
+        if (kafaVar) capaDelta = 0;
 
         var dizi = _dizimi(kw[0].v) && _spatialMi(kayit.ad);
         var taban = null, mevcut = null, kutu = { ilkHata: "", temizlenen: 0 };
@@ -2864,30 +2976,46 @@ function _yazVeSay(pr, klist, dizi, taban, mevcut, bazZaman, bicim, kutu, olcek)
 }
 /* Panelin yazdigi JSON dosyasindan okur ve SECILI kliplere uygular.
    Metin DOSYADAN geciyor, evalScript string literalinden DEGIL — proje geneli kural. */
-/* Animasyonun CIPADAN ITIBAREN uzanimi (klip-yerel).
+/* Animasyonun CIPADAN ITIBAREN uzanimi (klip-yerel), ILERI ve GERI AYRI.
    YAYILIM (mx-mn) DEGIL: sigdirma icin gereken sey, capanin oldugu noktadan animasyonun
    ne kadar UZAGA gittigidir. Cipadan uzakta baslayan bir preset'te (or. keyler 0.5..1.5)
    yayilim 1.0 ama gercek ihtiyac 1.5 — yayilima bakan bir esik sigdirmayi hic
    tetiklemiyor ve son keyframe klip disina dusuyordu.
-     capa='bas' -> 0'dan ileriye  : max(mx, 0)
-     capa='son' -> 0'dan geriye   : -min(mn, 0)   (o kayitta zamanlar negatif) */
-function _yiginSure(veri) {
-    var mn = NaN, mx = NaN, bi, pi, ki, plist, l, q;
+     capa='bas' -> 0'dan ileriye  : max(t, 0)
+     capa='son' -> 0'dan geriye   : max(-t, 0)   (o kayitta zamanlar negatif)
+
+   ⚠ ESKI `_yiginSure` KALDIRILDI — GERI EKLEME. O fonksiyon butun parametrelerin zamanlarini
+   TEK bir mn/mx ciftinde topluyor ve yalniz YIGIN capasinin yonune bakiyordu; p.capa'ya
+   (parametre basina cipa) hic bakmiyordu. Ama kullanicinin gercek yiginlari KARISIK: ayni
+   yiginda hem giris (zamanlar 0..+0.5) hem cikis (zamanlar -0.6..0) parametreleri var.
+   veri.capa === "bas" oldugunda eski fonksiyon yalniz max(mx,0) = 0.5 donduruyor, -0.6'lik
+   GERI uzanimi hic gormuyordu. Olculen sonuc: 0.55 sn'lik bir AutoCut klibinde 0.5 >
+   0.55*0.95 yanlis oldugu icin sigdirma HIC tetiklenmiyor; cikis parametresinin ilk
+   keyframe'i klibin BASLANGICINDAN ONCEYE dusuyor, Premiere onu sinira kirpiyor ve cikis
+   animasyonu tek keyframe'e cokuyordu — panel yine "uygulandi" diyordu.
+   Ters yondeki kucuk tasmalar (or. "son" cipali bir parametrenin pozitif zamani) bilerek
+   yok sayiliyor; eski davranis da oyleydi, bu bir gerileme degil.
+   ⚠ Fonksiyon SILINDI, "duruyor ama cagrilmiyor" olarak BIRAKILMADI: tam da bu hatanin
+   kaynagiydi ve elde durursa yeni bir cagri yeri sessizce ayni hataya duser. */
+function _yiginUzanim(veri) {
+    var ileri = 0, geri = 0, bi, pi, ki, plist, l, q, pCapa, t;
     for (bi = 0; bi < veri.bilesenler.length; bi++) {
         plist = veri.bilesenler[bi].p || [];
         for (pi = 0; pi < plist.length; pi++) {
+            pCapa = plist[pi].capa || veri.capa || "bas";
             for (q = 0; q < 2; q++) {
                 l = q ? plist[pi].s : plist[pi].k;
                 if (!l) continue;
                 for (ki = 0; ki < l.length; ki++) {
-                    if (isNaN(mn) || l[ki].t < mn) mn = l[ki].t;
-                    if (isNaN(mx) || l[ki].t > mx) mx = l[ki].t;
+                    t = l[ki].t;
+                    if (typeof t !== "number" || isNaN(t)) continue;
+                    if (pCapa === "son") { if (-t > geri) geri = -t; }
+                    else { if (t > ileri) ileri = t; }
                 }
             }
         }
     }
-    if (isNaN(mn) || isNaN(mx)) return 0;
-    return (veri.capa === "son") ? Math.max(-mn, 0) : Math.max(mx, 0);
+    return { ileri: ileri, geri: geri };
 }
 /* Butun keyframe/ornek zamanlarini K katiyla olcekle (kisa klibe sigdirma). */
 function _yiginOlcekle(veri, k) {
@@ -2960,7 +3088,8 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
 
         /* HIZ RAMPASI eski kayitlarda olabilir — uygulama aninda da suzulur (bkz.
            _hizRampasiMi). Aksi halde eski bir kayit her klibi agir cekim yapardi. */
-        var animSure = _yiginSure(veri);
+        /* NOT: eski `var animSure = _yiginSure(veri);` KALDIRILDI — sigdirma artik iki yonu
+           ayri olcen _yiginUzanim ile klip dongusunun icinde hesaplaniyor. */
         var kafaVar = (String(kafaKullan) === "1"), kafaSn = 0;
         if (kafaVar) {
             try { kafaSn = _zamanSn(seq.getPlayerPosition()); } catch (eKf) { kafaSn = NaN; }
@@ -3005,10 +3134,25 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
             /* Kullanilabilir alan CIPANIN YONUNE gore: 'bas' capasinda animasyon capadan
                ILERI, 'son' capasinda GERI uzaniyor. Kafa modunda capa klibin icinde bir
                nokta oldugu icin iki yon farkli miktarda yer birakir. */
-            var kullanSure = (veri.capa === "son") ? capaOfs : (hedefSure - capaOfs);
-            if (!(kullanSure > 0)) kullanSure = hedefSure;
-            if (animSure > 0 && kullanSure > 0.02 && animSure > kullanSure * 0.95) {
-                var kOl = (kullanSure * 0.9) / animSure;
+            /* ⚠ IKI YON AYRI OLCULUR, KATSAYI IKISININ KUCUGUDUR.
+               Eskiden tek bir `kullanSure` vardi ve karisik cipali yiginda yalniz bir yonu
+               goruyordu (bkz. _yiginUzanim). Odalar parametrenin ETKIN cipasina gore:
+                 · Kafa modunda cipa klibin ICINDE bir nokta -> ileri odasi kafadan klip
+                   sonuna, geri odasi kafadan klip basina kadar.
+                 · Kafa modu DISINDA capaDelta "son" parametrelerini klip sonuna, "bas"
+                   parametrelerini klip basina cipaliyor, yani iki yonun de odasi hedefSure.
+               (Yigin capasina gore tek bir oda hesaplamak yanlisti: capa "bas" iken capaOfs=0
+               oldugu icin "geri odasi = capaOfs" gibi bir olcut HER geri uzanimda tetiklenip
+               katsayiyi sifira cekerdi — butun keyframe'ler tek ana cokerdi.) */
+            var uz = _yiginUzanim(veri);
+            var ileriOda = kafaVar ? (hedefSure - capaOfs) : hedefSure;
+            var geriOda  = kafaVar ? capaOfs : hedefSure;
+            var kOl = 1;
+            if (uz.ileri > 0 && ileriOda > 0.02 && uz.ileri > ileriOda * 0.95)
+                kOl = Math.min(kOl, (ileriOda * 0.9) / uz.ileri);
+            if (uz.geri > 0 && geriOda > 0.02 && uz.geri > geriOda * 0.95)
+                kOl = Math.min(kOl, (geriOda * 0.9) / uz.geri);
+            if (kOl < 1) {
                 try {
                     vk = JSON.parse(JSON.stringify(veri));
                     _yiginOlcekle(vk, kOl);
@@ -3090,8 +3234,11 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
                    Ezildiginde: cikis preset'i + kafa birlesiminde spatial taban ters
                    seciliyor (klip kaynagin GITTIGI yere sicriyor) ve D10 kapisi hic
                    acilmiyor (kucultulmus klip animasyon basinda %100'e firliyor). */
+                /* 11. arguman kafaVar: kafa modunda parametre capasi ZAMANSAL oteleme
+                   uretmesin (bkz. _paramlariYaz'daki capaDelta notu). capa'nin kendisi yine
+                   kayittan gelir — yalniz zamansal delta sifirlanir. */
                 _paramlariYaz(taze.components[ix], b.p, adaylar, rapor, b.ad,
-                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa, hedefSure);
+                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa, hedefSure, kafaVar);
             }
             var ad = "?"; try { ad = String(ti.name); } catch (eN) {}
             toplamYaz += sayac.kf; toplamStatik += sayac.st; toplamTemiz += sayac.temiz;
@@ -3165,8 +3312,21 @@ function animasyonUygula(tur, sureSn) {
 
         var sure = parseFloat(sureSn);
         if (!(sure > 0)) sure = 0.4;
-        var ok = 0, hata = [], i, r, ad;
+        var ok = 0, hata = [], i, r, ad, sesAtlandi = 0;
         for (i = 0; i < sec.length; i++) {
+            /* ⚠ BAGLI SES KLIBI SUZULUR — AYNI HATANIN UCUNCU HALI.
+               Premiere'de Linked Selection VARSAYILAN ACIK: video klibine tiklayinca bagli ses
+               de getSelection()'a giriyor. efektUygula (1895) ve presetYaz (3025) bu suzgeci
+               yillar once eklemis, animasyonUygula'ya HIC eklenmemisti. Ses klibinde Scale/
+               Opacity olmadigi icin _popIn "olcek/opaklik parametresi yok — icerik: …" donuyor
+               ve panel TEK bir video klibine basildiginda bile "ok:1 klibe uygulandi | 1 klipte
+               OLMADI: <ses klibi> -> … <klibin butun bilesen dokumu>" diyordu. Animasyon aslinda
+               dogru uygulanmisken kullanici islemi bozuk saniyordu.
+               ⚠ Basari mesajina "N ses klibi atlandi" YAZILMAZ: app.js sonucGoster "atlandi"
+               alt dizgisini kismi basari sayip SARI basiyor — yani not eklemek tam da
+               kaldirdigimiz yanlis uyariyi geri getirirdi. efektUygula'daki gibi sessiz atla;
+               sayac yalniz "hic video klibi yoktu" mesajinda kullanilir. */
+            if (_sesKlibiMi(sec[i])) { sesAtlandi++; continue; }
             r = "bilinmeyen animasyon: " + tur;
             if (String(tur) === "popin") r = _popIn(sec[i], sure);
             if (r === "ok") { ok++; continue; }
@@ -3174,6 +3334,8 @@ function animasyonUygula(tur, sureSn) {
             try { ad = String(sec[i].name); } catch (eN) {}
             hata.push(ad + " -> " + r);
         }
+        if (!ok && sesAtlandi && !hata.length)
+            return "err:Yalniz ses klibi secili — video klibi sec (Linked Selection acikken ses de secime giriyor).";
         if (!ok) return "err:" + (hata[0] || "uygulanamadi");
         return "ok:" + ok + " klibe uygulandi" +
                (hata.length ? " | " + hata.length + " klipte OLMADI: " + hata.join(" ; ") : "");
@@ -3182,13 +3344,28 @@ function animasyonUygula(tur, sureSn) {
     } finally { if (_ug) { try { app.endUndoGroup(); } catch (eug2) {} } }
 }
 
+/* ⚠ ACILISI SINA, KAPATMAYI GARANTI ET, "null" DIZGISI URETME.
+   Eski hali open()'in donusune bakmiyordu: ExtendScript'te File.open() basarisiz olunca
+   false doner ve acilmamis dosyada read() icerik yerine null verir. Fonksiyon bunu ayirt
+   etmedigi icin cagiranlar String(null) === "null" ile calisiyordu. Somut sonucu
+   addCaptionsToTimeline'da gorunuyordu: panel ".stil" dosyasini ARTIK HIC YAZMIYOR (bkz.
+   CLAUDE.md), yani o okuma her altyazi yerlestirmesinde var olmayan bir dosyaya gidiyor ve
+   basari mesajina HER KANAL icin "[stil: 'null' projede bulunamadi]" ekleniyordu — gercek bir
+   stil sorunu bu surekli gurultunun icinde ayirt edilemezdi. presetYaz'da ise okunamayan
+   dosya JSON.parse("null") -> null olup "Kayitli preset bos" YANLIS teshisini uretiyordu
+   (dogrusu "okunamadi").
+   ⚠ BOS DIZGI DONDURULMEZ, HATA FIRLATILIR: "dosya okunamadi" ile "dosya bos" ayrimi
+   cagiranlar icin onemli (plan/liste okuyan yerler bos dosyayi "Plan bos" diye bildiriyor).
+   Zaten .stil ve emoji yolu okumalarinin hepsi try/catch icinde — orada sessizce "" oluyor.
+   try/finally handle sizintisini da kapatiyor (ES3'te try/finally var). */
 function _readFileUTF8(p) {
     var f = new File(p);
     f.encoding = "UTF-8";
-    f.open("r");
-    var s = f.read();
-    f.close();
-    return s;
+    if (!f.exists) throw new Error("dosya yok: " + p);
+    if (!f.open("r")) throw new Error("dosya acilamadi: " + p);
+    var s = "";
+    try { s = f.read(); } finally { try { f.close(); } catch (eC) {} }
+    return (s === null || s === undefined) ? "" : String(s);
 }
 
 function _writeFileUTF8(p, s) {
@@ -3330,11 +3507,33 @@ function kanalTasi(kaynakIdx, hedefIdx) {
         }
 
         // --- hedefe yerlestir ---
-        var konan = 0;
+        var konan = 0, tasHata = "";
         for (i = 0; i < bilgi.length; i++) {
             var bi = bilgi[i];
-            var oldu = false;
-            try { oldu = hed.overwriteClip(bi.pi, bi.bas / TICKS); } catch (e3) { oldu = false; }
+            /* ⚠ YERLESTIRME GERCEKTEN OLDU MU — KLIP SAYISIYLA OLC, overwriteClip'IN DONUSUNE
+               GUVENME. Eskiden donus `oldu` degiskenine ataniyor ama HIC OKUNMUYORDU (proje bu
+               donuse bilerek guvenmiyor, ayni sey snkYerlestir'de de var). Yerlestirme
+               basarisiz oldugunda _findClipNear'in "yeterince yakin" esigi olmadigi icin
+               (bd = 1e18 ile basliyor) kanalda BIR ONCEKI turda konmus klip varsa `yeni` O
+               klibi gosteriyor ve hemen asagidaki iki satir YANLIS klibin kirpma noktalarini
+               eziyor, ustelik konan++ da calisiyordu. Dogrulama turu tutarsizligi yakalayip
+               her seyi geri aldigi icin veri kaybi olmuyor ama kullanici sebepsiz bir
+               "Tasima dogrulanamadi" hatasi goruyor ve gercek sebep hicbir yere yazilmiyordu.
+               _findClipNear'a mesafe esigi EKLENMEDI: sayi tabanli kontrol varken gereksiz ve
+               yanlis secilmis bir esik (Premiere'in kare yuvarlamasi 24 fps'de ~0.021 sn)
+               GECERLI bir yerlestirmeyi de null yapip calisan tasimayi bozardi. */
+            var tOnce = 0;
+            try { tOnce = hed.clips.numItems; } catch (eN1) { tOnce = 0; }
+            try { hed.overwriteClip(bi.pi, bi.bas / TICKS); } catch (e3) {}
+            var tSonra = 0;
+            try { tSonra = hed.clips.numItems; } catch (eN2) { tSonra = 0; }
+            if (tSonra <= tOnce) {
+                /* `bilgi` kayitlarinda `ad` alani YOK ({pi,yol,bas,son,inT}) — yol'dan turet,
+                   yoksa mesaj her zaman "klip N" yedegine dusuyordu. */
+                tasHata = (_basename(bi.yol) || "klip " + (i + 1)) + ": hedef kanala yerlesmedi " +
+                          "(kanal tipi uyumsuz olabilir)";
+                break;
+            }
             var yeni = _findClipNear(hed, bi.bas / TICKS, TICKS);
             if (!yeni) break;
             // in/out ve bitisi orijinaline esitle (klip kirpilmis olabilir)
@@ -3372,8 +3571,12 @@ function kanalTasi(kaynakIdx, hedefIdx) {
         if (!saglam) {
             // geri al: yeni konanlari temizle, kaynak oldugu gibi kalsin
             for (i = hed.clips.numItems - 1; i >= 0; i--) { try { hed.clips[i].remove(false, false); } catch (e7) {} }
-            return "err:Tasima dogrulanamadi (" + konan + "/" + bilgi.length +
-                   "). Hicbir sey silinmedi, kanallar eski halinde.";
+            /* GERCEK SEBEP YAZILIR: "(konan/toplam)" tek basina yaniltici — yerlestirme
+               dongusu ortada kirildiysa sebebi (kanal tipi uyumsuz) yalnizca tasHata biliyor
+               ve kullanici eskiden onu hicbir yerde goremiyordu. */
+            return "err:Tasima dogrulanamadi (" + konan + "/" + bilgi.length + ")" +
+                   (tasHata ? " — " + tasHata : "") +
+                   ". Hicbir sey silinmedi, kanallar eski halinde.";
         }
 
         // --- dogrulandi: kaynagi bosalt ---
