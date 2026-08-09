@@ -2182,7 +2182,7 @@
        kanala İKİNCİ bir tam set koyuyor, her emoji ekranda iki kez çiziliyordu — host
        uyarmıyordu, çünkü o kanal gerçekten boştu. Üstte boş kanal yoksa da panel "Add Track
        ile ekle" diyerek tuzağı kullanıcıya kendi eliyle kurdurtuyordu. */
-    var kanal = -1, temizlenecekler = [], ek = null, enUstDolu = -1;
+    var kanal = -1, kanal2 = -1, temizlenecekler = [], ek = null, enUstDolu = -1;
     try {
       /* ⚠ Bu fonksiyon host.jsx'te. host.jsx yalnız PREMIERE AÇILIRKEN yükleniyor — paneli
          kapat-aç yetmez. Eski host'ta fonksiyon tanımsız olduğu için JSON.parse patlar ve
@@ -2214,6 +2214,22 @@
           t = ek.tracks[i];
           if (t.idx > enUstDolu && t.klip === 0 && !t.kilit) { kanal = t.idx; break; }
         }
+      }
+      /* ── İKİNCİ EMOJİ KANALI: SOL TARAF İÇİN ──
+         (kullanıcı isteği, 9 Ağustos 2026: "Tofi konuşurken Mimi cevap verirse sol tarafa
+         da aynı anda emoji gelebilsin".)
+         ⚠ NEDEN İKİ KANAL ŞART: host emojiYerlestir klipleri overwriteClip ile koyuyor ve
+         AYNI video kanalında zamanda örtüşen iki klip birbirini EZER. Sol ve sağ ekranda
+         farklı yerlerde ama TIMELINE'da aynı anda; yani ancak ayrı kanallarda yan yana
+         durabilirler.
+         İkinci kanal bulunamazsa özellik SESSİZCE DÜŞMEZ: tek kanal moduna dönülür (fren
+         yine ortak olur, yani eski davranış) ve sonuç mesajında SÖYLENİR. Kullanıcıya
+         "Add Track ile bir kanal daha ekle" demek, yarısı ezilmiş bir emoji katmanından iyidir. */
+      for (i = 0; i < ek.tracks.length; i++) {
+        t = ek.tracks[i];
+        if (t.idx === kanal) continue;
+        if (t.idx > enUstDolu && !t.kilit &&
+            (t.klip === 0 || (t.emoji > 0 && t.yabanci === 0))) { kanal2 = t.idx; break; }
       }
     } catch (e2) {
       /* En olası sebep host.jsx'in eski olması (emojiKanallariJSON yeni eklendi ve host
@@ -2305,7 +2321,7 @@
         return r.yol;
       }
 
-      var plan = [], planSag = [], planAyna = [], sonBitis = -999;
+      var plan = [], planSag = [], planAyna = [], sonBitisSag = -999, sonBitisSol = -999;
       var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0 };
       var sureTop = 0, kisaltilan = 0, varyantSay = {}, tarafSay = { sag: 0, sol: 0 };
       /* KAÇ FARKLI RESİM KULLANILDI — "45 emojim var ama projede 24 tane görüyorum, kalanı
@@ -2412,9 +2428,16 @@
            ALAN GİTMİYOR, ayna kararı dosya YOLUNA gömülü. Böylece host.jsx (ES3) hiç
            değişmiyor ve plan satırının 8 alanlı biçimi olduğu gibi kalıyor. */
         var sagMi = emojiSagMi(c.kar.key, c.a1);
+        /* ⚠ GRUPTAN SEÇİLEN ADAY KENDİ TARAFINDA UYGUN OLMAK ZORUNDA. Ana döngü grubu
+           İLK adayın frenine göre açıyor; grup içinden başka bir taraf seçilirse o tarafın
+           freni ayrıca kontrol edilmeli, yoksa aynı kanalda üst üste binen iki klip doğar
+           ve host ikincisini sessizce atar. */
+        if (c.bas < (kanal2 < 0 ? sonBitisSag : (sagMi ? sonBitisSag : sonBitisSol)) + EMOJI_GAP) {
+          atlanan.yakin++; return false;
+        }
         var kon = sagMi ? konSag : konSol;
         var pngYol = sagMi ? png.yol : aynaliYol(png.yol);
-        plan.push([pngYol, kanal, c.bas.toFixed(3), sure.toFixed(3),
+        plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, c.bas.toFixed(3), sure.toFixed(3),
                    kon.x, kon.y, EMJ.olcekHesapla(png, seqH, EMOJI_ORAN),
                    png.duygu + " " + png.karakter].join("|"));
         /* ⚠ TARAF VE AYNA BİLGİSİ PLANA PARALEL DİZİLERDE. Plan satırından geri çıkarım
@@ -2435,7 +2458,13 @@
            BOYUNCA sayıyor: çeşitlilik kuralı "üst üste gelmesin", bu ise "hepsi kullanılsın". */
         duyguSay[c.kar.key + "|" + duygu] = (duyguSay[c.kar.key + "|" + duygu] || 0) + 1;
         karSay[c.kar.key] = (karSay[c.kar.key] || 0) + 1;
-        sonBitis = c.bas + sure; sureTop += sure;
+        /* ⚠ FREN TARAF BAŞINA. İki kanal varken sol ve sağ birbirini engellemez —
+           "Tofi konuşurken Mimi cevap verdi" durumunda ikisi de ekrana gelir. Tek kanal
+           moduna düşüldüyse (kanal2 < 0) ikisi de AYNI freni paylaşır, yani eski davranış. */
+        if (kanal2 < 0) { sonBitisSag = c.bas + sure; sonBitisSol = sonBitisSag; }
+        else if (sagMi) sonBitisSag = c.bas + sure;
+        else sonBitisSol = c.bas + sure;
+        sureTop += sure;
         return true;
       }
 
@@ -2464,9 +2493,16 @@
         return acik > 0 ? acik : 0;
       }
 
+      /* Bir adayın tabi olduğu fren: kendi tarafınınki. */
+      function emojiFren(c) {
+        if (kanal2 < 0) return sonBitisSag;
+        return emojiSagMi(c.kar.key, c.a1) ? sonBitisSag : sonBitisSol;
+      }
       var ai = 0, aj, grup, gi, t0, kondu;
       while (ai < adaylar.length) {
-        if (adaylar[ai].c.bas < sonBitis + EMOJI_GAP) { atlanan.yakin++; ai++; continue; }
+        /* Aday KENDİ tarafının frenine bakar. Grup kurulurken de aynı kural geçerli:
+           bir pencerede sağ dolu ama sol boşsa, soldaki aday hâlâ konabilir. */
+        if (adaylar[ai].c.bas < emojiFren(adaylar[ai].c) + EMOJI_GAP) { atlanan.yakin++; ai++; continue; }
         t0 = adaylar[ai].c.bas; aj = ai; grup = [];
         while (aj < adaylar.length && adaylar[aj].c.bas < t0 + EMOJI_SECIM_PENCERE) {
           grup.push(adaylar[aj]); aj++;
@@ -2617,8 +2653,21 @@
          nefes alıyor. Parça SÜRESİ log'a yazılıyor — bu maliyet hiç ölçülmemişti. */
       var yol = path.join(extRoot, "emoji_plan.txt");
       var kondu = 0, uyarilar = [], parcaHata = "", p, dilim, t0, r, m, u;
-      for (p = 0; p < plan.length; p += EMOJI_PARCA) {
-        dilim = plan.slice(p, p + EMOJI_PARCA);
+      /* ⚠ PLAN KANALA GÖRE AYRILIR. host emojiYerlestir tek kanala yazıyor (plan[0].kanal)
+         ve ilk parçada o kanalın BOŞ olmasını şart koşuyor; iki kanalın satırları
+         karışırsa ikinci kanal "dolu" görünür ve yerleştirme durur. Her kanal kendi
+         parçalarıyla, kendi "ilk parça" bayrağıyla gider. */
+      var kanalGrup = {}, kgAnah = [];
+      plan.forEach(function (satir) {
+        var kn = String(satir).split("|")[1];
+        if (!kanalGrup[kn]) { kanalGrup[kn] = []; kgAnah.push(kn); }
+        kanalGrup[kn].push(satir);
+      });
+      var kgi, kgPlan;
+      for (kgi = 0; kgi < kgAnah.length; kgi++) {
+      kgPlan = kanalGrup[kgAnah[kgi]];
+      for (p = 0; p < kgPlan.length; p += EMOJI_PARCA) {
+        dilim = kgPlan.slice(p, p + EMOJI_PARCA);
         fs.writeFileSync(yol, dilim.join("\n"), "utf8");
         yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length);
         t0 = Date.now();
@@ -2628,6 +2677,8 @@
         if (r.indexOf("ok:") !== 0) { parcaHata = r.replace(/^err:/, ""); break; }
         m = r.match(/^ok:(\d+)\//); if (m) kondu += parseInt(m[1], 10);
         u = r.indexOf(" | "); if (u !== -1) uyarilar.push(r.slice(u + 3));
+      }
+      if (parcaHata) break;   // bir kanal durduysa ötekini denemenin anlamı yok
       }
       try { fs.unlinkSync(yol); } catch (eU) {}
 
@@ -2655,8 +2706,17 @@
           try {
             fs.writeFileSync(pYol, pYigin, "utf8");
             yaz("preset uygulanıyor: " + presetAd + "…");
-            var pr = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")'));
-            logLine("Emoji preset (" + presetAd + ") → " + pr);
+            /* ⚠ PRESET HER İKİ EMOJİ KANALINA DA UYGULANIR. İki kanala geçtikten sonra
+               yalnız birine uygulamak, sol taraftaki emojileri animasyonsuz bırakırdı —
+               kullanıcı bunu ancak videoyu izlerken fark ederdi. */
+            var prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")'));
+            logLine("Emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + prSag);
+            var prSol = "ok:(kanal yok)";
+            if (kanal2 >= 0 && tarafSay.sol > 0) {
+              prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")'));
+              logLine("Emoji preset (" + presetAd + ") V" + (kanal2 + 1) + " → " + prSol);
+            }
+            var pr = (prSag.indexOf("ok:") === 0 && prSol.indexOf("ok:") === 0) ? "ok:" : (prSag.indexOf("ok:") === 0 ? prSol : prSag);
             presetNot = (pr.indexOf("ok:") === 0)
               ? (" | preset: " + presetAd)
               : (" | preset UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 60));
@@ -2672,7 +2732,13 @@
       var aynaHata = aynaHataSay();
       var kismi = (kondu < plan.length) || uyarilar.length > 0 || !!parcaHata || aynasizKondu > 0 ||
                   (presetNot.indexOf("UYGULANMADI") !== -1) || (presetNot.indexOf("öğretilmemiş") !== -1);
-      var msg = kondu + "/" + plan.length + " emoji kondu (V" + (kanal + 1) + ")";
+      var msg = kondu + "/" + plan.length + " emoji kondu (V" + (kanal + 1) +
+                (kanal2 >= 0 && tarafSay.sol > 0 ? (" sağ · V" + (kanal2 + 1) + " sol") : "") + ")";
+      /* ⚠ TEK KANALA DÜŞÜLDÜYSE SÖYLE. Sessiz kalırsa kullanıcı "aynı anda iki emoji"
+         beklerken alamaz ve sebebini hiçbir yerde göremez. */
+      if (kanal2 < 0 && tarafSay.sol > 0)
+        msg += " · ⚠ ikinci boş video kanalı yoktu — sol ve sağ AYNI ANDA çıkamıyor " +
+               "(kanal başlığına sağ tık → Add Track ile bir kanal daha ekle)";
       if (parcaHata) msg += " — DURDU: " + parcaHata;
       else if (kondu < plan.length) msg += " — " + (plan.length - kondu) + " tanesi OLMADI";
       msg += " · " + tarafSay.sag + " sağda, " + tarafSay.sol + " solda";
