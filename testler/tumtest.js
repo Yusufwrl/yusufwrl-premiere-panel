@@ -913,6 +913,70 @@ function bitir() {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) {}
   })();
 
+  /* ---- 17d. EMOJİ YERLEŞTİRME: DONMA KORUMASI VE MALİYET ---- */
+  /* GERÇEK OLAY (ParsMazi, 10 Ağustos 2026): emoji yerleştirme "155/206"da kaldı, Premiere
+     yanıt vermedi. Görev Yöneticisi: Premiere %0,3 CPU — hesaplamıyor, ekranda açtığı
+     "Save Project" penceresini bekliyor. Panel `evalES`in geri çağrısını sonsuza kadar
+     beklediği için donmuş Premiere ile çalışan Premiere BİRBİRİNDEN AYIRT EDİLEMİYORDU. */
+  baslik("Emoji yerleştirme (donma koruması)");
+  (function () {
+    var a, h;
+    try {
+      a = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"));
+      h = String(fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"));
+    } catch (e) { hata("dosya okunamadı", e.message); return; }
+
+    /* NÖBETÇİ: evalES uzun çağrıda "hâlâ bekliyoruz" bilgisi verebilmeli. */
+    dogru("evalES nöbetçi (izle) parametresi alıyor", /function evalES\(code,\s*izle\)/.test(a));
+    dogru("nöbetçi setInterval ile çalışıyor", /if \(typeof izle === "function"\)[\s\S]{0,200}setInterval/.test(a));
+    /* ⚠ PROMISE TERK EDİLMEMELİ. Zaman aşımıyla vazgeçmek yeni bir kilitlenme doğurur:
+       Premiere kilitliyse sonraki evalScript de sıraya girer ve panel bu kez ilerleme
+       sayısı olmayan bir adımda donar; üstelik sırada bekleyen çağrının okuyacağı geçici
+       plan dosyası silinmiş olur. Nöbetçi yalnız BİLGİ verir. */
+    var evalBlok = a.slice(a.indexOf("function evalES(code"), a.indexOf("function evalES(code") + 900);
+    dogru("evalES promise'i TERK ETMİYOR (zaman aşımıyla res çağırmıyor)",
+          evalBlok.indexOf("res(") >= 0 && !/setTimeout\([^)]*res\(/.test(evalBlok));
+    dogru("emoji yerleştirme nöbetçiyi kullanıyor",
+          /emojiYerlestir\("[\s\S]{0,300}function \(sn\)/.test(a));
+    dogru("60 sn sonra kullanıcıya ne yapacağı yazılıyor",
+          /sn >= 60[\s\S]{0,300}Premiere yanıt vermiyor/.test(a));
+
+    /* İPTAL: parça sınırında. Çalışan evalScript kesilemez ama sıradaki parça başlamamalı. */
+    dogru("emoji iptal bayrağı var", /var _emojiIptal = false/.test(a));
+    dogru("parça döngüsü iptali kontrol ediyor", /if \(_emojiIptal\)[\s\S]{0,60}break/.test(a));
+    dogru("iptal düğmesi bağlanmış", /btnEmojiIptal[\s\S]{0,900}_emojiIptal = true/.test(a));
+
+    /* ÖNDEN UYARI: iş başlamadan kaç emoji/parça ve "Premiere donuk görünecek". */
+    dogru("başlamadan önce süre/parça uyarısı veriliyor",
+          /Emoji yerleştirme başlıyor[\s\S]{0,200}DONUK/.test(a));
+
+    /* MALİYET: iki parametre TEK yürüyüşte bulunmalı (Position + Scale aynı Motion'da). */
+    dogru("_paramAraIki tanımlı", /function _paramAraIki\(/.test(h));
+    /* ⚠ BLOK YETERİNCE GENİŞ OLMALI: emojiYerlestir uzun bir fonksiyon (~14 bin karakter) ve
+       parametre yazımı sonlara doğru. Dar bir pencere testi YANLIŞ NEGATİF yapar — kod doğru
+       olduğu hâlde "kaldı" der; bir kez tam bu oldu (9000 karakterde çağrı görünmüyordu). */
+    var _yIx = h.indexOf("function emojiYerlestir");
+    var yerBlok = h.slice(_yIx, _yIx + 16000);
+    dogru("emojiYerlestir tek yürüyüş kullanıyor", /_paramAraIki\(ti,/.test(yerBlok));
+    esit("emojiYerlestir'de artık iki ayrı _paramAraTum çağrısı YOK",
+         (yerBlok.match(/_paramAraTum\(ti,/g) || []).length, 0);
+
+    /* GÜVENLİK TARAMASI O(n²) OLMAMALI — son N klip yeter (klipler zaman sırasında). */
+    dogru("tarama tavanı var (_TARA_TAVAN)", /_TARA_TAVAN\s*=\s*\d+/.test(yerBlok));
+    dogru("tarama sondan başlıyor", /for \(ci = mevcut - 1; ci >= _bas; ci--\)/.test(yerBlok));
+    /* Tavan EMOJI_PARCA'dan büyük olmalı: önceki parçanın koyduğu her klip kapsamda kalsın. */
+    var tavanM = yerBlok.match(/_TARA_TAVAN\s*=\s*(\d+)/);
+    var parcaM = a.match(/EMOJI_PARCA\s*=\s*(\d+)/);
+    if (tavanM && parcaM) {
+      dogru("tarama tavanı (" + tavanM[1] + ") parça boyutundan (" + parcaM[1] + ") BÜYÜK",
+            parseInt(tavanM[1], 10) > parseInt(parcaM[1], 10),
+            "küçükse önceki parçanın klipleri denetimsiz kalır");
+    }
+    /* İLK PARÇA KURALI DEĞİŞMEDİ: kanal BOŞ olmak zorunda (v1.8.0 koruması). */
+    dogru("ilk parçada kanal BOŞ olma kuralı duruyor",
+          /if \(!devam\) return "err:V"[\s\S]{0,120}BOS DEGIL/.test(yerBlok));
+  })();
+
   /* ---- 18. POWERSHELL: BOM'SUZ DOSYADA DİZGE İÇİ ASCII-DIŞI KARAKTER ---- */
   /* GERÇEK HATA (bu denetimde ben ürettim): bir throw mesajına uzun tire (—) koymak
      publish-github.ps1'i TAMAMEN ayrıştırılamaz hâle getirdi. Sebep: dosya BOM'suz UTF-8 ama

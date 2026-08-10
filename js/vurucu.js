@@ -36,11 +36,21 @@ var API_YOL = "/v1/messages";
 var API_SURUM = "2023-06-01";           // anthropic-version başlığı (sabit, tarih gibi görünse de sürüm etiketi)
 
 /* Varsayılanlar TEK YERDE. Panel opts ile ezebilir; buradaki değerler ölçüme değil
-   kullanıcının isteğine dayanıyor (60 sn tam bölüm, ~20 sn'de bir vurucu cümle). */
+   kullanıcının isteğine dayanıyor.
+   ⚠ 9 Ağustos 2026'da kullanıcı isteğiyle SIKLAŞTIRILDI: tam bölüm 60 → 120 sn,
+   aralık 20 → 12 sn ("yazı sıklığı 20 saniyeden 12 saniyeye çıkaralım, yazılar artık ilk
+   1 dakika yerine ilk 2 dakika olsun"). Bunun iki bedeli var, bilerek kabul edildi:
+     · Pencere sayısı ~1.7 katına çıkıyor (20 sn yerine 12 sn'de bir pencere), yani yapay
+       zekâya giden istek sayısı ve ücret artıyor (`parcaPencere: 40` başına bir istek).
+     · Ekranda daha çok yazı kalıyor — "seyrek ve vurucu" dengesi sıklık yönüne kaydı.
+   Geri almak gerekirse yalnız bu iki sayı ve index.html'deki açıklama metni değişir. */
 var VARSAYILAN = {
-  tamSaniye: 60,        // ilk kaç saniye tam altyazılansın
-  aralikSn: 20,         // sonrasında yaklaşık kaç saniyede bir seçim
-  mesafePayi: 5,        // iki seçim arası en az (aralikSn - mesafePayi) saniye
+  tamSaniye: 120,       // ilk kaç saniye tam altyazılansın
+  aralikSn: 12,         // sonrasında yaklaşık kaç saniyede bir seçim
+  /* İki seçim arası en az (aralikSn - mesafePayi) saniye. 12 - 5 = 7 sn: aralık kısaldığı
+     için bu pay ORANSAL olarak büyüdü ama bilerek 5'te bırakıldı — kullanıcı daha SIK yazı
+     istedi, dar bir taban seçimlerin pencere sınırlarına yığılmasını da önlüyor. */
+  mesafePayi: 5,
   bosluk: 0.75,         // cue'lar arası bu kadar sessizlik = cümle sınırı (cumleId yoksa)
   maxCue: 40,           // bir "cümle" en fazla bu kadar cue olabilir (sınır sinyali hiç gelmediyse)
   maxSure: 25,          // ve en fazla bu kadar saniye

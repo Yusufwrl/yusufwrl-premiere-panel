@@ -796,8 +796,21 @@ function emojiYerlestir(planYol, devamMi) {
         var sonBitis = -1;
         if (mevcut !== 0) {
             if (!devam) return "err:V" + (kanal + 1) + " BOS DEGIL (" + mevcut + " klip var) — emoji ancak bos bir video kanalina konur";
+            /* ⚠ TARAMA SONDAN BASLAR VE ERKEN CIKAR — eskiden her devam parcasi kanaldaki
+               TUM klipleri bastan geziyordu (O(n^2)). Klipler zaman sirasinda oldugu ve her
+               parca oncekinin BITISINDEN sonra yazdigi icin:
+                 · en gec biten klip DAIMA sonuncudur -> sonBitis ilk turda bulunur,
+                 · onceki parcalarin kliplerini yeniden dogrulamanin bir anlami yok; onlar
+                   kendi parcalarinda zaten bu kontrolden gecti.
+               Bu yuzden yalnizca SON `_TARA_TAVAN` klip inceleniyor. Tavan EMOJI_PARCA'dan
+               (40) buyuk secildi: bir onceki parcanin koydugu her klip kapsam icinde kalsin,
+               yani "kullanici arada kanala yabanci bir klip koydu" durumu yine yakalansin.
+               ⚠ ILK PARCADA (devam=0) kanal ZATEN BOS olmak zorunda — o kural degismedi,
+               yukaridaki `if (!devam) return err` satiri hala kosulsuz. */
+            var _TARA_TAVAN = 60;
             var yabanci = 0, ci, cc, cp, ce;
-            for (ci = 0; ci < mevcut; ci++) {
+            var _bas = (mevcut > _TARA_TAVAN) ? (mevcut - _TARA_TAVAN) : 0;
+            for (ci = mevcut - 1; ci >= _bas; ci--) {
                 cc = null; try { cc = vt.clips[ci]; } catch (eC) { cc = null; }
                 cp = ""; try { cp = String(cc.projectItem.getMediaPath()); } catch (eCp) { cp = ""; }
                 if (cp && (_haritadaBul(harita, cp) || _emojiKlasorde(cp))) {
@@ -808,8 +821,10 @@ function emojiYerlestir(planYol, devamMi) {
                     if (!isNaN(ce) && ce > sonBitis) sonBitis = ce;
                 } else yabanci++;
             }
-            if (yabanci) return "err:V" + (kanal + 1) + " kanalinda emoji OLMAYAN " + yabanci +
-                                " klip var — yazilmadi";
+            /* Sayi "son _TARA_TAVAN klip icinde" anlaminda — mesaj bunu ima etmeli, yoksa
+               kullanici kanalda toplam o kadar yabanci klip oldugunu sanar. */
+            if (yabanci) return "err:V" + (kanal + 1) + " kanalinda emoji OLMAYAN klip var (" +
+                                yabanci + " tanesi son " + _TARA_TAVAN + " klipte) — yazilmadi";
         }
 
         // Bin yoksa yarat. Kosulsuz createBin her calistirmada kopya uretir.
@@ -893,7 +908,11 @@ function emojiYerlestir(planYol, devamMi) {
             /* KONUM + BOYUT. Yazilamazsa emoji SILINMEZ (ortada durur, kullanici gorur ve
                elle tasiyabilir) ama rapora dusler. */
             var notlar = "";
-            var pos = _paramAraTum(ti, ["Position", "Konum"]);
+            /* ⚠ TEK YURUYUS: Position ve Scale ayni "Motion" bileseninde. Eskiden iki ayri
+               _paramAraTum cagrisi agaci BASTAN iki kez geziyordu — klip basina ~17 Premiere
+               erisimi, 206 emojide ~3.500 gereksiz cagri. */
+            var _ps = _paramAraIki(ti, ["Position", "Konum"], ["Scale", "Ölçek", "Olcek"]);
+            var pos = _ps[0];
             if (pos) {
                 try {
                     pos.setValue([it.x, it.y], true);
@@ -905,7 +924,7 @@ function emojiYerlestir(planYol, devamMi) {
                kendi boyutunda gelir: 2000px'lik bir resim 1080p karede EKRANI KAPATIR ve
                1.6 sn boyunca video gorunmez. Boyle bir klibi birakmaktansa hic koymamak
                yegdir. */
-            var scl = _paramAraTum(ti, ["Scale", "Ölçek", "Olcek"]);
+            var scl = _ps[1];               // yukaridaki tek yuruyusten geldi
             var olcekOk = true;
             if (!isNaN(it.olcek)) {
                 if (!scl) olcekOk = false;
@@ -1760,6 +1779,28 @@ function _paramAraTum(ti, adlar) {
         if (p) return p;
     }
     return null;
+}
+/* ⚠ IKI PARAMETREYI TEK YURUYUSTE BUL — emoji yerlestirmenin sicak yolu.
+   Position ve Scale AYNI "Motion" bileseninde duruyor ama `_paramAraTum` iki kez
+   cagrildiginda bilesen/ozellik agaci BASTAN iki kez geziliyordu: klip basina iki tam
+   yuruyus (~17 Premiere erisimi) ve 206 emojide ~3.500 gereksiz cagri.
+   Burada agac BIR kez geziliyor; bir bilesende iki adin ikisi de aranıyor ve ikisi de
+   bulununca erken cikiliyor. Donus: [p1, p2] (bulunamayan null).
+   ⚠ Ikisi FARKLI bilesenlerde olsa bile dogru calisir — tarama ikisi de dolana kadar
+   surer, yalnizca erken cikis kacar. */
+function _paramAraIki(ti, adlar1, adlar2) {
+    var c = null, i, p1 = null, p2 = null;
+    try { c = ti.components; } catch (eC) { return [null, null]; }
+    if (!c) return [null, null];
+    var n = 0; try { n = c.numItems; } catch (eN) { return [null, null]; }
+    for (i = 0; i < n; i++) {
+        var bil = null;
+        try { bil = c[i]; } catch (eB) { continue; }
+        if (!p1) { try { p1 = _paramAra(bil, adlar1); } catch (e1) {} }
+        if (!p2) { try { p2 = _paramAra(bil, adlar2); } catch (e2) {} }
+        if (p1 && p2) break;
+    }
+    return [p1, p2];
 }
 /* Hata mesaji icin: klipte hangi bilesen VE hangi parametreler var. Tek turda teshis —
    "olmadi" deyip kullaniciyi ikinci bir olcume yollamamak icin. */

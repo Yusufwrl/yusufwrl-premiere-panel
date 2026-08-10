@@ -200,7 +200,7 @@
             <input type="checkbox" id="chkVurucu">
           </label>
           <div id="vurucuAyar" hidden>
-            <p class="note" style="margin-top:8px">İlk <b>1 dakika</b> her şey altyazılanır. Sonrasında yaklaşık <b>20 saniyede bir</b> sadece en vurucu cümle yazılır.</p>
+            <p class="note" style="margin-top:8px">İlk <b>2 dakika</b> her şey altyazılanır. Sonrasında yaklaşık <b>12 saniyede bir</b> sadece en vurucu cümle yazılır.</p>
             <!-- app.js dolduruyor: anahtar var mı, yoksa nereye konacak. -->
             <p class="note" id="vurucuAnahtarNot" style="margin-top:8px"></p>
           </div>
@@ -350,6 +350,9 @@
               </select>
             </div>
             <button class="btn-ghost" id="btnEmojiSil" title="Panelin koyduğu emojileri siler">Emojileri Sil</button>
+            <!-- İptal yalnız yerleştirme sürerken görünür. Parça sınırında kesiyor: o ana
+                 kadar konan emojiler kalır, "Emojileri Sil" ile temizlenebilir. -->
+            <button class="btn-ghost" id="btnEmojiIptal" hidden title="Sıradaki parçayı başlatma — o ana kadar konanlar kalır">İptal</button>
             <button class="btn-ghost" id="btnEmojiYenile" title="Kanal listesini ve emoji klasörünü yeniden oku">Yenile</button>
           </div>
           <span class="dict-status" id="emojiDurum" style="display:block;margin-top:8px"></span>

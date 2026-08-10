@@ -181,7 +181,36 @@
     setProgress(overall, null, eta);
   }
   function esPath(p) { return String(p).replace(/\\/g, "\\\\"); }
-  function evalES(code) { return new Promise(function (res) { if (!cs) { res('{"error":"no_cep"}'); return; } cs.evalScript(code, function (r) { res(r); }); }); }
+  /* izle (isteğe bağlı): uzun süren çağrılarda saniyede bir çağrılan NÖBETÇİ.
+     ⚠ ZAMAN AŞIMI DEĞİL — promise ASLA terk edilmiyor, yalnızca "hâlâ bekliyoruz" bilgisi
+     dışarı veriliyor. Sebep ölçüldü: `cs.evalScript` geri çağrısı gelmezse `await` sonsuza
+     kadar bekler ve panel son yazdığı metinde donar. İkinci kullanıcıda tam bu oldu — emoji
+     yerleştirme "155/206"da kaldı, Görev Yöneticisi'nde Premiere %0,3 CPU (hesaplamıyor,
+     ekranda açılmış bir pencereyi bekliyor: "Save Project — Saving project: Untitled.prproj").
+     Panel donmuş Premiere ile çalışan Premiere'i BİRBİRİNDEN AYIRT EDEMİYORDU.
+     ⚠ NEDEN ZAMAN AŞIMI DEĞİL: Premiere gerçekten bir pencerede kilitliyse evalScript
+     çağrıları host tarafında SIRAYA giriyor. Zaman aşımıyla vazgeçip akışa devam etmek
+     sonraki çağrıyı da dondurur — panel bu kez ilerleme sayısı bile olmayan bir adımda
+     ("preset uygulanıyor…") donar ve hâlâ sırada bekleyen bir çağrının okuyacağı geçici plan
+     dosyası silinmiş olur. Yani zaman aşımı teşhisi İYİLEŞTİRMİYOR, kötüleştiriyor.
+     Nöbetçide bu risk yok: pencere kapandığı anda her şey kaldığı yerden doğru devam eder. */
+  function evalES(code, izle) {
+    return new Promise(function (res) {
+      if (!cs) { res('{"error":"no_cep"}'); return; }
+      var bitti = false, t0 = Date.now(), sayac = null;
+      if (typeof izle === "function") {
+        sayac = setInterval(function () {
+          if (bitti) return;
+          try { izle(Math.round((Date.now() - t0) / 1000)); } catch (eIz) {}
+        }, 1000);
+      }
+      cs.evalScript(code, function (r) {
+        bitti = true;
+        if (sayac) { try { clearInterval(sayac); } catch (eC) {} }
+        res(r);
+      });
+    });
+  }
   function speakerColor(i) { return SP_COLORS[i % SP_COLORS.length]; }
   function fmtShort(sec) { var m = Math.floor(sec / 60), s = Math.floor(sec % 60); return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s; }
   /* Motor çıktısından ilerleme yüzdesi. Motor varsayılan ayarda HİÇ yüzde basmıyor — çubuk
@@ -528,6 +557,9 @@
      imzası. Bilerek localStorage değil: sekans adları projeler arası tekrar ediyor ve kalıcı
      bir onay, başka bir projenin kararıyla bu videonun sorusunu susturabilirdi. */
   var _emojiEslemeOnay = {};
+  /* Emoji yerleştirme iptali. Parça SINIRINDA okunuyor (bkz. emojiEkle döngüsü): çalışan bir
+     evalScript kesilemez — o Premiere'in elinde — ama sıradaki parça hiç başlatılmaz. */
+  var _emojiIptal = false;
   function vurucuAcik() { var c = $("chkVurucu"); return !!(c && c.checked); }
 
   /* ---------- ASLA ÜST ÜSTE GELMESİN ----------
@@ -1574,7 +1606,14 @@
      Orta sıklıkta etki küçük (%55 → %54) çünkü aynı pencerede nadiren iki aday oluyor —
      denge asıl olarak yapay zekânın karakter başına dengeli işaretlemesinden geliyor
      (bkz. js/emoji.js SISTEM_DUYGU 3. kural). */
-  var EMOJI_SECIM_PENCERE = 3.0;
+  /* ⚠ 3.0 → 2.2 (kullanıcı isteği, 9 Ağustos 2026: "emojileri biraz daha artıralım").
+     Bu pencere emoji sayısının ASIL kolu: EMOJI_SIKLIK'i tek başına yükseltmek doyuma
+     giriyor, çünkü aynı 3 sn'lik gruptan taraf başına yalnız BİR aday konuyor. Gerçek
+     oturumda ölçüldü (251 cue / 33 uygun cümle): oran 0.90'da pencere 3.0 → 24 emoji,
+     2.2 → 26 emoji. Oran + pencere birlikte: 22 → 26 (+%18).
+     ⚠ DAHA AŞAĞI İNDİRME (2.0 ve altı) kazancı hızla azaltıyor — üst sınırı artık pencere
+     değil çakışma freni (EMOJI_GAP) ve emojinin cümle boyunca ekranda kalması koyuyor. */
+  var EMOJI_SECIM_PENCERE = 2.2;
 
   /* ── HANGİ KARAKTER HANGİ TARAFTA (kullanıcı kararı, 8 Ağustos 2026) ──
      "Tofi ve Moni her zaman emoji sağda olacak, diğer karakterler diğer tarafa."
@@ -2031,16 +2070,22 @@
         videoda emoji olması iyi oluyor").
      Değer yapay zekâya "cümlelerin yaklaşık şu kadarını işaretle" diye gidiyor (hedefOran).
 
-     ⚠ 0.75 SEÇİLDİ ÇÜNKÜ ÜSTÜ BOŞA GİDİYOR — ÖLÇÜLDÜ (kullanıcının gerçek oturumu, 32 uygun
-     cümle / 142 sn, plan döngüsü birebir simüle edilerek):
-        oran 0.40 → 10 emoji (4.2/dk) · 0.60 → 13 (5.5/dk) · **0.75 → 17 (7.2/dk)**
-        0.85 → 17 (7.2/dk, KAZANÇ YOK) · 1.00 → 19 (8.0/dk)
-     Yani "Bol"a göre +%31, ama 0.85'e çıkmak tek bir emoji bile eklemiyor — yalnız API
-     parası harcıyor (işaretlenen cümle 24 → 27).
-     TAVANI YAPAY ZEKÂ BELİRLEMİYOR: emoji cümle boyunca ekranda kaldığı için çakışma freni
-     (EMOJI_GAP) ve 3 sn'lik seçim penceresi bir üst sınır koyuyor. Daha çok emoji isteniyorsa
-     çevrilecek kol bu sabit DEĞİL, o iki fren — ama ikisi de üst üste binmeyi önlüyor. */
-  var EMOJI_SIKLIK = 0.75;
+     ⚠ TAVANI YAPAY ZEKÂ BELİRLEMİYOR: emoji cümle boyunca ekranda kaldığı için asıl üst
+     sınırı çakışma freni (EMOJI_GAP) ve SEÇİM PENCERESİ koyuyor. Bu yüzden oranı tek başına
+     yükseltmek doyuma giriyor — kol İKİSİ birden çevrilmeli.
+
+     ⚠ ESKİ NOT ("0.75 seçildi çünkü üstü boşa gidiyor, 0.85 tek emoji bile eklemiyor")
+     TEK KANALLI dönemde ölçülmüştü. İki emoji kanalına (sol+sağ) geçildikten sonra yeniden
+     ölçüldü — kullanıcının gerçek oturumu, 251 cue / 5 grup / 33 emojiye uygun cümle,
+     plan döngüsü birebir canlandırılarak:
+        oran\pencere    3.0 sn      2.2 sn
+        0.75            22          24
+        0.90            24          **26**
+        0.95            26          28
+     9 Ağustos 2026'da kullanıcı "emojileri biraz daha artıralım" dedi → **0.90 + 2.2 sn**
+     seçildi: 22 → 26 emoji (+%18). 0.95'e çıkmak +%27 verirdi ama "biraz daha" isteğini aşar
+     ve her emoji Premiere'de ~15 API turu demek (bkz. yerleştirme maliyeti). */
+  var EMOJI_SIKLIK = 0.90;
   function emojiOran() { return EMOJI_SIKLIK; }
 
   /* EMOJİ PRESET SEÇİCİSİ — yalnız GERÇEKTEN öğrenilmiş yığınlar listelenir.
@@ -2334,6 +2379,9 @@
     }
 
     var btn = $("btnEmojiEkle"); if (btn) btn.disabled = true;
+    /* İptal düğmesi yalnız iş sürerken görünür; bayrak her çalıştırmada sıfırlanır. */
+    _emojiIptal = false;
+    var _btnIptal = $("btnEmojiIptal"); if (_btnIptal) _btnIptal.hidden = false;
     yaz("duygular seçiliyor… (" + cumleler.length + " cümle)");
     try {
       /* 3) DUYGU SEÇİMİ. İPTAL DAMGASI ŞART — null GEÇİLMEZ (iptalEdildiMi "sayaç !== damga"
@@ -2766,6 +2814,16 @@
          nefes alıyor. Parça SÜRESİ log'a yazılıyor — bu maliyet hiç ölçülmemişti. */
       var yol = path.join(extRoot, "emoji_plan.txt");
       var kondu = 0, uyarilar = [], parcaHata = "", p, dilim, t0, r, m, u;
+      /* ⚠ BAŞLAMADAN ÖNCE NE OLACAĞINI SÖYLE. Yerleştirme sırasında Premiere DONUK görünüyor
+         (her parça tek bir evalScript) ve kullanıcı bunu "kilitlendi" sanıp Premiere'i
+         öldürüyordu — ikinci kullanıcıda tam bu oldu. Emoji başına ~30 Premiere komutu var;
+         200+ emojilik bir planda iş dakikalarca sürer ve bu NORMALDİR. */
+      var _parcaToplam = 0, _kg;
+      for (_kg = 0; _kg < kgAnah.length; _kg++)
+        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA);
+      logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
+              " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
+              "Durdurmak istersen “İptal” (süren parça bitince durur).");
       /* ⚠ PLAN KANALA GÖRE AYRILIR. host emojiYerlestir tek kanala yazıyor (plan[0].kanal)
          ve ilk parçada o kanalın BOŞ olmasını şart koşuyor; iki kanalın satırları
          karışırsa ikinci kanal "dolu" görünür ve yerleştirme durur. Her kanal kendi
@@ -2780,11 +2838,29 @@
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
       for (p = 0; p < kgPlan.length; p += EMOJI_PARCA) {
+        /* İPTAL — parça sınırında güvenli: her parça kendi içinde tamamlanıyor ve sonraki
+           parça kanalın gerçek durumunu yeniden okuyor. ⚠ İptal ZATEN DONMUŞ bir evalScript'i
+           kurtarmaz (o Premiere'in elinde); sonraki parçanın hiç başlamamasını sağlar. */
+        if (_emojiIptal) { parcaHata = "kullanıcı iptal etti"; break; }
         dilim = kgPlan.slice(p, p + EMOJI_PARCA);
         fs.writeFileSync(yol, dilim.join("\n"), "utf8");
+        var _parcaNo = Math.floor(p / EMOJI_PARCA) + 1;
         yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length);
         t0 = Date.now();
-        r = String(await evalES('emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '")'));
+        /* ⚠ NÖBETÇİ: bu çağrı sürerken durum satırı CANLI kalır. Eskiden "155/206" yazısı
+           parça boyunca (dakikalarca) donuk duruyordu; Premiere bir pencere açıp kilitlense
+           panel bunu hiçbir şekilde belli etmiyordu — kullanıcı "takıldı" deyip Premiere'i
+           öldürüyordu. 60 saniyeden sonra ekranda ne yapması gerektiği yazıyor. */
+        r = String(await evalES(
+          'emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '")',
+          function (sn) {
+            var m0 = "emoji yerleştiriliyor… " + kondu + "/" + plan.length +
+                     " · parça " + _parcaNo + " (" + sn + " sn)";
+            if (sn >= 60) {
+              yaz(m0 + " · ⚠ Premiere yanıt vermiyor olabilir — ekranda açık bir pencere " +
+                  "(Save Project / Import) var mı? Kapatınca kaldığı yerden devam eder.", "var(--warn)");
+            } else yaz(m0);
+          }));
         logLine("Emoji parça " + (Math.floor(p / EMOJI_PARCA) + 1) + " (" + dilim.length +
                 " emoji, " + Math.round((Date.now() - t0) / 100) / 10 + " sn): " + r);
         if (r.indexOf("ok:") !== 0) {
@@ -2910,7 +2986,13 @@
     } catch (e3) {
       yaz("hata: " + (e3.message || e3), "var(--bad)");
       logLine("Emoji hatası: " + (e3.stack || e3.message || e3));
-    } finally { if (btn) btn.disabled = false; }
+    } finally {
+      if (btn) btn.disabled = false;
+      /* İptal düğmesi iş bitince kaybolur ve bir sonraki çalıştırma için tazelenir. */
+      var _bi = $("btnEmojiIptal");
+      if (_bi) { _bi.hidden = true; _bi.disabled = false; }
+      _emojiIptal = false;
+    }
   }
 
   /* EMOJİ ÖLÇÜM KARTI — geçici. Emoji özelliği yazılmadan önce Premiere'in gerçek
@@ -3010,9 +3092,18 @@
       try { emojiKlasorDurumYaz(); } catch (e2) {}
       try { wireEmojiPreset(true); } catch (e3) {}
     });
-    var bEkle = $("btnEmojiEkle"), bSil = $("btnEmojiSil");
+    var bEkle = $("btnEmojiEkle"), bSil = $("btnEmojiSil"), bIptal = $("btnEmojiIptal");
     if (bEkle) bEkle.addEventListener("click", function () {
       emojiEkle().catch(function (e) { logLine("Emoji hatası: " + (e.message || e)); });
+    });
+    /* ⚠ İPTAL YALNIZ SIRADAKİ PARÇAYI ENGELLER. Çalışan bir evalScript kesilemez (o
+       Premiere'in elinde); bu yüzden düğme "durduruluyor…" diyor, "durduruldu" demiyor. */
+    if (bIptal) bIptal.addEventListener("click", function () {
+      _emojiIptal = true;
+      bIptal.disabled = true;
+      var d3 = $("emojiDurum");
+      if (d3) { d3.textContent = "iptal ediliyor… (süren parça bitince duracak)"; d3.style.color = "var(--warn)"; }
+      logLine("Emoji: kullanıcı iptal etti — sıradaki parça başlatılmayacak.");
     });
     if (bSil) bSil.addEventListener("click", async function () {
       var d2 = $("emojiDurum");
