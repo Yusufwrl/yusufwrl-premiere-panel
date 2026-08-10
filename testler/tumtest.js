@@ -1032,6 +1032,161 @@ function bitir() {
     esit("BOM'suz .ps1 dizgelerinde ASCII-dışı karakter yok", riskli, []);
   })();
 
+/* ================= 19. BİLDİRİMDEN ÖNCE KULLANIM (var hoisting) =================
+   ⚠ GERÇEKTEN OLDU — v1.9.20, ParsMazi'de emoji özelliğini TÜMDEN çökertti (10 Ağustos 2026).
+   app.js emojiEkle içinde `_parcaToplam` hesabı `kgAnah.length` okuyordu ama `var kgAnah = []`
+   bildirimi 9 satır AŞAĞIDAYDI. `var` hoisting'i adı fonksiyon başına taşır ama DEĞERİNİ
+   atamaz: bildirim satırına gelmeden değer `undefined`, yani `undefined.length` →
+   "Cannot read properties of undefined (reading 'length')".
+   NEDEN BU KADAR PAHALI: hata plan üretildikten ve yapay zekâ isteğinin PARASI ödendikten
+   SONRA patlıyor. Ve sözdizimi geçerli olduğu için hiçbir ayrıştırıcı yakalamıyor.
+   AYNI TUZAK ZATEN YAZILIYDI (app.js'te `uyarilar` dizisi için bir uyarı bloğu var) — uyarı
+   yazmak yetmedi, nöbetçi gerekti.
+   KASITLI BOZMAYLA KANITLANDI: v1.9.20'nin gerçek app.js'i (git 9e3da4d) taranınca tarayıcı
+   `kgAnah` ve `kanalGrup`'u bildiriminden önce kullanılmış diye yakalıyor; düzeltilmiş kodda
+   10 dosyanın hepsinde 0 bulgu.
+   ⚠ YANLIŞ POZİTİF İKİ YERDEN GELİYORDU, İKİSİ DE KAPATILDI — kurcalarsan geri gelirler:
+   (1) fonksiyon PARAMETRESİ dıştaki var'ı gölgeler, o yüzden çerçeve `function` kelimesinden
+       başlar, `{`'ten değil (`function aynaliYol(yol)` yoksa "yol" bulgusu verirdi);
+   (2) regex BAYRAKLARI da maskelenmeli — `/^v/i` içindeki "i" aksi hâlde identifier sanılıyor. */
+  baslik("Bildirimden önce kullanım (var hoisting — v1.9.20 emoji çökmesi)");
+  (function () {
+    /* String / yorum / regex maskele. Ofsetler korunur (aynı uzunlukta boşluk). */
+    function maskele(s) {
+      var out = s.split(""), i = 0, n = s.length, onceki = "";
+      function bosalt(a, b) { for (var k = a; k < b && k < n; k++) if (out[k] !== "\n") out[k] = " "; }
+      while (i < n) {
+        var c = s.charAt(i), c2 = s.substr(i, 2);
+        if (c2 === "//") { var e = s.indexOf("\n", i); if (e < 0) e = n; bosalt(i, e); i = e; continue; }
+        if (c2 === "/*") { var e2 = s.indexOf("*/", i + 2); e2 = (e2 < 0) ? n : e2 + 2; bosalt(i, e2); i = e2; continue; }
+        if (c === '"' || c === "'" || c === "`") {
+          var j = i + 1;
+          while (j < n) { if (s.charAt(j) === "\\") { j += 2; continue; } if (s.charAt(j) === c) break; j++; }
+          bosalt(i, Math.min(j + 1, n)); i = j + 1; onceki = "s"; continue;
+        }
+        if (c === "/" && /[=(,:;[!&|?{}+\-*%~^]|return|typeof|case/.test(onceki)) {
+          var k2 = i + 1, sinif = false, bitti = false;
+          while (k2 < n) {
+            var ch = s.charAt(k2);
+            if (ch === "\\") { k2 += 2; continue; }
+            if (ch === "\n") break;
+            if (sinif) { if (ch === "]") sinif = false; }
+            else if (ch === "[") sinif = true;
+            else if (ch === "/") { bitti = true; break; }
+            k2++;
+          }
+          if (bitti) {
+            var bay = k2 + 1;                    // (2) bayrakları da yut
+            while (bay < n && /[a-z]/.test(s.charAt(bay))) bay++;
+            bosalt(i, bay); i = bay; onceki = "s"; continue;
+          }
+        }
+        if (!/\s/.test(c)) {
+          if (/[\w$]/.test(c)) { var mm = /[\w$]+/.exec(s.slice(i)); onceki = mm ? mm[0] : c; }
+          else onceki = c;
+        }
+        i++;
+      }
+      return out.join("");
+    }
+    /* Fonksiyon çerçeveleri. (1) bas = `function` kelimesi, govdeBas = gövdenin `{`'i. */
+    function cerceveler(m) {
+      var res = [], re = /\bfunction\b/g, mm;
+      while ((mm = re.exec(m))) {
+        var ac = m.indexOf("{", mm.index);
+        if (ac < 0) continue;
+        var d = 0, i = ac, son = -1;
+        for (; i < m.length; i++) {
+          var c = m.charAt(i);
+          if (c === "{") d++;
+          else if (c === "}") { d--; if (d === 0) { son = i; break; } }
+        }
+        if (son > 0) res.push({ bas: mm.index, govdeBas: ac, son: son });
+      }
+      return res;
+    }
+    function satirNo(s, ofs) { return s.slice(0, ofs).split("\n").length; }
+
+    function taraKaynak(ham) {
+      var m = maskele(ham), frames = cerceveler(m), bulgular = [];
+      frames.forEach(function (f) {
+        var govde = m.slice(f.govdeBas, f.son);
+        /* İç fonksiyonlar HARİÇ: closure sonra çağrılıyor, hoisting sorunu değil. */
+        var ic = frames.filter(function (g) { return g.bas > f.govdeBas && g.son < f.son; });
+        function icteMi(ofs) {
+          for (var i = 0; i < ic.length; i++) if (ofs > ic[i].bas && ofs < ic[i].son) return true;
+          return false;
+        }
+        var declRe = /\bvar\s+/g, dm, adlar = {};
+        while ((dm = declRe.exec(govde))) {
+          if (icteMi(f.govdeBas + dm.index)) continue;
+          var i2 = dm.index + dm[0].length, d2 = 0, bekleAd = true;
+          while (i2 < govde.length) {                 // virgül listesini derinlik 0'da çöz
+            var c = govde.charAt(i2);
+            if (c === "(" || c === "[" || c === "{") d2++;
+            else if (c === ")" || c === "]" || c === "}") { if (d2 === 0) break; d2--; }
+            else if (c === ";" && d2 === 0) break;
+            else if (c === "," && d2 === 0) { bekleAd = true; i2++; continue; }
+            else if (d2 === 0 && bekleAd && /[A-Za-z_$]/.test(c)) {
+              var nm = /[\w$]+/.exec(govde.slice(i2))[0];
+              if (adlar[nm] === undefined) adlar[nm] = f.govdeBas + i2;
+              bekleAd = false; i2 += nm.length; continue;
+            }
+            else if (d2 === 0 && c === "=" && govde.charAt(i2 + 1) !== "=") bekleAd = false;
+            i2++;
+          }
+        }
+        Object.keys(adlar).forEach(function (ad) {
+          var declOfs = adlar[ad], um;
+          var ure = new RegExp("(^|[^\\w$.])" + ad.replace(/\$/g, "\\$") + "(?![\\w$])", "g");
+          while ((um = ure.exec(govde))) {
+            var uofs = f.govdeBas + um.index + um[1].length;
+            if (uofs >= declOfs) break;
+            if (icteMi(uofs)) continue;
+            if (/^\s*:/.test(govde.slice(um.index + um[1].length + ad.length))) continue;  // {ad: ...}
+            bulgular.push(ad + " → satır " + satirNo(ham, uofs) +
+                          " kullanılıyor, satır " + satirNo(ham, declOfs) + "'de bildiriliyor");
+            break;
+          }
+        });
+      });
+      return bulgular;
+    }
+
+    var dosyalar = ["js/app.js", "js/pipeline.js", "js/emoji.js", "js/vurucu.js", "js/hizala.js",
+                    "js/sozluk.js", "js/kisiler.js", "js/pngayna.js", "js/updater.js", "js/lisans.js"];
+    var tumBulgu = [], taranan = 0;
+    dosyalar.forEach(function (rel) {
+      var y = path.join(KOK, rel), ham;
+      try { ham = fs.readFileSync(y, "utf8"); } catch (e) { return; }
+      taranan++;
+      taraKaynak(ham).forEach(function (b) { tumBulgu.push(rel + ": " + b); });
+    });
+    dogru("panel JS dosyaları tarandı (" + taranan + ")", taranan >= 8);
+    esit("hiçbir var bildiriminden önce kullanılmıyor", tumBulgu, []);
+
+    /* NÖBETÇİNİN KENDİSİ ÇALIŞIYOR MU — kasıtlı bozma. Bu olmadan test "hep yeşil" olabilir. */
+    var sahte = [
+      "function f() {",
+      "  var toplam = 0, k;",
+      "  for (k = 0; k < liste.length; k++) toplam += liste[k];",
+      "  var liste = [1, 2, 3];",
+      "  return toplam;",
+      "}"
+    ].join("\n");
+    dogru("nöbetçi kasıtlı bozmayı yakalıyor", taraKaynak(sahte).length === 1,
+          "bulgular: " + JSON.stringify(taraKaynak(sahte)));
+    /* Ve yanlış pozitif üretmiyor: parametre gölgeleme + regex bayrağı. */
+    var temiz = [
+      "function f() {",
+      "  var ad = String(x).replace(/^v/i, '');",
+      "  function ic(ad) { return ad + 1; }",
+      "  return ic(ad);",
+      "}"
+    ].join("\n");
+    esit("parametre gölgeleme ve regex bayrağı yanlış pozitif vermiyor", taraKaynak(temiz), []);
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");

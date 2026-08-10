@@ -2818,22 +2818,30 @@
          (her parça tek bir evalScript) ve kullanıcı bunu "kilitlendi" sanıp Premiere'i
          öldürüyordu — ikinci kullanıcıda tam bu oldu. Emoji başına ~30 Premiere komutu var;
          200+ emojilik bir planda iş dakikalarca sürer ve bu NORMALDİR. */
-      var _parcaToplam = 0, _kg;
-      for (_kg = 0; _kg < kgAnah.length; _kg++)
-        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA);
-      logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
-              " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
-              "Durdurmak istersen “İptal” (süren parça bitince durur).");
       /* ⚠ PLAN KANALA GÖRE AYRILIR. host emojiYerlestir tek kanala yazıyor (plan[0].kanal)
          ve ilk parçada o kanalın BOŞ olmasını şart koşuyor; iki kanalın satırları
          karışırsa ikinci kanal "dolu" görünür ve yerleştirme durur. Her kanal kendi
-         parçalarıyla, kendi "ilk parça" bayrağıyla gider. */
+         parçalarıyla, kendi "ilk parça" bayrağıyla gider.
+         ⚠⚠ BU BLOK `_parcaToplam` HESABININ ÜSTÜNDE KALMAK ZORUNDA — ALTINA ALMA.
+         v1.9.20'de tam tersi sıradaydı ve emoji özelliği HER makinede, HER çalıştırmada
+         "Cannot read properties of undefined (reading 'length')" ile çöküyordu: `var`
+         hoisting'i `kgAnah`'ı fonksiyon başına taşıyor ama DEĞERİNİ atamıyor, yani bildirim
+         satırına gelmeden `kgAnah` = undefined. Hata plan üretildikten ve yapay zekâ isteğinin
+         PARASI ödendikten SONRA patlıyordu, yani en pahalı yerde. Aynı tuzak bu fonksiyonun
+         başında (`uyarilar` dizisi) zaten yazılıydı; uyarı yazmak yetmedi, nöbetçi testi
+         `testler\tumtest.js`'e eklendi. */
       var kanalGrup = {}, kgAnah = [];
       plan.forEach(function (satir) {
         var kn = String(satir).split("|")[1];
         if (!kanalGrup[kn]) { kanalGrup[kn] = []; kgAnah.push(kn); }
         kanalGrup[kn].push(satir);
       });
+      var _parcaToplam = 0, _kg;
+      for (_kg = 0; _kg < kgAnah.length; _kg++)
+        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA);
+      logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
+              " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
+              "Durdurmak istersen “İptal” (süren parça bitince durur).");
       var kgi, kgPlan;
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
