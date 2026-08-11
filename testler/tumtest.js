@@ -1056,6 +1056,28 @@ function bitir() {
             "küçükse önceki parçanın klipleri denetimsiz kalır");
     }
     /* İLK PARÇA KURALI DEĞİŞMEDİ: kanal BOŞ olmak zorunda (v1.8.0 koruması). */
+    /* ⚠ HIZ: clips.numItems emoji başına 4 kez okunuyordu — her biri ayrı Premiere turu
+       (ParsMazi, 11 Ağustos 2026: "okey ekledi ama çok yavaştı"). 172 emojide 344 gereksiz
+       çağrı. overwriteClip'ten sonra BİR KEZ okunup değişkende tutuluyor; geri okuma ilkesi
+       bozulmuyor, yalnız tekrarı kalkıyor. */
+    (function () {
+      var i0 = h.indexOf("function emojiYerlestir");
+      var blok = h.slice(i0, h.indexOf("\nfunction ", i0 + 10));
+      var ana = blok.slice(blok.lastIndexOf("for (i = 0; i < plan.length; i++)"));
+      var say = (ana.match(/\.clips\.numItems/g) || []).length;
+      dogru("ana döngüde clips.numItems en fazla 2 kez okunuyor", say <= 2, "olan: " + say);
+      dogru("yeniSayi değişkeni yeniden kullanılıyor", ana.indexOf("yeniSayi") !== -1);
+    })();
+
+    /* ⚠ BİRİKMİŞ KATMAN ONAYI (ParsMazi: "emoji ekleme kısmı baya bi bozuk knkm"). Panel eski
+       katmanları zaten temizliyordu ama SESSİZCE; temizlik başarısız olursa (kilitli kanal,
+       araya karışmış yabancı klip) kullanıcı yalnız bozuk bir timeline görüyor ve sebebini
+       hiçbir yerde bulamıyordu. */
+    dogru("birikmiş emoji katmanı ÖNCEDEN sorulup onaylatılıyor",
+          /temizlenecekler\.length[\s\S]{0,700}uiConfirm/.test(a));
+    dogru("onay reddedilirse Emojileri Sil düğmesine yönlendiriyor",
+          /temizOnay[\s\S]{0,400}Emojileri Sil/.test(a));
+
     dogru("ilk parçada kanal BOŞ olma kuralı duruyor",
           /if \(!devam\) return "err:V"[\s\S]{0,120}BOS DEGIL/.test(yerBlok));
   })();

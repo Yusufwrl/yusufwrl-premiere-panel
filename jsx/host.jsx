@@ -866,10 +866,16 @@ function emojiYerlestir(planYol, devamMi) {
             var pi = _haritadaBul(harita, it.yol) || _binAdBul(bin, it.yol);
             if (!pi) { hata.push(it.ad + " (resim projeye alinamadi)"); continue; }
 
+            /* ⚠ clips.numItems EMOJI BASINA 4 KEZ OKUNUYORDU — her biri ayri bir Premiere
+               turu (ParsMazi: "okey ekledi ama cok yavasti", 172 emoji = 688 gereksiz cagri).
+               Simdi overwriteClip'ten SONRA BIR KEZ okunup degiskende tutuluyor.
+               ⚠ GERI OKUMA ILKESI BOZULMUYOR: yine Premiere'den okunuyor, yalniz bir kez —
+               "istenen degil gerceklesen" kurali aynen duruyor. */
             var oncekiSayi = vt.clips.numItems;
             try { vt.overwriteClip(pi, it.bas); }
             catch (eO) { hata.push(it.ad + " (yerlestirilemedi: " + eO.toString() + ")"); continue; }
-            if (vt.clips.numItems <= oncekiSayi) { hata.push(it.ad + " (klip olusmadi)"); continue; }
+            var yeniSayi = vt.clips.numItems;          // TEK okuma, asagida yeniden kullanilir
+            if (yeniSayi <= oncekiSayi) { hata.push(it.ad + " (klip olusmadi)"); continue; }
 
             /* KONAN KLIBI BUL. Plan zaman sirasinda ve sonBitis freni geriye yazmayi
                engelledigi icin yeni klip DAIMA sonuncudur — devam parcasinda kanal dolu
@@ -879,14 +885,14 @@ function emojiYerlestir(planYol, devamMi) {
                tutmazsa klip ORTADA KALIYORDU: 5 sn'lik, tam ekran, merkezde bir cop klip —
                ustelik sonBitis guncellenmedigi icin sonraki emoji onu bilmiyordu. */
             var ti = null;
-            try { ti = vt.clips[vt.clips.numItems - 1]; } catch (eSon) { ti = null; }
+            try { ti = vt.clips[yeniSayi - 1]; } catch (eSon) { ti = null; }
             if (ti) {
                 var sBas = _zamanSn(ti.start);
                 if (isNaN(sBas) || Math.abs(sBas - it.bas) >= 0.05) ti = _klipBulZamanda(vt, it.bas) || ti;
             } else ti = _klipBulZamanda(vt, it.bas);
             if (!ti) {
                 /* Klibe hic erisemedik: 5 sn'lik cop birakma, SON klibi kaldirmayi dene. */
-                try { vt.clips[vt.clips.numItems - 1].remove(false, false); } catch (eTem) {}
+                try { vt.clips[yeniSayi - 1].remove(false, false); } catch (eTem) {}
                 hata.push(it.ad + " (konan klip bulunamadi, kaldirildi)");
                 continue;
             }

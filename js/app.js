@@ -2473,6 +2473,39 @@
       return;
     }
 
+    /* ⚠ BİRİKMİŞ EMOJİ KATMANLARI SESSİZ KALMAZ — ARTIK ÖNCEDEN SÖYLENİYOR VE ONAYLANIYOR.
+       GERÇEK VAKA (ParsMazi, 11 Ağustos 2026: "emoji ekleme kısmı baya bi bozuk knkm"):
+       timeline'da birden çok kanala yayılmış, farklı boyutlarda emoji klipleri birikmişti.
+       Panel eski katmanları ZATEN temizliyor ama bunu SESSİZCE yapıyordu; temizlik bir
+       sebeple başarısız olursa (kilitli kanal, araya karışmış yabancı klip) kullanıcı
+       yalnız "bozuk" bir timeline görüyor ve sebebini hiçbir yerde bulamıyordu.
+       Emsal: capBasildi_<sekans> ve cuesStale onayları — ikisi de "panel ölçemediğini SORAR"
+       ilkesinden doğdu. */
+    if (temizlenecekler.length) {
+      var tDokum = temizlenecekler.map(function (tx) {
+        var tt = null;
+        for (var ty = 0; ty < ek.tracks.length; ty++) if (ek.tracks[ty].idx === tx) tt = ek.tracks[ty];
+        return "V" + (tx + 1) + " (" + ((tt && tt.emoji) || "?") + " emoji)";
+      }).join(" · ");
+      logLine("Emoji: önceki katmanlar bulundu → " + tDokum);
+      var temizOnay = await uiConfirm(
+        "Projede önceki emoji katman(lar)ı var:
+
+  " + tDokum + "
+
+" +
+        "Bunlar SİLİNECEK ve emojiler baştan konacak.
+" +
+        "(Silinmezse emojiler üst üste biner ve timeline karışır.)
+
+Devam edeyim mi?", "Emoji");
+      if (!temizOnay) {
+        yaz("İptal edildi — eski katmanları kendin silmek istersen “Emojileri Sil” düğmesini kullan.",
+            "var(--warn)");
+        return;
+      }
+    }
+
     var btn = $("btnEmojiEkle"); if (btn) btn.disabled = true;
     /* İptal düğmesi yalnız iş sürerken görünür; bayrak her çalıştırmada sıfırlanır. */
     _emojiIptal = false;
