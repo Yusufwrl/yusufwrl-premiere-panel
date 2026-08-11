@@ -1730,12 +1730,25 @@ function bitir() {
 
       /* İstemin kullanıcı örneğini ve yasakladığı örneği İÇERMESİ — istem gevşetilirse
          bu test kırmızı olur ve tarihçe hatırlanır. */
-      dogru("istem kullanıcının ÖRNEK başlığını içeriyor",
-            SH.SISTEM_BASLIK.indexOf("EJDERHA Sen KIZLARI ETKİLEDİN") !== -1);
+      /* ⚠ Kullanıcının ilk örneği ("EJDERHA Sen KIZLARI ETKİLEDİN") artık istemde ZORUNLU
+         kalıp olarak DEĞİL, A seçeneğinin örneği olarak duruyor — kendisi "o o videoluktu"
+         dedi. Bu yüzden örnek metni değil, KALIP ÇEŞİTLİLİĞİ denetleniyor. */
       dogru("istem reddedilen örneği KÖTÜ olarak gösteriyor",
             SH.SISTEM_BASLIK.indexOf("Yetimhaneden") !== -1);
       dogru("istem 42 karakter sınırını söylüyor", SH.SISTEM_BASLIK.indexOf("42 KARAKTER") !== -1);
-      dogru("istem izleyiciye seslenmeyi şart koşuyor", SH.SISTEM_BASLIK.indexOf("İZLEYİCİYE SESLEN") !== -1);
+      /* ⚠ "Sen/Sana" ZORUNLU OLMAKTAN ÇIKARILDI (kullanıcı, 11 Ağustos 2026: "tüm başlıkları
+         sana/seni bilmem ne diye yapmış, o o videoluktu"). Zorunlu kural yapılınca 5 başlığın
+         hepsi aynı kalıba düştü. Artık 7 kalıp SEÇENEK olarak sunuluyor. */
+      dogru("istem 'Sen' kalıbını ZORUNLU KILMIYOR",
+            SH.SISTEM_BASLIK.indexOf("ZORUNLU DEĞİL") !== -1 &&
+            SH.SISTEM_BASLIK.indexOf("İZLEYİCİYE SESLEN:") === -1);
+      var kalipSay = (SH.SISTEM_BASLIK.match(/[A-G]\) /g) || []).length;
+      dogru("istem birden çok kalıp sunuyor (en az 6)", kalipSay >= 6, "bulunan: " + kalipSay);
+      /* Çoklu Shorts'ta önceki başlıklar modele gösteriliyor mu — çeşitliliğin asıl kolu. */
+      dogru("baslikUret önceki başlıkları isteme katıyor",
+            SH.baslikUret.toString().indexOf("oncekiBasliklar") !== -1);
+      dogru("istem tek kalıba sıkışmayı KÖTÜ örnek olarak gösteriyor",
+            SH.SISTEM_BASLIK.indexOf("tek kalıba sıkışmış") !== -1);
     })();
 
     /* --- shortsAdet varsayılanı kullanıcı isteğiyle 5 --- */

@@ -3700,8 +3700,11 @@
            ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır: sekans zaten kuruldu ve
            kullanıcı başlığı elle de yazabilir. */
         yaz(etk + "başlık üretiliyor…");
+        /* ⚠ ÖNCEKİ BAŞLIKLAR GEÇİRİLİR — yoksa 5 başlığın hepsi aynı kalıba düşüyor
+           (kullanıcı bildirdi). Model her isteği ayrı görüyor, çeşitliliği panel sağlar. */
         var bp = await SHORTS.baslikUret(VUR, anahtar, r.metin || sh.baslik,
-          { onLog: logLine, damga: VUR.iptalDamgasi() });
+          { onLog: logLine, damga: VUR.iptalDamgasi(),
+            oncekiBasliklar: basliklar.map(function (x) { return x.baslik; }) });
         bp.sekansAd = r.hs.ad + " — " + sh.baslik;
         basliklar.push(bp);
         shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", basliklar);

@@ -606,23 +606,29 @@ var SISTEM_BASLIK =
   "Sen YouTube Shorts başlığı yazan bir uzmansın. Türkçe, Minecraft/Roblox içerikleri, " +
   "hedef kitle 8-14 yaş.\n\n" +
   "Sana bir Shorts'un konuşma metni veriliyor.\n\n" +
-  "═══ BAŞLIK KURALLARI (hepsi ZORUNLU) ═══\n" +
-  "1. EN FAZLA 42 KARAKTER (emoji dahil). Tek satıra sığmalı. Uzun başlık kesilir.\n" +
-  "2. İZLEYİCİYE SESLEN: \"Sen\", \"Sana\", \"Senin\" geçsin — izleyici olayın içinde hissetsin.\n" +
-  "3. 1-2 kelime TAMAMEN BÜYÜK HARF (vurgu). Tamamı büyük OLMASIN.\n" +
-  "4. Sonunda TEK emoji.\n" +
-  "5. \"!!\" kullanabilirsin.\n" +
-  "6. OLAYI ANLATMA — SONUCU İMA ET. İzleyici \"ne olmuş?\" diye merak edip tıklamalı.\n\n" +
-  "═══ İYİ ÖRNEKLER ═══\n" +
-  "  EJDERHA Sen KIZLARI ETKİLEDİN !! 😍\n" +
-  "  Sana TUZAK Kurdular ve KAÇAMADIN 😱\n" +
-  "  Bu KAFESTEN Çıkamazsın Sandılar 🔓\n" +
-  "  Seni KANDIRDILAR ama Fark Ettin 👀\n\n" +
+  "═══ ZORUNLU KURALLAR ═══\n" +
+  "1. EN FAZLA 42 KARAKTER (emoji dahil). Tek satıra sığmalı.\n" +
+  "2. 1-2 kelime TAMAMEN BÜYÜK HARF (vurgu). Tamamı büyük OLMASIN.\n" +
+  "3. Sonunda TEK emoji.\n" +
+  "4. OLAYI ANLATMA — SONUCU İMA ET. İzleyici \"ne olmuş?\" diye merak edip tıklamalı.\n" +
+  "5. \"!!\" kullanabilirsin.\n\n" +
+  "═══ KALIPLAR — İÇERİĞE EN UYGUN OLANI SEÇ ═══\n" +
+  "⚠ Bunlar SEÇENEK, hepsini uygulama. Her başlık aynı kalıpta olursa hepsi birbirine benzer " +
+  "ve sıradanlaşır. İçerik hangisine uyuyorsa ONU kullan:\n\n" +
+  "A) İzleyiciye seslenme:  Sana TUZAK Kurdular ve KAÇAMADIN 😱\n" +
+  "B) Soru:                 Bu KAFESTEN Nasıl Kaçtık ?! 🔓\n" +
+  "C) Şok/sonuç ima:        KİMSE Bunu Beklemiyordu 😳\n" +
+  "D) Karakterle:           Moni'yi POLİSE Verdiler !! 🚔\n" +
+  "E) Abartı:               EN KÖTÜ Gün Bu Oldu 💀\n" +
+  "F) Çatışma:              Beni SUÇLADILAR ama Masumum 😤\n" +
+  "G) Meydan okuma:         Bunu Yapabilene AŞK OLSUN 🔥\n\n" +
+  "⚠ \"Sen/Sana/Senin\" ZORUNLU DEĞİL — yalnız A kalıbında var. İçerik ikinci şahsa uymuyorsa " +
+  "KULLANMA; olayı karakter adıyla ya da soruyla anlatmak çoğu zaman daha iyi.\n\n" +
   "═══ KÖTÜ ÖRNEKLER (ve nedeni) ═══\n" +
-  "  \"Yetimhaneden Kaçıyoruz Kimse Bizi Sahiplenmedi\" → olayı anlatıyor, merak bırakmıyor, " +
-  "çok uzun, izleyiciye seslenmiyor\n" +
+  "  \"Yetimhaneden Kaçıyoruz Kimse Bizi Sahiplenmedi\" → olayı anlatıyor, merak bırakmıyor, çok uzun\n" +
   "  \"Minecraft'ta Ev Yaptık\" → hiçbir merak yok\n" +
-  "  \"ÇOK KOMİK ANLAR\" → içerikle ilgisi yok, herkes yazıyor\n\n" +
+  "  \"ÇOK KOMİK ANLAR\" → içerikle ilgisi yok, herkes yazıyor\n" +
+  "  Hepsi \"Sana ...\" / \"Seni ...\" diye başlayan başlıklar → tek kalıba sıkışmış, sıradan\n\n" +
   "═══ OYUN ═══\n" +
   "Metne bakıp oyunu belirle: \"minecraft\" mı \"roblox\" mu. Emin değilsen \"minecraft\" yaz.\n\n" +
   "═══ ETİKETLER ═══\n" +
@@ -649,6 +655,16 @@ var SEMA_BASLIK = {
 async function baslikUret(VUR, anahtar, metin, opts) {
   opts = opts || {};
   var icerik = "Bu Shorts'un konuşma metni:\n\n" + String(metin || "").slice(0, 2500);
+  /* ⚠ ÖNCEKİ BAŞLIKLAR MODELE GÖSTERİLİR — ÇOKLU SHORTS'TA ŞART.
+     Her başlık AYRI istekle üretiliyor, yani model ötekileri görmüyor ve aynı kalıba
+     düşüyor (kullanıcı bildirdi: "tüm başlıkları sana/seni bilmem ne diye yapmış").
+     Önceki başlıkları göstermek tek etkili çözüm — istemdeki "kalıp seç" kuralı tek başına
+     yetmiyor, çünkü model her seferinde aynı en-olası kalıbı seçiyor. */
+  var onceki = (opts.oncekiBasliklar || []).filter(Boolean);
+  if (onceki.length) {
+    icerik += "\n\n⚠ Bu videodan ÜRETİLMİŞ başlıklar (aynı kalıbı TEKRARLAMA, farklı bir " +
+              "kalıp seç):\n" + onceki.map(function (b) { return "  - " + b; }).join("\n");
+  }
   var cevap;
   try {
     cevap = await VUR.istekGonder(anahtar, _govde(SISTEM_BASLIK, icerik, opts, SEMA_BASLIK),
