@@ -103,6 +103,20 @@
             <div class="tc-arrow">›</div>
           </button>
 
+          <!-- ⚠ ADI "Shorts Sekansı" — SADECE "Shorts" DEĞİL. Panelde zaten bir "Shorts"
+               kutusu var (Altyazı ekranında, yalnız kelime bölmesini değiştiriyor) ve iki
+               farklı şeyin aynı adı taşıması kullanıcıyı da ileride kodu okuyanı da yanıltır. -->
+          <button class="tool-card" data-view="shortsSekans">
+            <div class="tc-icon grad-b">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Shorts Sekansı</div>
+              <div class="tc-desc">Videonun en iyi anlarından 30-40 sn'lik dikey özet — altyazı ve emoji dahil</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+
           <!-- Ayarlar: üretim ekranından çıkarılan, nadiren dokunulan şeyler burada. -->
           <button class="tool-card" data-view="ayarlar">
             <div class="tc-icon grad-d">
@@ -385,6 +399,41 @@
       <!-- ================= AYARLAR ================= -->
       <!-- Üretim ekranını sadeleştirmek için açılan görünüm. Altyazı ekranında sürekli
            göze giren ama nadiren dokunulan ayarlar buraya taşınıyor. -->
+      <!-- ══ SHORTS SEKANSI ══
+           Uzun video bittikten sonra en iyi anlardan dikey bir özet üretir. Altyazı ve emoji
+           KOPYALANMAZ, yeniden üretilir — panel caption track'e erişemiyor (üç API yüzeyi
+           ölçüldü) ve kesitler birleşince zamanlar zaten kayıyor. -->
+      <div class="view" id="viewShortsSekans" hidden>
+        <div class="card">
+          <div class="card-title">Shorts Sekansı</div>
+          <p class="note" style="margin:0 0 10px">
+            Videonun <b>en iyi anlarını</b> yapay zekâya seçtirir, yeni bir <b>dikey (1080×1920)</b>
+            sekans açar ve kesitleri arka arkaya dizer. Altyazı ve emoji o sekansa yeniden yazılır.
+            Uzun videona <b>dokunmaz</b>.
+          </p>
+          <p class="note" style="margin:0 0 10px">
+            Önce Altyazı ekranında altyazı üret — Shorts anları o metinden seçiliyor.
+          </p>
+
+          <div class="kanal-liste" id="shortsAyar" style="margin-bottom:10px">
+            <label class="chk"><input type="checkbox" id="shortsEmoji" checked> Emoji de koy</label>
+            <label class="chk"><input type="checkbox" id="shortsAltyazi" checked> Altyazı da yaz</label>
+          </div>
+
+          <p class="note" style="margin:0 0 10px;color:var(--warn)">
+            ⚠ Görüntü <b>tam ekran</b> yapılır: yatay karenin sağı ve solu kırpılır. Kenarda
+            kalan karakterler kadraj dışında kalabilir — istersen sonra Premiere'de
+            Effect Controls → Motion → Position ile kaydırabilirsin.
+          </p>
+
+          <div class="dict-actions">
+            <button class="btn" id="btnShortsUret" type="button">Shorts Oluştur</button>
+            <button class="btn-ghost" id="btnShortsIptal" type="button" hidden>İptal</button>
+          </div>
+          <div class="dict-status" id="shortsDurum" style="margin-top:10px"></div>
+        </div>
+      </div>
+
       <div class="view" id="viewAyarlar" hidden>
         <details class="card dict-card" id="dictCard" open>
           <summary class="dict-summary">
@@ -423,6 +472,21 @@
         <!-- Tanılama kartları KALDIRILDI: ikisi de sorusunu cevapladı ve sonuçlar
              CLAUDE.md'ye yazıldı. Fonksiyonlar host.jsx'te duruyor (captionStilTani,
              presetTani), yeni bir Premiere sürümünde DevTools'tan tekrar çağrılabilir. -->
+
+        <!-- GEÇİCİ: Shorts kartı için API ölçümü. Panel bugüne kadar hiç sekans YARATMADI;
+             "videodan özet Shorts üret" özelliği bunu gerektiriyor ve yapılabilirliği
+             ölçülmedi. Ölçüm bitip karar verilince bu kart da kaldırılacak (captionStilTani
+             ve presetTani kartlarında olduğu gibi). SALT OKUR — projede iz bırakmaz. -->
+        <div class="card" id="shortsOlcCard">
+          <div class="card-title">Shorts — API ölçümü (geçici)</div>
+          <p class="note">Premiere'in yeni sekans yaratma yeteneğini ölçer. Projene <b>dokunmaz</b>, hiçbir şey oluşturmaz. Ölçüm dosyaya yazılır, Yusuf'a gönder.</p>
+          <div class="dict-actions" style="margin-top:10px">
+            <button class="btn-ghost" id="shortsOlcBtn" type="button">Ölç</button>
+            <button class="btn-ghost" id="shortsDeneBtn" type="button">Gerçekten Dene</button>
+            <span class="dict-status" id="shortsOlcStatus"></span>
+          </div>
+          <p class="note" style="margin-top:8px"><b>Gerçekten Dene:</b> geçici bir test sekansı yaratıp siler — “listede var” ile “çalışıyor” aynı şey değil. Projene kalıcı bir şey eklemez.</p>
+        </div>
 
         <!-- EMOJİ AYARLARI. Asıl düğme Altyazı ekranında (üretimden sonra basılıyor);
              burada yalnız bir kez ayarlanan şeyler + ölçüm testi duruyor. -->

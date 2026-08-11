@@ -3986,3 +3986,572 @@ function lastProjectItemName() {
         return app.project.rootItem.children[n - 1].name;
     } catch (e) { return "error:" + e.toString(); }
 }
+
+/* ── SHORTS OLCUMU — "videodan ozet Shorts uret" karti icin API kesfi ───────────────
+   NEDEN VAR: panel bugune kadar HIC sequence YARATMADI; hep app.project.activeSequence
+   uzerinde calisti. Shorts karti yeni bir DIKEY sekans acip secilen kesitleri oraya
+   kopyalamak zorunda ve bunun yapilabilir olup olmadigi bu projede HIC olculmedi.
+   Bu projenin en pahali dersi "belgelenmemis API'de tahmin etme" (caption stil atama
+   ucuncu yuzeye kadar denenip kapandi, preset dosyasi okuma da oyle) — o yuzden kart
+   yazilmadan ONCE olculuyor.
+
+   ALTI SORUYU CEVAPLAR:
+     1. Yeni sekans yaratilabiliyor mu?      app.project.createNewSequence / ...FromClips
+     2. Sekansin olcusu (1080x1920) ayarlanabiliyor mu?  sequence.getSettings/setSettings
+     3. Kaynak videodan KESIT alinabiliyor mu?           projectItem.createSubClip
+     4. Klip yeni sekansa konabiliyor mu?                videoTracks[i].overwriteClip
+     5. Klibin in/out noktasi yazilabiliyor mu?          trackItem.inPoint/outPoint setter
+     6. Yeni sekans AKTIF yapilabiliyor mu?              openSequence / activeSequence setter
+        (6 sart: altyazi ve emoji kodunun tamami activeSequence'a yaziyor.)
+
+   ⚠ SALT OKUR. Hicbir sekans yaratmaz, hicbir klip koymaz, hicbir ayar degistirmez —
+   yalnizca reflect dokumu alir. Yazma denemeleri kullanicinin projesinde iz birakirdi. */
+function shortsTani() {
+    var out = [];
+    var ANAHTAR = ["sequence", "subclip", "clip", "preset", "setting", "point", "duration",
+                   "insert", "overwrite", "create", "open", "active", "scale", "frame", "size"];
+    function yaz(s) { out.push(String(s)); }
+
+    try { yaz("Premiere surum: " + app.version); } catch (eV) { yaz("surum okunamadi"); }
+
+    /* --- 1) app.project: sekans yaratma metotlari --- */
+    var proj = null;
+    try { proj = app.project; } catch (eP) {}
+    _refListele(out, "app.project (SEKANS YARATMA)", proj, ANAHTAR);
+    yaz("");
+    yaz(">> SORU 1 — sekans yaratma metotlari tek tek:");
+    var yaratAdlar = ["createNewSequence", "createNewSequenceFromClips", "newSequence",
+                      "openSequence", "deleteSequence"];
+    var qi;
+    for (qi = 0; qi < yaratAdlar.length; qi++) {
+        var v = "yok";
+        try { v = (typeof proj[yaratAdlar[qi]]); } catch (eQ) { v = "hata"; }
+        yaz("   app.project." + yaratAdlar[qi] + " = " + v);
+    }
+    try { yaz("   app.project.sequences.numSequences = " + proj.sequences.numSequences); }
+    catch (eS0) { yaz("   sequences okunamadi: " + eS0.toString()); }
+
+    /* --- 2) aktif sekans + ayarlari --- */
+    var seq = null;
+    try { seq = proj.activeSequence; } catch (eS) {}
+    if (!seq) {
+        yaz("");
+        yaz("UYARI: aktif sekans yok — Premiere'de bir sekans acip tekrar bas.");
+        return out.join("\n");
+    }
+    _refListele(out, "activeSequence", seq, ANAHTAR);
+    yaz("");
+    yaz(">> SORU 2 — sekans ayarlari (olcuyu 1080x1920 yapabilir miyiz):");
+    var ayar = null;
+    try { ayar = seq.getSettings(); yaz("   getSettings() CALISTI"); }
+    catch (eG) { yaz("   getSettings() YOK/hata: " + eG.toString()); }
+    if (ayar) {
+        _refListele(out, "sequence.getSettings()", ayar, ANAHTAR);
+        try { yaz("   mevcut olcu: " + ayar.videoFrameWidth + "x" + ayar.videoFrameHeight); }
+        catch (eA) { yaz("   videoFrameWidth/Height okunamadi: " + eA.toString()); }
+    }
+    try { yaz("   setSettings tipi = " + (typeof seq.setSettings)); } catch (eSS) {}
+
+    /* --- 3/5) ilk VIDEO klibi: kesit alma ve in/out --- */
+    var ti = null, vt, ci;
+    try {
+        for (vt = 0; vt < seq.videoTracks.numTracks && !ti; vt++) {
+            for (ci = 0; ci < seq.videoTracks[vt].clips.numItems; ci++) {
+                ti = seq.videoTracks[vt].clips[ci]; break;
+            }
+        }
+    } catch (eT) {}
+    yaz("");
+    if (!ti) {
+        yaz(">> SORU 3/5 ATLANDI: sekansta hic video klibi yok.");
+    } else {
+        _refListele(out, "TrackItem (ornek video klibi)", ti, ANAHTAR);
+        yaz("");
+        yaz(">> SORU 5 — klibin in/out noktasi YAZILABILIR mi (salt okunur mu):");
+        var alanlar = ["inPoint", "outPoint", "start", "end", "duration"];
+        var ai2;
+        for (ai2 = 0; ai2 < alanlar.length; ai2++) {
+            var oku = "?", tip = "?";
+            try { oku = String(ti[alanlar[ai2]].seconds); tip = "Time"; }
+            catch (eI) { try { oku = String(ti[alanlar[ai2]]); tip = typeof ti[alanlar[ai2]]; } catch (eI2) { oku = "okunamadi"; } }
+            yaz("   " + alanlar[ai2] + " = " + oku + "  (" + tip + ")");
+        }
+        var pi = null;
+        try { pi = ti.projectItem; } catch (ePi) {}
+        _refListele(out, "ProjectItem (KESIT ALMA)", pi, ANAHTAR);
+        yaz("");
+        yaz(">> SORU 3 — kesit alma metotlari tek tek:");
+        var kesitAdlar = ["createSubClip", "setInPoint", "setOutPoint", "getInPoint",
+                          "getOutPoint", "clearInPoint", "clearOutPoint"];
+        var ki;
+        for (ki = 0; ki < kesitAdlar.length; ki++) {
+            var kv = "yok";
+            try { kv = (typeof pi[kesitAdlar[ki]]); } catch (eK) { kv = "hata"; }
+            yaz("   projectItem." + kesitAdlar[ki] + " = " + kv);
+        }
+    }
+
+    /* --- 4) video kanaline yerlestirme --- */
+    yaz("");
+    yaz(">> SORU 4 — video kanalina yerlestirme metotlari:");
+    try {
+        var v0 = seq.videoTracks[0];
+        var yerAdlar = ["overwriteClip", "insertClip", "appendClip"];
+        var yi;
+        for (yi = 0; yi < yerAdlar.length; yi++) {
+            var yv = "yok";
+            try { yv = (typeof v0[yerAdlar[yi]]); } catch (eY) { yv = "hata"; }
+            yaz("   videoTracks[0]." + yerAdlar[yi] + " = " + yv);
+        }
+        _refListele(out, "VideoTrack", v0, ANAHTAR);
+    } catch (eV0) { yaz("   videoTracks[0] okunamadi: " + eV0.toString()); }
+
+    /* --- 6) yeni sekansi aktif yapma --- */
+    yaz("");
+    yaz(">> SORU 6 — yeni sekansi AKTIF yapma (altyazi/emoji kodu activeSequence'a yaziyor):");
+    try { yaz("   app.project.openSequence tipi = " + (typeof proj.openSequence)); } catch (eO) {}
+    try { yaz("   activeSequence yazilabilir mi (sequenceID okunuyor): " + String(seq.sequenceID)); }
+    catch (eSid) { yaz("   sequenceID okunamadi: " + eSid.toString()); }
+
+    /* --- QE tarafi: sekans yaratma orada olabilir --- */
+    var qe0 = null;
+    try { if (typeof qe === "undefined") app.enableQE(); qe0 = qe.project; } catch (eQE) {}
+    _refListele(out, "qe.project (SEKANS YARATMA yedegi)", qe0, ANAHTAR);
+
+    return out.join("\n");
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   SHORTS SEKANSI KURMA — kaynak videodan secilen araliklari kesip yeni bir DIKEY
+   sekansa arka arkaya dizer.
+
+   PLAN DOSYASI BICIMI (UTF-8, satir satir — emoji/senkron planlariyla ayni desen):
+     #OLCU|1080|1920           <- hedef kare olcusu
+     <basSn>|<bitSn>           <- SEKANS zamani (panelin cue'lari bu eksende)
+     ...
+
+   DONUS: JSON tek satir. Panel her sayiyi GERI OKUNMUS degerden alir, kendi varsayimindan
+   DEGIL — kesitlerin gercek [bas,bit] listesi "kesitler" alaninda doner.
+
+   ⚠⚠ OLCULMUS TUZAKLAR — hepsi kod icinde isaretli:
+   1. createNewSequence KULLANILMAZ: bos preset yolu verilince kullaniciya DIALOG aciyor ve
+      iptalde HATA VERMEDEN null donuyor (11 Agustos 2026'da kullanicinin makinesinde olculdu).
+      createNewSequenceFromClips preset istemiyor.
+   2. createSubClip KAYNAK MEDYA zamani ister, SEKANS zamani DEGIL. Iki bagimsiz kayma var:
+      klibin inPoint'i (still ogede 3600 sn olabiliyor) ve AutoCut'in ripple-delete'i.
+      Ayni sinif hata preset tarafinda 20 turluk hata avina mal oldu (_klipKaynakBas).
+   3. setSettings IKI YUZEY basiyor (getSettings().videoFrameWidth ve frameSizeHorizontal);
+      panelin butun geometrisi _seqOlcu uzerinden geliyor ve o IKINCISINE bakiyor. Ikisi de
+      dogrulanir.
+   4. overwriteClip kullanilir, insertClip DEGIL (proje kurali, yukarida yazili) ve her
+      yerlestirmeden sonra bitis GERI OKUNUR — Premiere kareye yuvarluyor, 5 kesitte ~0.16 sn
+      birikiyor ve bu cumleBirlestir kopru esigi (0.15) buyuklugunde.
+   5. Basarisiz her daldan cikmadan once yaratilan sekans SILINIR ve kaynak sekans geri
+      acilir — panelin butun kartlari activeSequence'a nisan aliyor.
+   ══════════════════════════════════════════════════════════════════════════════════ */
+
+/* Bir TrackItem'in KAYNAK MEDYA zamanini verir: sekans zamani -> medya zamani.
+   ⚠ TUZAK 2'nin cozumu. clip.start sekans ekseninde, clip.inPoint medya ekseninde. */
+function _shortsMedyaZamani(ti, seqSn) {
+    var inP = _zamanSn(ti.inPoint), bas = _zamanSn(ti.start);
+    return inP + (seqSn - bas);
+}
+
+/* Verilen SEKANS zamanini iceren V1 klibini bulur (yoksa null).
+   AutoCut'tan gecmis timeline'da V1 tek klip DEGIL, yuzlerce klip. */
+function _shortsKlipBul(seq, seqSn) {
+    var vt, ci, c;
+    for (vt = 0; vt < seq.videoTracks.numTracks; vt++) {
+        for (ci = 0; ci < seq.videoTracks[vt].clips.numItems; ci++) {
+            c = seq.videoTracks[vt].clips[ci];
+            if (seqSn >= _zamanSn(c.start) && seqSn < _zamanSn(c.end)) return c;
+        }
+    }
+    return null;
+}
+
+function shortsSekansKur(planYol) {
+    var proj = app.project;
+    var kaynakSeq = null, kaynakID = "", yeni = null, altlar = [];
+    function jsonHata(m) {
+        /* TEMIZLIK: yarim sekansi sil, kaynagi geri ac. Panelin butun kartlari
+           activeSequence'a nisan aliyor — yanlis sekansta birakmak en pahali sonuc. */
+        try { if (yeni) proj.deleteSequence(yeni); } catch (eD) {}
+        try { if (kaynakID) proj.openSequence(kaynakID); } catch (eO) {}
+        return '{"error":"' + _jsonEsc(String(m)) + '"}';
+    }
+    try { kaynakSeq = proj.activeSequence; } catch (e0) {}
+    if (!kaynakSeq) return '{"error":"Aktif sekans yok"}';
+    try { kaynakID = String(kaynakSeq.sequenceID); } catch (e1) {}
+
+    /* --- PLANI OKU --- */
+    var ham = "";
+    try { ham = _readFileUTF8(planYol); } catch (e2) { return jsonHata("Plan okunamadi: " + e2.toString()); }
+    if (!ham) return jsonHata("Plan dosyasi bos");
+    var satirlar = String(ham).split(/\r?\n/);
+    var hedefW = 1080, hedefH = 1920, istenen = [], i, s, p;
+    for (i = 0; i < satirlar.length; i++) {
+        s = String(satirlar[i]);
+        if (!s) continue;
+        if (s.indexOf("#OLCU|") === 0) {
+            p = s.split("|");
+            if (p.length >= 3) { hedefW = parseInt(p[1], 10); hedefH = parseInt(p[2], 10); }
+            continue;
+        }
+        if (s.charAt(0) === "#") continue;
+        p = s.split("|");
+        if (p.length < 2) continue;                 // bozuk satir sessizce atlanmaz: asagida sayilir
+        var b = parseFloat(p[0]), t = parseFloat(p[1]);
+        if (!isFinite(b) || !isFinite(t) || t <= b) continue;
+        istenen.push({ bas: b, bit: t });
+    }
+    if (!istenen.length) return jsonHata("Planda gecerli kesit yok");
+    if (istenen.length > 12) return jsonHata("Plan cok uzun (" + istenen.length + " kesit)");
+
+    /* --- ALT KLIPLERI URET (kesitler) --- */
+    var bin = null;
+    try {
+        bin = _binBulYarat(proj.rootItem, "Yusufwrl Shorts");
+    } catch (eB) { bin = null; }
+    for (i = 0; i < istenen.length; i++) {
+        var kes = istenen[i];
+        var klip = _shortsKlipBul(kaynakSeq, kes.bas);
+        if (!klip) return jsonHata("Kesit " + (i + 1) + " (" + kes.bas.toFixed(1) +
+                                   " sn) hicbir klibe denk gelmiyor — kesit zamanlari bayat olabilir, " +
+                                   "AutoCut'tan sonra altyaziyi yeniden uret");
+        var srcBas = _shortsMedyaZamani(klip, kes.bas);
+        var srcBit = _shortsMedyaZamani(klip, kes.bit);
+        /* ⚠ AYIRT EDICI KONTROL: hesaplanan zaman klibin KAYNAK araliginda mi. Geri okuma
+           tek basina totoloji (ayni yanlis tabanla yazip ayni yanlis tabanla okumak). */
+        var klipIn = _zamanSn(klip.inPoint), klipSure = _zamanSn(klip.duration);
+        if (srcBas < klipIn - 0.001 || srcBit > klipIn + klipSure + 0.001) {
+            return jsonHata("Kesit " + (i + 1) + " klip sinirlarinin disina dusuyor " +
+                            "(kaynak " + srcBas.toFixed(2) + "-" + srcBit.toFixed(2) +
+                            ", klip " + klipIn.toFixed(2) + "-" + (klipIn + klipSure).toFixed(2) + ")");
+        }
+        var pi = null;
+        try { pi = klip.projectItem; } catch (eP) {}
+        if (!pi) return jsonHata("Kesit " + (i + 1) + ": klibin proje ogesi okunamadi");
+        var alt = null;
+        try { alt = pi.createSubClip("YW_S" + (i + 1), srcBas, srcBit, 1, 1, 1); }
+        catch (eS2) { return jsonHata("Kesit " + (i + 1) + " olusturulamadi: " + eS2.toString()); }
+        if (!alt) return jsonHata("Kesit " + (i + 1) + " olusturulamadi (bos dondu)");
+        /* GERI OKU: istenen sure gercekten olustu mu (bir kare tolerans). */
+        var gercekSure = -1;
+        try {
+            var ip = alt.getInPoint(), op = alt.getOutPoint();
+            gercekSure = _zamanSn(op) - _zamanSn(ip);
+        } catch (eR) { gercekSure = -1; }
+        var istenenSure = srcBit - srcBas;
+        if (gercekSure >= 0 && Math.abs(gercekSure - istenenSure) > 0.1) {
+            return jsonHata("Kesit " + (i + 1) + " suresi tutmadi (istenen " +
+                            istenenSure.toFixed(2) + " sn, olusan " + gercekSure.toFixed(2) + " sn)");
+        }
+        try { if (bin) alt.moveBin(bin); } catch (eM) {}
+        altlar.push({ oge: alt, sure: (gercekSure > 0 ? gercekSure : istenenSure) });
+    }
+
+    /* --- YENI SEKANS (TUZAK 1: FromClips, preset istemiyor) --- */
+    var ad = "Shorts " + _shortsSayac(proj);
+    try { yeni = proj.createNewSequenceFromClips(ad, [altlar[0].oge]); }
+    catch (eN) { return jsonHata("Sekans yaratilamadi: " + eN.toString()); }
+    if (!yeni) return jsonHata("Sekans yaratilamadi (bos dondu)");
+
+    /* Kaynak olcusu — Scale hesabi icin. createNewSequenceFromClips sekansi kaynak
+       medyanin olcusuyle doguruyor, yani BEDAVA olculuyor. 1920x1080 VARSAYILMAZ. */
+    var kaynakOlcu = _seqOlcu(yeni);
+    if (!kaynakOlcu.w || !kaynakOlcu.h) return jsonHata("Kaynak olcusu okunamadi");
+
+    /* --- DIKEY YAP (TUZAK 3: IKI YUZEY de dogrulanir) --- */
+    try {
+        var ayar = yeni.getSettings();
+        ayar.videoFrameWidth = hedefW;
+        ayar.videoFrameHeight = hedefH;
+        yeni.setSettings(ayar);
+    } catch (eSet) { return jsonHata("Sekans olcusu ayarlanamadi: " + eSet.toString()); }
+    var ay2 = null;
+    try { ay2 = yeni.getSettings(); } catch (eG2) {}
+    var olcu2 = _seqOlcu(yeni);
+    if (!ay2 || Number(ay2.videoFrameWidth) !== hedefW || Number(ay2.videoFrameHeight) !== hedefH) {
+        return jsonHata("Sekans olcusu TUTMADI (getSettings: " +
+                        (ay2 ? (ay2.videoFrameWidth + "x" + ay2.videoFrameHeight) : "okunamadi") + ")");
+    }
+    if (olcu2.w !== hedefW || olcu2.h !== hedefH) {
+        return jsonHata("Sekans olcusu TUTMADI (frameSize: " + olcu2.w + "x" + olcu2.h + ")");
+    }
+
+    /* --- KALAN KESITLERI DIZ (TUZAK 4: overwriteClip + GERI OKUNAN bitis) --- */
+    var vt0 = null;
+    try { vt0 = yeni.videoTracks[0]; } catch (eV) {}
+    if (!vt0) return jsonHata("Yeni sekansin video kanali okunamadi");
+    var imlec = 0, gercekKesitler = [];
+    try { imlec = _zamanSn(vt0.clips[0].end); } catch (eE) { imlec = altlar[0].sure; }
+    gercekKesitler.push({ bas: 0, bit: imlec });
+    for (i = 1; i < altlar.length; i++) {
+        try { vt0.overwriteClip(altlar[i].oge, imlec); }
+        catch (eW) { return jsonHata("Kesit " + (i + 1) + " yerlestirilemedi: " + eW.toString()); }
+        var yeniSon = -1;
+        try {
+            var sonKlip = vt0.clips[vt0.clips.numItems - 1];
+            yeniSon = _zamanSn(sonKlip.end);
+        } catch (eRd) { yeniSon = -1; }
+        if (yeniSon <= imlec) {
+            return jsonHata("Kesit " + (i + 1) + " kondu ama timeline uzamadi (" +
+                            imlec.toFixed(2) + " -> " + yeniSon.toFixed(2) + ")");
+        }
+        gercekKesitler.push({ bas: imlec, bit: yeniSon });
+        imlec = yeniSon;                       // ⚠ ISTENEN degil GERI OKUNAN degerden
+    }
+    if (vt0.clips.numItems !== altlar.length) {
+        return jsonHata("Beklenen " + altlar.length + " kesit, timeline'da " +
+                        vt0.clips.numItems + " klip var");
+    }
+
+    /* --- TAM EKRAN OLCEGI (kullanici karari: %68 kirpma kabul edildi) --- */
+    var olcek = Math.max(hedefW / kaynakOlcu.w, hedefH / kaynakOlcu.h) * 100;
+    var olcekOk = 0, olcekHata = "";
+    for (i = 0; i < vt0.clips.numItems; i++) {
+        try {
+            var ti2 = vt0.clips[i];
+            var par = _paramAra(_bilesenAra(ti2, "AE.ADBE Motion"), ["Scale", "Olcek", "Ölçek"]);
+            if (!par) { olcekHata = "Motion/Scale bulunamadi"; continue; }
+            par.setValue(olcek, true);
+            var geri = -1;
+            try { geri = Number(par.getValue()); } catch (eGv) { geri = -1; }
+            if (geri >= 0 && Math.abs(geri - olcek) < 0.5) olcekOk++;
+            else olcekHata = "Scale yazildi ama geri okunamadi/tutmadi";
+        } catch (eSc) { olcekHata = eSc.toString(); }
+    }
+
+    /* --- SES KANALI SAYISI (TUZAK: arkadaslarin sesi gelmeyebilir) --- */
+    var sesKanal = 0, sesKlip = 0;
+    try {
+        sesKanal = yeni.audioTracks.numTracks;
+        for (i = 0; i < sesKanal; i++) sesKlip += yeni.audioTracks[i].clips.numItems;
+    } catch (eA) {}
+
+    /* --- AKTIF YAP (altyazi/emoji kodunun tamami activeSequence'a yaziyor) --- */
+    var yeniID = "";
+    try { yeniID = String(yeni.sequenceID); } catch (eI2) {}
+    try { proj.openSequence(yeniID); } catch (eOp) { return jsonHata("Yeni sekans acilamadi: " + eOp.toString()); }
+    var aktifAd = "";
+    try { aktifAd = String(proj.activeSequence.name); } catch (eAk) {}
+    if (aktifAd !== ad) return jsonHata("Yeni sekans AKTIF olmadi (aktif: " + aktifAd + ")");
+
+    var kes2 = [], q;
+    for (q = 0; q < gercekKesitler.length; q++) {
+        kes2.push('{"bas":' + gercekKesitler[q].bas.toFixed(3) +
+                  ',"bit":' + gercekKesitler[q].bit.toFixed(3) + '}');
+    }
+    return '{"ok":true,"seqId":"' + _jsonEsc(yeniID) + '","ad":"' + _jsonEsc(ad) +
+           '","kaynakId":"' + _jsonEsc(kaynakID) + '","w":' + olcu2.w + ',"h":' + olcu2.h +
+           ',"sure":' + imlec.toFixed(3) + ',"kesitler":[' + kes2.join(",") + ']' +
+           ',"olcek":' + olcek.toFixed(2) + ',"olcekOk":' + olcekOk +
+           ',"olcekHata":"' + _jsonEsc(olcekHata) + '"' +
+           ',"sesKanal":' + sesKanal + ',"sesKlip":' + sesKlip + '}';
+}
+
+/* Ayni adda sekans birikmesin — "Shorts 1", "Shorts 2"... ⚠ SABIT AD KULLANMA: hem
+   capBasildi_<id> hem oturum_<sekans>.json ayni adda carpisir. */
+function _shortsSayac(proj) {
+    var n = 1, i, ad;
+    try {
+        for (i = 0; i < proj.sequences.numSequences; i++) {
+            ad = String(proj.sequences[i].name);
+            if (ad.indexOf("Shorts ") === 0) {
+                var no = parseInt(ad.substring(7), 10);
+                if (isFinite(no) && no >= n) n = no + 1;
+            }
+        }
+    } catch (e) {}
+    return n;
+}
+
+/* Bin bul ya da yarat. ⚠ createBin BASARISIZ olabilir ve kod koke duser — emoji tarafinda
+   tam bu oldu (479 PNG proje kokune import edildi ve panel kendi kliplerini "yabanci"
+   sandi). Burada kok'e dusmek zararsiz: alt klipler yine calisir, yalniz dagink olur. */
+function _binBulYarat(root, ad) {
+    var i, it;
+    try {
+        for (i = 0; i < root.children.numItems; i++) {
+            it = root.children[i];
+            if (it.type === 2 && String(it.name) === ad) return it;
+        }
+    } catch (e) {}
+    try { return root.createBin(ad); } catch (e2) { return null; }
+}
+
+/* Bilesen adiyla ara (matchName SONEK ile — gercek deger "AE.ADBE Motion", olculdu). */
+function _bilesenAra(ti, matchSonek) {
+    var i, c, mn;
+    try {
+        for (i = 0; i < ti.components.numItems; i++) {
+            c = ti.components[i];
+            mn = ""; try { mn = String(c.matchName); } catch (e) { mn = ""; }
+            if (mn && mn.substring(mn.length - matchSonek.length) === matchSonek) return c;
+            if (String(c.displayName) === "Motion") return c;
+        }
+    } catch (e2) {}
+    return null;
+}
+
+/* ── SHORTS DENEMESI — "listede var" ile "gercekten calisiyor" AYRI SEYLER ─────────
+   shortsTani() metotlarin VARLIGINI olctu. Ama bu projede tam da o fark pahaliya patladi:
+   createCaptionTrack'in 3./4. parametresi listede duruyordu, cagriliyordu, HATA DA
+   VERMIYORDU — sessizce yok sayiyordu ("denedim, olmus gorunuyor" tuzagi). O yuzden Shorts
+   karti yazilmadan once her adim GERCEKTEN denenir ve sonucu GERI OKUNUR.
+
+   ⚠ BU FONKSIYON YAZAR: test sekansi yaratir, olcusunu degistirir, kesit koyar. Sonunda
+   HEPSINI SILER. Kaynak sekans en sonda geri acilir — kullanici baska bir sekansa
+   dusmus bulmasin.
+
+   YEDI ADIM, HER BIRI GERI OKUNUR (yazip geri okumadan "oldu" denmez). */
+function shortsDene() {
+    var out = [];
+    function yaz(s) { out.push(String(s)); }
+    var proj = app.project;
+    var temizSekans = [], i;
+
+    yaz("=== SHORTS GERCEK DENEME ===");
+    try { yaz("Premiere: " + app.version); } catch (e0) {}
+
+    var kaynakSeq = null;
+    try { kaynakSeq = proj.activeSequence; } catch (e1) {}
+    if (!kaynakSeq) { yaz("HATA: aktif sekans yok."); return out.join("\n"); }
+    var kaynakAd = "";
+    try { kaynakAd = String(kaynakSeq.name); } catch (e2) {}
+    yaz("kaynak sekans: " + kaynakAd);
+
+    var ti = null, pi = null, vt, ci;
+    try {
+        for (vt = 0; vt < kaynakSeq.videoTracks.numTracks && !ti; vt++) {
+            for (ci = 0; ci < kaynakSeq.videoTracks[vt].clips.numItems; ci++) {
+                ti = kaynakSeq.videoTracks[vt].clips[ci]; break;
+            }
+        }
+        if (ti) pi = ti.projectItem;
+    } catch (e3) {}
+    if (!pi) { yaz("HATA: sekansta video klibi yok — Shorts kaynagi da olmazdi."); return out.join("\n"); }
+    try { yaz("kaynak klip: " + pi.name); } catch (e4) {}
+
+    /* --- ADIM 1: createNewSequenceFromClips (preset dosyasi GEREKMEZ) --- */
+    yaz("");
+    yaz(">> ADIM 1 - createNewSequenceFromClips");
+    var s1 = null;
+    try {
+        s1 = proj.createNewSequenceFromClips("YW_TEST_1", [pi]);
+        if (s1) {
+            temizSekans.push(s1);
+            yaz("   OK - sekans olustu: " + s1.name);
+            yaz("   olcu: " + s1.frameSizeHorizontal + "x" + s1.frameSizeVertical);
+        } else { yaz("   BOS dondu (null)"); }
+    } catch (e5) { yaz("   HATA: " + e5.toString()); }
+
+    /* --- ADIM 2: createNewSequence (preset ister mi) --- */
+    yaz("");
+    yaz(">> ADIM 2 - createNewSequence (imza denemesi)");
+    var s2 = null;
+    try { s2 = proj.createNewSequence("YW_TEST_2", ""); yaz("   iki argumanla CALISTI"); }
+    catch (e6) {
+        yaz("   iki argumanla HATA: " + e6.toString());
+        try { s2 = proj.createNewSequence("YW_TEST_2"); yaz("   tek argumanla CALISTI"); }
+        catch (e7) { yaz("   tek argumanla da HATA: " + e7.toString()); }
+    }
+    if (s2) {
+        temizSekans.push(s2);
+        try { yaz("   olcu: " + s2.frameSizeHorizontal + "x" + s2.frameSizeVertical); } catch (e8) {}
+    }
+
+    /* --- ADIM 3: setSettings ile 1080x1920 — GERI OKUNUR --- */
+    yaz("");
+    yaz(">> ADIM 3 - setSettings ile DIKEY yapma (1080x1920)");
+    var hedef = s1 || s2;
+    if (!hedef) { yaz("   ATLANDI (sekans yaratilamadi)"); }
+    else {
+        try {
+            var ayar = hedef.getSettings();
+            yaz("   once: " + ayar.videoFrameWidth + "x" + ayar.videoFrameHeight);
+            ayar.videoFrameWidth = 1080;
+            ayar.videoFrameHeight = 1920;
+            hedef.setSettings(ayar);
+            var ayar2 = hedef.getSettings();
+            yaz("   sonra: " + ayar2.videoFrameWidth + "x" + ayar2.videoFrameHeight);
+            yaz("   frameSize ozelliginden: " + hedef.frameSizeHorizontal + "x" + hedef.frameSizeVertical);
+            yaz("   >>> TUTTU MU: " +
+                ((Number(ayar2.videoFrameWidth) === 1080 && Number(ayar2.videoFrameHeight) === 1920) ? "EVET" : "HAYIR"));
+        } catch (e9) { yaz("   HATA: " + e9.toString()); }
+    }
+
+    /* --- ADIM 4: createSubClip (kesit alma) --- */
+    yaz("");
+    yaz(">> ADIM 4 - createSubClip (kesit alma)");
+    var alt = null;
+    try { alt = pi.createSubClip("YW_TEST_KESIT", 2, 7, 1, 1, 1); yaz("   sayi argumanla CALISTI"); }
+    catch (eA) {
+        yaz("   sayi argumanla HATA: " + eA.toString());
+        try { alt = pi.createSubClip("YW_TEST_KESIT", "2", "7", 1, 1, 1); yaz("   string argumanla CALISTI"); }
+        catch (eB) { yaz("   string argumanla da HATA: " + eB.toString()); }
+    }
+    if (alt) {
+        try { yaz("   kesit adi: " + alt.name); } catch (eC0) {}
+        try {
+            var ib = alt.getInPoint(), ob = alt.getOutPoint();
+            yaz("   in=" + ((ib && ib.seconds !== undefined) ? ib.seconds : ib) +
+                " out=" + ((ob && ob.seconds !== undefined) ? ob.seconds : ob));
+        } catch (eC) { yaz("   in/out okunamadi: " + eC.toString()); }
+    }
+
+    /* --- ADIM 5: insertClip ile arka arkaya dizme --- */
+    yaz("");
+    yaz(">> ADIM 5 - kesitleri arka arkaya dizme (insertClip)");
+    if (!hedef) { yaz("   ATLANDI (sekans yok)"); }
+    else {
+        try {
+            var vt0 = hedef.videoTracks[0];
+            var oncekiSay = vt0.clips.numItems;
+            var kaynakOge = alt || pi;
+            vt0.insertClip(kaynakOge, 0);
+            var sonraSay = vt0.clips.numItems;
+            yaz("   klip sayisi: " + oncekiSay + " -> " + sonraSay);
+            yaz("   >>> insertClip ISE YARADI MI: " + (sonraSay > oncekiSay ? "EVET" : "HAYIR"));
+            if (sonraSay > 0) {
+                var k0 = vt0.clips[0];
+                yaz("   ilk klip: " + k0.name + " start=" + k0.start.seconds + " end=" + k0.end.seconds);
+            }
+        } catch (eE) { yaz("   HATA: " + eE.toString()); }
+    }
+
+    /* --- ADIM 6: openSequence ile aktif yapma --- */
+    yaz("");
+    yaz(">> ADIM 6 - yeni sekansi AKTIF yapma (altyazi/emoji kodu activeSequence'a yaziyor)");
+    if (!hedef) { yaz("   ATLANDI"); }
+    else {
+        try {
+            proj.openSequence(hedef.sequenceID);
+            var akt = "";
+            try { akt = String(proj.activeSequence.name); } catch (eF) {}
+            yaz("   openSequence sonrasi aktif: " + akt);
+            yaz("   >>> AKTIF OLDU MU: " + (akt === String(hedef.name) ? "EVET" : "HAYIR"));
+        } catch (eG) { yaz("   HATA: " + eG.toString()); }
+    }
+
+    /* --- ADIM 7: autoReframe / clone / createSubsequence — YALNIZ VARLIK --- */
+    yaz("");
+    yaz(">> ADIM 7 - autoReframeSequence (CAGRILMADI: dakikalarca surebilir)");
+    try { yaz("   autoReframeSequence tip: " + (typeof kaynakSeq.autoReframeSequence)); } catch (eH) {}
+    try { yaz("   createSubsequence tip: " + (typeof kaynakSeq.createSubsequence)); } catch (eI) {}
+    try { yaz("   clone tip: " + (typeof kaynakSeq.clone)); } catch (eJ) {}
+
+    /* --- TEMIZLIK --- */
+    yaz("");
+    yaz(">> TEMIZLIK");
+    try { proj.openSequence(kaynakSeq.sequenceID); yaz("   kaynak sekans geri acildi"); }
+    catch (eK) { yaz("   kaynak sekans geri acilamadi: " + eK.toString()); }
+    for (i = 0; i < temizSekans.length; i++) {
+        try { proj.deleteSequence(temizSekans[i]); yaz("   silindi: test sekansi " + (i + 1)); }
+        catch (eL) { yaz("   SILINEMEDI (elle sil): test sekansi " + (i + 1) + " - " + eL.toString()); }
+    }
+    yaz("");
+    yaz("BITTI. Proje panelinde YW_TEST ile baslayan bir sey kaldiysa elle silebilirsin.");
+    return out.join("\n");
+}

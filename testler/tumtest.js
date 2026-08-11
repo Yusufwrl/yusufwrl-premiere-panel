@@ -1216,7 +1216,7 @@ function bitir() {
     }
 
     var dosyalar = ["js/app.js", "js/pipeline.js", "js/emoji.js", "js/vurucu.js", "js/hizala.js",
-                    "js/sozluk.js", "js/kisiler.js", "js/pngayna.js", "js/updater.js", "js/lisans.js"];
+                    "js/sozluk.js", "js/kisiler.js", "js/pngayna.js", "js/updater.js", "js/lisans.js", "js/emojikonum.js", "js/shortszaman.js", "js/shorts.js"];
     var tumBulgu = [], taranan = 0;
     dosyalar.forEach(function (rel) {
       var y = path.join(KOK, rel), ham;
@@ -1247,6 +1247,273 @@ function bitir() {
       "}"
     ].join("\n");
     esit("parametre gölgeleme ve regex bayrağı yanlış pozitif vermiyor", taraKaynak(temiz), []);
+  })();
+
+/* ================= 21. EMOJİ KONUMU (js/emojikonum.js) =================
+   ⚠ NEDEN VAR: bu hesap bugüne kadar HİÇ test edilemiyordu — js/app.js kapalı bir IIFE ve
+   emojiKonum dışa açılmıyordu. Konum kullanıcı onaylı bir sabite (ORAN = 0.574) ve İKİ KEZ
+   dönmüş bir taraf kararına dayanıyor.
+   ⚠ ÖLÇÜLMÜŞ HATA: eski taban `seqH` idi ve 1080x1920'de emoji 1102 px (kareden geniş)
+   çıkıp sağ/sol formülleri ÇAPRAZLANIYOR, kelepçe de ikisini 0.5'e indiriyordu — yani iki
+   emoji kanalı dikeyde AYNI noktaya çiziyordu. Premiere tarafında hiçbir geri okuma bunu
+   yakalayamaz (klipler doğru konur, host "ok" der); nöbetçisi bu yüzden burada.
+   Aşağıdaki yatay değerler REGRESYON KİLİDİ: taban değişikliğinin yatay videoda hiçbir
+   sayıyı değiştirmediği iddiası ancak böyle sabitlenir. */
+  baslik("Emoji konumu (dikey/yatay taban)");
+  (function () {
+    var K;
+    try { K = require(path.join(KOK, "js", "emojikonum.js")); }
+    catch (e) { hata("emojikonum.js yüklenemedi", e.message); return; }
+
+    esit("sabitler korundu (ORAN kullanıcı onaylı)", [K.ORAN, K.BOSLUK_X, K.BOSLUK_Y], [0.574, 0.005, 0]);
+
+    /* --- YATAY: DEĞİŞMEMELİ (regresyon kilidi) --- */
+    var ys = K.hesapla(1920, 1080, true), yl = K.hesapla(1920, 1080, false);
+    esit("yatay 1080p sağ  x", ys.x, 0.836);
+    esit("yatay 1080p sol  x", yl.x, 0.164);
+    esit("yatay 1080p y (alta dayalı)", ys.y, 0.713);
+    esit("yatay 1080p emoji boyu", ys.boyPx, 620);
+    dogru("yatay 1080p kelepçeye GİRMİYOR", !ys.kelepce && !yl.kelepce);
+
+    var ks = K.hesapla(3840, 2160, true);
+    esit("yatay 4K sağ x (oransal, aynı)", ks.x, 0.836);
+    esit("yatay 4K emoji boyu", ks.boyPx, 1240);
+
+    /* Kare: min(w,h) === h === w, yani burada da eski davranış. */
+    esit("kare 1080 sağ x", K.hesapla(1080, 1080, true).x, 0.708);
+
+    /* --- DİKEY: ASIL DÜZELTME --- */
+    var ds = K.hesapla(1080, 1920, true), dl = K.hesapla(1080, 1920, false);
+    dogru("DİKEY'de sağ ile sol AYNI NOKTA DEĞİL", ds.x !== dl.x,
+          "sağ=" + ds.x + " sol=" + dl.x + " — aynıysa iki emoji kanalı üst üste çizer");
+    esit("dikey sağ x", ds.x, 0.708);
+    esit("dikey sol x", dl.x, 0.292);
+    dogru("dikey emoji KAREYE SIĞIYOR", ds.boyPx <= 1080, "boy=" + ds.boyPx + "px, kare=1080px");
+    esit("dikey emoji boyu (kısa kenardan)", ds.boyPx, 620);
+    dogru("dikey kelepçeye GİRMİYOR (taban düzeltmesi sayesinde)", !ds.kelepce && !dl.kelepce);
+
+    /* --- ÜST YERLEŞİM (Shorts: emoji üstte, altyazı altta) --- */
+    var us = K.hesapla(1080, 1920, true, true);
+    dogru("üst yerleşim y, alt yerleşimden KÜÇÜK", us.y < ds.y, "üst=" + us.y + " alt=" + ds.y);
+    esit("dikey üst y", us.y, 0.161);
+    dogru("üstte de sağ/sol ayrı", K.taraflarAyriMi(1080, 1920, true));
+
+    /* --- taban() KONUM İLE ÖLÇEĞİ AYNI SAYIYA BAĞLAR ---
+       ⚠ Bu ikisi ayrışırsa emoji hesaplanan yerin DIŞINA taşar (konum bir tabana, boyut
+       başka tabana oturur). app.js olcekHesapla'ya bu fonksiyonu geçiriyor. */
+    esit("taban yatayda seqH ile ÖZDEŞ", K.taban(1920, 1080), 1080);
+    esit("taban 4K'da seqH ile ÖZDEŞ", K.taban(3840, 2160), 2160);
+    esit("taban dikeyde seqW", K.taban(1080, 1920), 1080);
+    esit("boyPx gerçekten taban*ORAN", K.hesapla(1080, 1920, true).boyPx, Math.round(1080 * K.ORAN));
+
+    /* --- Nöbetçinin kendisi: ESKİ formül gerçekten bozuk muydu? ---
+       Kasıtlı bozma yerine eski formülü burada yeniden kurup dikeyde çakıştığını gösteriyoruz;
+       yoksa "düzeltildi" iddiası ölçüsüz kalır. */
+    (function () {
+      function eski(seqW, seqH, sag) {
+        var boyPx = seqH * 0.574, yariPx = boyPx / 2;
+        var bosX = Math.round(seqH * 0.005);
+        var x = sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW);
+        if (sag && x < 0.5) x = 0.5;
+        if (!sag && x > 0.5) x = 0.5;
+        return Math.round(x * 1000) / 1000;
+      }
+      dogru("ESKİ formül dikeyde gerçekten çakışıyordu (düzeltme boşuna değil)",
+            eski(1080, 1920, true) === eski(1080, 1920, false));
+      esit("ESKİ formül yatayda bugünküyle aynı sonucu veriyordu",
+           [eski(1920, 1080, true), eski(1920, 1080, false)], [ys.x, yl.x]);
+    })();
+  })();
+
+/* ================= 22. SHORTS ZAMAN HARİTALAMA (js/shortszaman.js) =================
+   Shorts, uzun videodan seçilmiş 3-5 aralığı arka arkaya diziyor; altyazı ve emoji zamanları
+   bu yeni eksene taşınmak zorunda. Saf hesap olduğu için Premiere gerekmiyor.
+   ⚠ EN KRİTİK TEST "girdi değişmiyor mu": bu projede cue nesnelerini yerinde değiştirmek bir
+   kez saveSession'a sızdı ve bozuk zamanlar diske yazıldı. */
+  baslik("Shorts zaman haritalama");
+  (function () {
+    var SZM;
+    try { SZM = require(path.join(KOK, "js", "shortszaman.js")); }
+    catch (e) { hata("shortszaman.js yüklenemedi", e.message); return; }
+
+    var kesitler = [{ bas: 120, bit: 132 }, { bas: 340, bit: 349 }, { bas: 610, bit: 622 }];
+    esit("toplam süre", SZM.toplamSure(kesitler), 33);
+
+    /* --- zamanCevir --- */
+    esit("1. kesitin başı 0'a düşer", SZM.zamanCevir(kesitler, 120).shorts, 0);
+    esit("1. kesitin ortası", SZM.zamanCevir(kesitler, 126).shorts, 6);
+    esit("2. kesitin başı 1. kesitin süresine düşer", SZM.zamanCevir(kesitler, 340).shorts, 12);
+    esit("3. kesitin başı", SZM.zamanCevir(kesitler, 610).shorts, 21);
+    esit("kesit ARASI zaman null döner", SZM.zamanCevir(kesitler, 200), null);
+    esit("kesit no doğru", SZM.zamanCevir(kesitler, 345).kesit, 1);
+
+    /* --- cueHarita --- */
+    var cues = [
+      { start: 100, end: 103, text: "kesit oncesi", cumleId: "a-1:0" },   // dışarıda
+      { start: 121, end: 123, text: "tam icinde", cumleId: "a-1:1" },     // taşınır
+      { start: 131, end: 136, text: "sinirda uzun", cumleId: "a-1:2" },   // kırpılır (1 sn kalır)
+      { start: 131.9, end: 140, text: "sinirda cok kisa", cumleId: "a-1:3" }, // kırpılır -> gizlenir
+      { start: 341, end: 344, text: "ikinci kesit", cumleId: "a-1:4" },
+      { start: 500, end: 502, text: "arada", cumleId: "a-1:5" },          // dışarıda
+      { start: 611, end: 615, text: "ucuncu kesit", cumleId: "a-1:6" }
+    ];
+    /* Girdi anlık görüntüsü — mutasyon nöbetçisi için */
+    var once = JSON.stringify(cues);
+
+    var r = SZM.cueHarita(kesitler, cues);
+    esit("kesit dışındakiler düştü", r.sayac.disarida, 2);
+    esit("taşınan cue sayısı", r.sayac.tasinan, 5);
+    esit("kırpılan", r.sayac.kirpilan, 2);
+    esit("gizlenen (kırpılıp 0.25 altına düşen)", r.sayac.gizlenen, 1);
+
+    var t1 = r.cues.filter(function (c) { return c.text === "tam icinde"; })[0];
+    esit("tam içindeki cue kaydı", [t1.start, t1.end], [1, 3]);
+    var t2 = r.cues.filter(function (c) { return c.text === "sinirda uzun"; })[0];
+    esit("sınırdaki cue KIRPILDI (itilmedi)", [t2.start, t2.end], [11, 12]);
+    dogru("kırpılan işaretli", t2.kirpildi === true);
+    dogru("kırpılan ama yeterince uzun -> GİZLENMEDİ", t2.gizliKesit === false);
+    var t3 = r.cues.filter(function (c) { return c.text === "sinirda cok kisa"; })[0];
+    dogru("çok kısalan cue GİZLENDİ (silinmedi)", t3.gizliKesit === true && !!t3.text);
+    var t4 = r.cues.filter(function (c) { return c.text === "ikinci kesit"; })[0];
+    esit("2. kesitteki cue ofsetlendi", [t4.start, t4.end], [13, 16]);
+
+    /* --- MUTASYON NÖBETÇİSİ --- */
+    esit("GİRDİ cue nesneleri DEĞİŞMEDİ", JSON.stringify(cues), once);
+    dogru("çıktı cue'ları YENİ nesneler", r.cues[0] !== cues[1]);
+
+    /* --- cumleId kesit numarası alıyor mu (köprü kesit sınırında kurulmasın) --- */
+    dogru("cumleId'ye kesit no eklendi", t1.cumleId === "a-1:1@s0",
+          "olan: " + t1.cumleId);
+    dogru("farklı kesitteki cümle kimliği FARKLI", t4.cumleId !== t1.cumleId);
+
+    /* --- kaynakBas korunuyor (hata ayıklama + emoji eşleşmesi) --- */
+    esit("kaynakBas özgün zamanı tutuyor", t4.kaynakBas, 341);
+
+    /* --- araliklariHarita (emoji) --- */
+    var em = [{ bas: 121, bit: 124, kar: "tofi" }, { bas: 200, bit: 203, kar: "moni" },
+              { bas: 611, bit: 613, kar: "dora" }];
+    var emOnce = JSON.stringify(em);
+    var er = SZM.araliklariHarita(kesitler, em);
+    esit("kesit dışı emoji düştü", er.dusen, 1);
+    esit("taşınan emoji sayısı", er.araliklar.length, 2);
+    esit("emoji zamanı ofsetlendi", [er.araliklar[0].bas, er.araliklar[0].bit], [1, 4]);
+    esit("emoji GİRDİSİ değişmedi", JSON.stringify(em), emOnce);
+
+    /* --- dogrula: SRT yazılmadan önceki son nöbetçi --- */
+    esit("temiz liste hatasız", SZM.dogrula(r.cues, r.sure), []);
+    var bozuk = [{ start: -1, end: 2 }, { start: 5, end: 4 }, { start: 30, end: 99 }];
+    var h = SZM.dogrula(bozuk, 33);
+    esit("negatif + ters + taşan yakalandı", h.length, 3);
+    dogru("negatif zaman ADIYLA bildiriliyor", h[0].indexOf("NEGATİF") !== -1, h[0]);
+
+    /* ⚠ fmtTime negatif zamanı sessizce 0 yapıyor (pipeline.js) — bu nöbetçi olmasa ters
+       işaretli bir ofset bütün altyazıyı 00:00:00'a yığar ve panel "ok" derdi. */
+    dogru("dogrula() boş liste için de çalışıyor", SZM.dogrula([], 33).length === 0);
+  })();
+
+/* ================= 23. SHORTS KESİT SEÇİMİ (js/shorts.js) =================
+   ⚠ EN KRİTİK TEST: parça numaralandırma. Bu hata bu projede AYNEN yaşandı (duygulariSec
+   global numara gönderiyordu, model parçayı 1'den numaralıyordu, panelde doğrulama YOKTU;
+   400 cümlede 150'si iki kez seçildi, 150'si hiç seçilmedi ve tek parçalık test oturumunda
+   AYLARCA görünmedi). Shorts'ta bedeli daha büyük: 3-5 kesit var, bir yanlış numara
+   Shorts'un %25'ini bambaşka bir ana çevirir.
+   Ağ ÇAĞRISI YOK — yalnız saf ayrıştırma ve bütçe aritmetiği sınanıyor. */
+  baslik("Shorts kesit seçimi (numaralandırma + bütçe)");
+  (function () {
+    var SH;
+    try { SH = require(path.join(KOK, "js", "shorts.js")); }
+    catch (e) { hata("shorts.js yüklenemedi", e.message); return; }
+
+    /* Sahte dilim: 5 cümle, global indeksleri BİLEREK 100'den başlıyor —
+       "parça içi numara" ile "global indeks" karışırsa test yakalasın. */
+    function dilimKur() {
+      return [
+        { bas: 10, bit: 14, metin: "birinci", grup: "Tofi", grupIdx: 0, globalIdx: 100 },
+        { bas: 20, bit: 25, metin: "ikinci", grup: "Moni", grupIdx: 1, globalIdx: 101 },
+        { bas: 30, bit: 36, metin: "ucuncu", grup: "Tofi", grupIdx: 0, globalIdx: 102 },
+        { bas: 40, bit: 47, metin: "dorduncu", grup: "Dora", grupIdx: 2, globalIdx: 103 },
+        { bas: 50, bit: 58, metin: "besinci", grup: "Moni", grupIdx: 1, globalIdx: 104 }
+      ];
+    }
+    var dilim = dilimKur();
+
+    /* --- Geçerli cevap: numara -> DOĞRU cümle --- */
+    var s1 = { siraDisi: 0 };
+    var r1 = SH._cevapCoz(null, JSON.stringify({ kesitler: [
+      { basNo: 1, bitNo: 1, puan: 9, sebep: "komik" },
+      { basNo: 3, bitNo: 4, puan: 8, sebep: "gergin" }
+    ] }), dilim, s1);
+    esit("iki kesit çözüldü", r1.length, 2);
+    esit("1 numaralı satır 1. CÜMLEYE düştü", [r1[0].bas, r1[0].bit], [10, 14]);
+    esit("3-4 aralığı doğru cümlelere düştü", [r1[1].bas, r1[1].bit], [30, 47]);
+    esit("grup bilgisi korundu (emoji yanlış yüzü koymasın)", r1[0].grup, "Tofi");
+    esit("global indeks panelin KENDİ kaydından", r1[0].globalIdx, 100);
+    esit("aralık dışı yok", s1.siraDisi, 0);
+
+    /* --- ARALIK DIŞI NUMARA: atılmalı VE sayılmalı --- */
+    var s2 = { siraDisi: 0 };
+    var r2 = SH._cevapCoz(null, JSON.stringify({ kesitler: [
+      { basNo: 1, bitNo: 1, puan: 9, sebep: "gecerli" },
+      { basNo: 99, bitNo: 99, puan: 9, sebep: "UYDURMA" },     // dilimde yok
+      { basNo: 0, bitNo: 2, puan: 9, sebep: "sifir" },          // 1'den küçük
+      { basNo: 4, bitNo: 2, puan: 9, sebep: "ters" },           // bit < bas
+      { basNo: 101, bitNo: 101, puan: 9, sebep: "GLOBAL INDEKS" } // global sanıp gönderirse
+    ] }), dilim, s2);
+    esit("yalnız geçerli olan kaldı", r2.length, 1);
+    esit("aralık dışı SAYILDI (sessiz düşüş yok)", s2.siraDisi, 4);
+
+    /* ⚠ Bu satır hatanın ta kendisini sabitliyor: model GLOBAL indeksi (101) gönderirse
+       dilim 5 elemanlı olduğu için aralık dışı sayılır ve ATILIR — sessizce 101. cümleye
+       düşmez. Koruma kalkarsa bu test kırmızı olur. */
+    dogru("global indeks gönderilirse kabul EDİLMİYOR",
+          r2.every(function (k) { return k.globalIdx === 100; }));
+
+    /* --- Bozuk JSON: çökme yok, boş dönüş --- */
+    var s3 = { siraDisi: 0 };
+    esit("bozuk JSON boş liste döner", SH._cevapCoz(null, "bu json degil", dilim, s3).length, 0);
+    esit("metne gömülü JSON kurtarılır",
+         SH._cevapCoz(null, 'bak: {"kesitler":[{"basNo":2,"bitNo":2,"puan":7,"sebep":"x"}]} bitti',
+                      dilim, s3).length, 1);
+
+    /* --- GİRDİ DEĞİŞMEDİ --- */
+    esit("dilim nesneleri değişmedi", JSON.stringify(dilim), JSON.stringify(dilimKur()));
+
+    /* --- BÜTÇE ARİTMETİĞİ (modelde DEĞİL panelde) --- */
+    var s4 = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var ad = [
+      { bas: 10, bit: 20, puan: 9 },    // 10 sn
+      { bas: 15, bit: 24, puan: 8 },    // ÇAKIŞIYOR (10-20 ile)
+      { bas: 30, bit: 40, puan: 7 },    // 10 sn
+      { bas: 50, bit: 52, puan: 10 },   // 2 sn — kesitMin(4) altında
+      { bas: 60, bit: 90, puan: 10 },   // 30 sn — kesitMax(14) üstünde
+      { bas: 100, bit: 112, puan: 6 },  // 12 sn
+      { bas: 200, bit: 212, puan: 5 }   // 12 sn — bütçeyi aşar (10+10+12=32, +12=44 > 42)
+    ];
+    var b = SH._butceUygula(ad, {}, s4);
+    esit("çakışan elendi", s4.cakismaElenen, 1);
+    esit("kısa elendi", s4.kisaElenen, 1);
+    esit("uzun elendi", s4.uzunElenen, 1);
+    esit("bütçeyi aşan elendi", s4.sureElenen, 1);
+    esit("seçilen kesit sayısı", b.kesitler.length, 3);
+    esit("toplam süre bütçe içinde", b.toplam, 32);
+    dogru("toplam 42 sn tavanını aşmıyor", b.toplam <= 42);
+
+    /* ⚠ SHORTS KRONOLOJİK AKMALI — puan sırasına göre değil zaman sırasına dizilmeli. */
+    var artan = true;
+    for (var q = 1; q < b.kesitler.length; q++) if (b.kesitler[q].bas < b.kesitler[q - 1].bas) artan = false;
+    dogru("kesitler ZAMAN sırasına dizildi (puan sırasına değil)", artan);
+
+    /* --- adetMax tavanı --- */
+    var s5 = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var cok = [];
+    for (var i = 0; i < 20; i++) cok.push({ bas: i * 20, bit: i * 20 + 5, puan: 9 });
+    var b5 = SH._butceUygula(cok, {}, s5);
+    dogru("adetMax (5) aşılmıyor", b5.kesitler.length <= 5, "olan: " + b5.kesitler.length);
+
+    /* --- dilim metni: numara 1'DEN başlamalı, global indeksten DEĞİL --- */
+    var mt = SH._dilimMetni(dilim, 200);
+    dogru("dilim metni 1'den numaralanıyor", mt.indexOf("1 [") === 0, mt.split("\n")[0]);
+    dogru("global indeks (100) metne SIZMIYOR", mt.indexOf("100 [") === -1);
   })();
 
 /* ================= 20. MOJIBAKE (UTF-8 dosyanin ANSI okunup yeniden yazilmasi) =================

@@ -284,7 +284,8 @@
     for (var i = 0; i < all.length; i++) { all[i].classList.remove("active"); all[i].setAttribute("hidden", ""); }
     var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
            : name === "senkron" ? "viewSenkron" : name === "ayarlar" ? "viewAyarlar"
-           : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji" : "viewHome";
+           : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji"
+           : name === "shortsSekans" ? "viewShortsSekans" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
@@ -483,6 +484,74 @@
     catch (e) { dictStatus("✕ Kaydedilemedi: " + (e.message || e), "var(--bad)"); }
   });
 
+  /* ── GEÇİCİ: SHORTS API ÖLÇÜMÜ ──
+     Panel bugüne kadar HİÇ sekans yaratmadı; "videodan özet Shorts üret" kartı bunu
+     gerektiriyor ve yapılabilirliği ölçülmedi. Emsal: captionStilTani ve presetTani —
+     ikisi de kart olarak eklendi, sorusunu cevapladı, sonuç CLAUDE.md'ye yazıldı ve kart
+     kaldırıldı. Aynısı burada da yapılacak.
+     ⚠ Çıktı UZUN (reflect dökümü): durum satırına sığmaz, dosyaya yazılır. Log'a da
+     düşer ama ikinci kullanıcının log'u kopyalaması dosya göndermekten zor. */
+  if ($("shortsOlcBtn")) $("shortsOlcBtn").addEventListener("click", async function () {
+    var btn = this, st = $("shortsOlcStatus");
+    function y(m, renk) { if (st) { st.textContent = m || ""; st.style.color = renk || "var(--muted)"; } }
+    if (!CEP) { y("Premiere'de çalışır", "var(--warn)"); return; }
+    btn.disabled = true;
+    y("ölçülüyor…");
+    try {
+      var r = String(await evalES("shortsTani()"));
+      if (!r || r.indexOf("EvalScript error") !== -1) {
+        /* host.jsx YALNIZ Premiere açılırken yükleniyor — paneli kapat-aç yetmez.
+           Bu mesaj olmadan kullanıcı "düğme çalışmıyor" der ve sebebi görünmez. */
+        y("Ölçüm alınamadı — Premiere'i TAMAMEN kapatıp aç (host.jsx yalnız açılışta yüklenir).",
+          "var(--bad)");
+        return;
+      }
+      var yol = path.join(extRoot, "shorts-olcum.txt");
+      fs.writeFileSync(yol, r, "utf8");
+      logLine("Shorts API ölçümü:\n" + r);
+      y("✓ Yazıldı → " + yol, "var(--good)");
+    } catch (e) {
+      y("hata: " + (e.message || e), "var(--bad)");
+    } finally { btn.disabled = false; }
+  });
+
+  /* ── GEÇİCİ: SHORTS GERÇEK DENEME ──
+     ⚠ Bu YAZAN bir ölçüm: test sekansı yaratıp siliyor. Onay soruluyor çünkü kullanıcının
+     projesinde (kısa süreliğine de olsa) değişiklik yapıyor ve aktif sekansı değiştiriyor.
+     Neden şart: "listede var" ile "gerçekten çalışıyor" bu projede aynı şey çıkmadı —
+     createCaptionTrack'in stil parametresi listede duruyordu, hata da vermiyordu, sessizce
+     yok sayıyordu. Shorts kartının tamamı bu altı çağrının üstüne kurulacak. */
+  if ($("shortsDeneBtn")) $("shortsDeneBtn").addEventListener("click", async function () {
+    var btn = this, st = $("shortsOlcStatus");
+    function y(m, renk) { if (st) { st.textContent = m || ""; st.style.color = renk || "var(--muted)"; } }
+    if (!CEP) { y("Premiere'de çalışır", "var(--warn)"); return; }
+    var ok = await uiConfirm(
+      "Bu ölçüm projende GEÇİCİ bir test sekansı yaratıp siler.\n\n" +
+      "· Aktif sekans kısa süreliğine değişir, sonunda seninki geri açılır\n" +
+      "· Proje panelinde “YW_TEST…” diye bir şey kalırsa elle silebilirsin\n" +
+      "· Timeline'ındaki hiçbir klibe dokunulmaz\n\n" +
+      "Önce projeni kaydetmen iyi olur. Devam edeyim mi?", "Shorts ölçümü");
+    if (!ok) { y("İptal edildi.", "var(--warn)"); return; }
+    btn.disabled = true;
+    y("deneniyor… (Premiere kısa süre donuk görünebilir)");
+    try {
+      var r2 = String(await evalES("shortsDene()", function (sn) {
+        y("deneniyor… (" + sn + " sn)");
+      }));
+      if (!r2 || r2.indexOf("EvalScript error") !== -1) {
+        y("Ölçüm alınamadı — Premiere'i TAMAMEN kapatıp aç (host.jsx yalnız açılışta yüklenir).",
+          "var(--bad)");
+        return;
+      }
+      var yol2 = path.join(extRoot, "shorts-deneme.txt");
+      fs.writeFileSync(yol2, r2, "utf8");
+      logLine("Shorts gerçek deneme:\n" + r2);
+      y("✓ Yazıldı → " + yol2, "var(--good)");
+    } catch (e2) {
+      y("hata: " + (e2.message || e2), "var(--bad)");
+    } finally { btn.disabled = false; }
+  });
+
   // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
   /* ================= SHORTS (dikey video) =================
      Dikey karede (1080x1920) satır yatayın ~yarısı kadar dar. İki şey değişir:
@@ -553,6 +622,9 @@
   var VUR = null;
   var EMJ = null;                // js/emoji.js — emoji klasörü tarayıcı (Premiere'e dokunmaz)
   var AYNA = null;               // js/pngayna.js — sol taraf emojileri için yatay ayna (saf dosya işi)
+  var SHORTS = null;             // js/shorts.js — Shorts kesit secimi (AI)
+  var SZAMAN = null;             // js/shortszaman.js — kaynak->Shorts zaman haritalama
+  var KONUM = null;              // js/emojikonum.js — emoji konumu/ölçeği (saf hesap, tumtest'ten çağrılabilir)
   /* Emoji eşleme onayı — OTURUMLUK, diske YAZILMAZ. Anahtar sekans kimliği, değer eşlemenin
      imzası. Bilerek localStorage değil: sekans adları projeler arası tekrar ediyor ve kalıcı
      bir onay, başka bir projenin kararıyla bu videonun sorusunu susturabilirdi. */
@@ -1563,16 +1635,17 @@
      sonra konabiliyor (host.jsx `sonBitis` freni); kare yuvarlaması yukarı giderse çakışan
      emoji EZİLMEZ ama SESSİZCE ATILIR ve her çalıştırma sarıya döner. 0.08 ≈ iki kare payı. */
   var EMOJI_GAP = 0.08;
-  var EMOJI_ORAN = 0.574;      // emoji yüksekliği / kare yüksekliği — KULLANICI ONAYLADI, DOKUNMA
-  var EMOJI_BOSLUK_X = 0.005;  // SAĞ kenar boşluğu (kare yüksekliğinin oranı) ≈ 5 px
-  /* ALT BOŞLUK YOK (kullanıcı isteği, 7 Ağustos 2026: "aşağıda boşluk kalıyo çok az, o
-     küçücük yer kapanıcak şekilde aşağı indirebilir miyiz"). Emoji kareyi alt kenara dayanır.
-     ⚠ BU HER RESİMDE BOŞLUĞU BİTİRMEZ: bazı PNG'lerin KENDİ altında şeffaf pay var —
-     ölçüldü (alfa bounding box): çoğu dosyada %0 (yani resim alt kenara dayalı, panel 0
-     yapınca tam oturuyor) ama Çok Mutlu/Havalı/Mızmızlanan/Heyecanlı Tofi 2 → %10.9,
-     Şaşırmış Moni → %12.2, Şaşırmış Mimi → %3.1. O dosyalarda kalan boşluk resmin kendi
-     boşluğudur; çözümü kod değil, resmi alt kenara dayalı yeniden kaydetmek. */
-  var EMOJI_BOSLUK_Y = 0;
+  /* ⚠ EMOJİ KONUMU/ÖLÇEĞİ ARTIK `js/emojikonum.js`'TE — buraya geri yazma.
+     Sebep: app.js kapalı bir IIFE, yani buradaki hiçbir fonksiyon tumtest.js'ten
+     çağrılamıyor. Emoji konumu kullanıcı onaylı bir sabite (ORAN = 0.574) ve İKİ KEZ
+     dönmüş bir taraf kararına dayanıyor; ölçülemeyen değişiklik bu projede en pahalı yer.
+     Modül ayrıca dikey (Shorts) karesindeki ölçülmüş hatayı düzeltiyor: ölçü tabanı
+     `min(seqW,seqH)` — yatayda TEK SAYI değişmiyor, dikeyde sağ/sol artık ayrışıyor.
+     ALT BOŞLUK NOTU (kullanıcı isteği, 7 Ağustos 2026: "aşağıda o küçücük yer kapansın"):
+     BOSLUK_Y = 0, emoji alt kenara DAYANIR. ⚠ Bu her resimde boşluğu bitirmez — bazı
+     PNG'lerin KENDİ altında şeffaf payı var (ölçüldü, alfa bounding box: Çok Mutlu/Havalı/
+     Mızmızlanan/Heyecanlı Tofi 2 → %10.9 · Şaşırmış Moni → %12.2 · Şaşırmış Mimi → %3.1).
+     O boşluk resmin kendi boşluğu; çözümü kod değil, resmi yeniden kaydetmek. */
   /* Bir evalScript'te kaç emoji. Klip başına 12-15 ExtendScript↔Premiere turu var ve tek
      çağrı boyunca Premiere'in arayüzü DONUYOR; 150 emoji tek seferde gitseydi kullanıcı ne
      kadar kaldığını göremez, "kilitlendi" sanıp Premiere'i öldürebilirdi. */
@@ -1644,22 +1717,13 @@
      artık ÇAĞIRAN SEÇMİYOR — emojiSagMi(karakter) belirliyor, yani "yanlış taraf" ancak
      yukarıdaki listeyi bozarak geçilebilir. Sol x, sağ x'in kare merkezine göre TAM AYNASI
      (solX = 1 - sağX), çünkü iki kenar boşluğu da aynı `bosX` değerinden hesaplanıyor. */
-  function emojiKonum(seqW, seqH, sag) {
-    var boyPx = seqH * EMOJI_ORAN;                 // emoji ekranda bu kadar yüksek
-    var yariPx = boyPx / 2;
-    var bosX = Math.round(seqH * EMOJI_BOSLUK_X), bosY = Math.round(seqH * EMOJI_BOSLUK_Y);
-    var x = sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW);
-    var y = (seqH - bosY - yariPx) / seqH;
-    /* ⚠ DİKEY (Shorts) SEKANSTA TARAFLAR YER DEĞİŞTİREBİLİYORDU. Ölçek kare YÜKSEKLİĞİNE
-       bağlı (EMOJI_ORAN); 1080x1920'de emoji 1102 px oluyor, yani kareden GENİŞ. O zaman
-       "sağ" formülü 0.481, "sol" formülü 0.519 veriyor — sağdaki soldan solda kalıyor ve
-       tarafSay sayımı da ters okuyor. Kelepçe iki tarafın ÇAPRAZLAMASINI engelliyor;
-       yatay videoda hiçbir şeyi değiştirmiyor (orada sağ 0.836, sol 0.164 çıkıyor).
-       NOT: dikey sekansta emojinin kareyi taşması AYRI ve ESKİ bir konu — bu kelepçe onu
-       çözmez, yalnız "hangi taraf" bilgisini dürüst tutar. Shorts'ta emoji hiç ölçülmedi. */
-    if (sag && x < 0.5) x = 0.5;
-    if (!sag && x > 0.5) x = 0.5;
-    return { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 };
+  /* ⚠ GÖVDE `js/emojikonum.js`'E TAŞINDI — buraya geri yazma (sebep: test edilebilirlik,
+     bkz. o dosyanın başı). Burası yalnız ince bir sarmalayıcı: modül yüklenemezse emoji
+     özelliği DURUR, sessizce yanlış konuma emoji koymaz.
+     `ust` parametresi Shorts içindir (emoji üstte, altyazı altta — kullanıcı isteği). */
+  function emojiKonum(seqW, seqH, sag, ust) {
+    if (!KONUM) throw new Error("emojikonum.js yüklenemedi — paneli yeniden kur");
+    return KONUM.hesapla(seqW, seqH, sag, ust);
   }
 
   /* Tarama sonucunda bir karakter anahtarını bul (yoksa null). Eşleşme ASCII üzerinden:
@@ -2418,15 +2482,36 @@
       /* 4) PLAN. Karakter zaten eşleşmiş (c.kar); burada yalnız aralık freni + dosya bulma. */
       var indeks = {}; cumleler.forEach(function (c) { indeks[c.sira] = c; });
       var seqW = 1920, seqH = 1080;
+      /* ⚠ SESSİZ VARSAYILAN ARTIK LOG'A DÜŞÜYOR. Boş catch, panel hiç sekans YARATMADIĞI
+         sürece zararsızdı; dikey bir sekansta 1920x1080 varsaymak emojiyi kare dışına
+         koyup "başarılı" dedirtiyor. Ölçü okunamazsa varsayılan yine kullanılıyor (emoji
+         özelliğini tümden durdurmak daha kötü) ama SÖYLENİYOR. */
       try {
         var si = JSON.parse(String(await evalES("getSequenceInfoJSON()")));
         // Alan adları getSequenceInfoJSON'daki gibi: frameWidth/frameHeight
         if (si && si.frameWidth > 0 && si.frameHeight > 0) { seqW = si.frameWidth; seqH = si.frameHeight; }
-      } catch (eS) {}
+        else logLine("Emoji UYARI: sekans ölçüsü okunamadı, 1920x1080 varsayıldı — dikey " +
+                     "sekansta emoji yanlış yere düşer.");
+      } catch (eS) {
+        logLine("Emoji UYARI: sekans ölçüsü okunamadı (" + (eS.message || eS) +
+                "), 1920x1080 varsayıldı.");
+      }
       /* İKİ KONUM: Tofi/Moni sağ alt, konuklar sol alt (bkz. EMOJI_SAG_KARAKTER).
-         Karakter başına hesaplamaya gerek yok — yalnız iki değer var, döngüde seçiliyor. */
+         Karakter başına hesaplamaya gerek yok — yalnız iki değer var, döngüde seçiliyor.
+         `ust` YOK: yatay videoda emoji alt kenara dayanır (kullanıcı isteği). Shorts'ta
+         üstte olacak, o yolu Shorts kartı kendi konumuyla çağıracak. */
       var konSag = emojiKonum(seqW, seqH, true);
       var konSol = emojiKonum(seqW, seqH, false);
+      /* ⚠ İKİ TARAF AYNI NOKTAYA DÜŞÜYORSA İKİNCİ KANAL ANLAMSIZ — ve bunu Premiere ASLA
+         söylemez: klipler doğru konur, host "ok" der, yanlış olan panelin kendi hesabıdır.
+         (Dikey karede eski taban tam olarak bunu yapıyordu; taban min(w,h) olduktan sonra
+         ulaşılamaz olmalı, ama nöbetçi kalıyor — sessiz üst üste binmektense tek kanala
+         düşüp SÖYLEMEK yeğdir.) */
+      if (kanal2 >= 0 && konSag.x === konSol.x) {
+        logLine("Emoji: sağ ve sol aynı noktaya düşüyor (x=" + konSag.x + ") — ikinci emoji " +
+                "kanalı KAPATILDI, hepsi tek kanala konacak. Sekans ölçüsü: " + seqW + "x" + seqH);
+        kanal2 = -1;
+      }
 
       /* SOL TARAF RESİMLERİ YATAY AYNALANIR — karakter ekranın DIŞINA değil İÇİNE baksın.
          Ayna kopyaları <emoji klasörü>\ayna\ altında ÖNBELLEKLENİR: ilk çalıştırmada üretilir
@@ -2581,7 +2666,12 @@
         var kon = sagMi ? konSag : konSol;
         var pngYol = sagMi ? png.yol : aynaliYol(png.yol);
         plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, c.bas.toFixed(3), sure.toFixed(3),
-                   kon.x, kon.y, EMJ.olcekHesapla(png, seqH, EMOJI_ORAN),
+                   /* ⚠ ÖLÇEK TABANI KONUM TABANIYLA AYNI OLMAK ZORUNDA. Burada `seqH`
+                      geçiliyordu; konum tarafı min(w,h)'ye çevrilince dikey sekansta ikisi
+                      AYRIŞIYOR ve emoji hesaplanan yerin dışına taşıyordu (konum 620 px'e
+                      göre, boyut 1102 px). Yatayda min(w,h) === seqH, yani bu satır yatay
+                      videoda tek bir sayıyı bile değiştirmiyor. */
+                   kon.x, kon.y, EMJ.olcekHesapla(png, KONUM.taban(seqW, seqH), KONUM.ORAN),
                    png.duygu + " " + png.karakter].join("|"));
         /* ⚠ TARAF VE AYNA BİLGİSİ PLANA PARALEL DİZİLERDE. Plan satırından geri çıkarım
            YAPILMIYOR: x alanına bakmak dikey sekansta (iki taraf da 0.5'e kelepçelenince)
@@ -3084,6 +3174,197 @@
      Motor kökü doğru yer: ASCII (CEF Türkçe karakterli yolda takılıyor), kullanıcının
      kurulumda seçtiği yer, ve panel klasörünün DIŞINDA — ne güncelleme ne yeniden kurulum
      dokunuyor. Paket açılırken resimler oraya kuruluyor (bkz. varsayilanlariKur). */
+  /* ══════════════════════ SHORTS SEKANSI ══════════════════════
+     Uzun videodan 30-40 sn'lik dikey özet üretir. 8 ajanlı keşif + risk analizinden çıkan
+     korumaların hepsi burada — her biri kendi satırında işaretli.
+
+     ⚠ EN AĞIR RİSK: AKTİF SEKANS SIZINTISI. Panelin altyazı/emoji/AutoCut/Senkron kartlarının
+     HEPSİ app.project.activeSequence'a nişan alıyor ve "hangi sekanstayım" diye bir kavram
+     YOK. Shorts sekansı aktif kalırsa AutoCut 35 saniyelik Shorts'u keser, Senkron Craig
+     kayıtlarını oraya koyar ve en pahalısı: ertesi gün Premiere Shorts aktifken açılınca
+     offerSessionRestore oturumu HİÇ bulamaz, 25 dakikalık GPU işi "kayıp" görünür.
+     Bu yüzden akış NE OLURSA OLSUN (hata, iptal, başarı) kaynak sekansı geri açar — finally. */
+  var _shortsIptal = false;
+
+  async function shortsUret() {
+    var dur = $("shortsDurum");
+    function yaz(m, renk) { if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; } }
+    if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
+    if (!SHORTS || !SZAMAN) { yaz("Shorts modülleri yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
+    if (!VUR) { yaz("Yapay zekâ modülü yüklenemedi", "var(--bad)"); return; }
+
+    /* --- 1) ÖN KONTROLLER (hepsi görünür iş başlamadan) --- */
+    var anahtar = "";
+    try { anahtar = VUR.anahtarOku(extRoot); }
+    catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle (Shorts anları onunla seçiliyor)", "var(--bad)"); return; }
+
+    /* Kaynak: altyazı ekranındaki cue'lar. "Herkes" modunda kanal başına ayrı liste var. */
+    var gruplar = [];
+    if (state.genMode === "channels") {
+      if (state.a1Cues && state.a1Cues.length) gruplar.push({ ad: a1Adi() || "A1", cues: state.a1Cues });
+      aktifKanallar().forEach(function (ch) {
+        if (ch.cues && ch.cues.length) gruplar.push({ ad: kanalAdi(ch) || ("A" + (ch.idx + 1)), cues: ch.cues });
+      });
+    } else if (state.singleCues && state.singleCues.length) {
+      gruplar.push({ ad: (state.track === "1" ? (String(lsGet("kanalAd.1", "")).trim() || "A2") : (a1Adi() || "A1")),
+                     cues: state.singleCues });
+    }
+    if (!gruplar.length) { yaz("Önce Altyazı ekranından altyazı üret — Shorts anları o metinden seçiliyor.", "var(--warn)"); return; }
+
+    /* AUTOCUT BAYATLIK FRENİ — altyazı ve emojide var, burada olmaması tutarsızlık olurdu.
+       Kesim timeline'ı kısalttığı için kesit zamanları dakikalarca kayar ve host "hiçbir
+       klibe denk gelmiyor" diyene kadar para da harcanmış olur. */
+    if (state.cuesStale) {
+      var dvm = await uiConfirm(
+        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\n" +
+        "Kesim timeline'ı kısalttığı için Shorts kesitleri YANLIŞ anlardan alınır.\n\n" +
+        "Doğrusu altyazıyı yeniden üretmek. Yine de devam edeyim mi?", "Shorts");
+      if (!dvm) { yaz("İptal edildi — altyazıyı yeniden üret, sonra Shorts oluştur.", "var(--warn)"); return; }
+    }
+
+    var btn = $("btnShortsUret"); if (btn) btn.disabled = true;
+    _shortsIptal = false;
+    var bIptal = $("btnShortsIptal"); if (bIptal) bIptal.hidden = false;
+    var kaynakId = "";
+    try {
+      /* --- 2) YAPAY ZEKÂ: EN İYİ ANLAR --- */
+      yaz("en iyi anlar seçiliyor…");
+      var sec = await SHORTS.shortsSec(VUR, anahtar, gruplar,
+        { onLog: logLine, damga: VUR.iptalDamgasi() });
+      if (sec.hata) { yaz(sec.hata, "var(--bad)"); return; }
+      if (!sec.kesitler || !sec.kesitler.length) { yaz("Uygun an bulunamadı.", "var(--warn)"); return; }
+      if (_shortsIptal) { yaz("İptal edildi.", "var(--warn)"); return; }
+
+      /* --- 3) ONAY KAPISI — SEKANS YARATILMADAN ÖNCE ---
+         ⚠ Emsal: emoji kimlik kapısı (_emojiEslemeOnay). Bu tek onay satırı, yapay zekâ
+         numaralandırmasından gelen bütün eşleşme hatalarını AYNI ANDA yakalar: kullanıcı
+         metinleri görüyor ve yanlış an seçilmişse basmadan önce fark ediyor. Shorts para
+         harcıyor ve projede sekans yaratıyor. */
+      var satirlar = sec.kesitler.map(function (k, ix) {
+        return "  " + (ix + 1) + ") " + _shortsSaat(k.bas) + "-" + _shortsSaat(k.bit) +
+               "  (" + (k.bit - k.bas).toFixed(1) + " sn · " + k.grup + ")\n     " +
+               String(k.metin || "").slice(0, 90);
+      });
+      var onay = await uiConfirm(
+        "Shorts için şu " + sec.kesitler.length + " an seçildi (toplam " +
+        sec.toplamSure.toFixed(1) + " sn):\n\n" + satirlar.join("\n") +
+        "\n\nYeni bir dikey sekans oluşturulacak. Uzun videona dokunulmayacak.\n\nDevam edeyim mi?",
+        "Shorts");
+      if (!onay) { yaz("İptal edildi.", "var(--warn)"); return; }
+
+      /* --- 4) SEKANSI KUR --- */
+      yaz("dikey sekans kuruluyor… (Premiere kısa süre donuk görünebilir)");
+      var planYol = path.join(extRoot, "shorts_plan.txt");
+      var planSatir = ["#OLCU|1080|1920"];
+      sec.kesitler.forEach(function (k) { planSatir.push(k.bas.toFixed(3) + "|" + k.bit.toFixed(3)); });
+      fs.writeFileSync(planYol, planSatir.join("\n"), "utf8");
+      var hr = String(await evalES('shortsSekansKur("' + esPath(planYol) + '")',
+        function (sn) {
+          yaz("dikey sekans kuruluyor… (" + sn + " sn)" +
+              (sn >= 60 ? " · ⚠ Premiere'de açık bir pencere var mı? Kapatınca devam eder." : ""));
+        }));
+      try { fs.unlinkSync(planYol); } catch (eU) {}
+      var hs = null;
+      try { hs = JSON.parse(hr); } catch (eJ) { hs = null; }
+      if (!hs) { yaz("Sekans kurulamadı — Premiere'i TAMAMEN kapatıp aç (host.jsx yalnız açılışta yüklenir). Dönen: " + String(hr).slice(0, 120), "var(--bad)"); return; }
+      if (hs.error) { yaz("Sekans kurulamadı: " + hs.error, "var(--bad)"); return; }
+      kaynakId = String(hs.kaynakId || "");
+      logLine("Shorts sekansı: " + hs.ad + " · " + hs.w + "x" + hs.h + " · " +
+              hs.sure.toFixed(2) + " sn · ölçek %" + hs.olcek + " (" + hs.olcekOk + " klipte tuttu) · " +
+              hs.sesKanal + " ses kanalı / " + hs.sesKlip + " ses klibi");
+
+      /* --- 5) ALTYAZIYI YENİDEN YAZ ---
+         ⚠ Kopyalanamaz: panel caption track'e hiç erişemiyor (üç API yüzeyi ölçüldü).
+         Zaten kesitler birleşince zamanlar kayıyor, yeniden yazmak doğrusu.
+         ⚠ Cue'lar host'un GERİ OKUDUĞU kesit listesinden haritalanır, panelin varsaydığı
+         aritmetikten DEĞİL — Premiere klip sınırlarını kareye yuvarlıyor. */
+      var kaynakKesit = sec.kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
+      var altOk = 0, altHata = "", gizli = 0, disarida = 0;
+      if ($("shortsAltyazi") && $("shortsAltyazi").checked) {
+        yaz("altyazı yazılıyor…");
+        var capDir = path.join(cfg.workDir, "captions");
+        try { pipeline.ensureDir(capDir); } catch (eCd) {}
+        for (var gi = 0; gi < gruplar.length; gi++) {
+          var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
+          var yazilacak = hm.cues.filter(function (c) { return !c.gizliKesit && String(c.text || "").trim(); });
+          gizli += hm.sayac.gizlenen; disarida += hm.sayac.disarida;
+          if (!yazilacak.length) continue;
+          /* ⚠ SON NÖBETÇİ: fmtTime negatif zamanı SESSİZCE 0 yapıyor, yani ters bir ofset
+             bütün altyazıyı 00:00:00'a yığar ve panel "ok" derdi. Tek ihlalde hiçbir şey yazma. */
+          var ihlal = SZAMAN.dogrula(yazilacak, hs.sure);
+          if (ihlal.length) {
+            altHata = ihlal.length + " altyazı zamanı geçersiz (" + ihlal[0] + ")";
+            logLine("Shorts altyazı DURDU: " + ihlal.slice(0, 3).join(" · "));
+            break;
+          }
+          var srtFile = path.join(capDir, "shorts_" + Date.now() + "_" + gi + ".srt");
+          fs.writeFileSync(srtFile, pipeline.cuesToSrt(yazilacak), "utf8");
+          var rc = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
+          logLine("Shorts altyazı " + gruplar[gi].ad + " (" + yazilacak.length + " satır): " + rc);
+          if (rc.indexOf("ok:") === 0) altOk++;
+          else altHata = gruplar[gi].ad + " — " + rc.replace(/^[a-z_]+:/, "");
+        }
+      }
+
+      /* --- 6) SONUÇ — DÜRÜST --- */
+      var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) || !!sec.uyari;
+      var msg = "“" + hs.ad + "” oluşturuldu · " + hs.kesitler.length + " kesit · " +
+                hs.sure.toFixed(1) + " sn · " + hs.w + "x" + hs.h;
+      if (altOk) msg += " · " + altOk + " altyazı kanalı";
+      if (gizli || disarida) msg += " (" + disarida + " cümle kesit dışı, " + gizli + " sınırda gizlendi)";
+      if (altHata) msg += " · ⚠ altyazı: " + altHata;
+      if (hs.olcekHata) msg += " · ⚠ ölçek: " + hs.olcekHata;
+      /* ⚠ SES UYARISI — ÖLÇÜLMEDİ, o yüzden SORULUYOR. createSubClip yalnız o project
+         item'ın sesini getiriyor; A1/A2/A3 aynı OBS dosyasının farklı AKIŞLARI, Craig
+         kayıtları ise ayrı öğeler. Arkadaşların sesi Shorts'a hiç gelmemiş olabilir ve
+         belirtisi tamamen sessiz: altyazısı akar, sesi duyulmaz. */
+      if (hs.sesKanal < gruplar.length) {
+        msg += " · ⚠ " + gruplar.length + " karakter var ama Shorts'ta " + hs.sesKanal +
+               " ses kanalı — bazı seslerin gelmemiş olabilir, BİR KEZ DİNLE";
+        kismi = true;
+      }
+      if (sec.uyari) msg += " · ⚠ " + sec.uyari;
+      msg += " · emoji için Emoji ekranına geç (Shorts sekansı açık kalıyor)";
+      yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : "var(--good)");
+
+      /* ⚠ SHORTS SEKANSI AÇIK BIRAKILIYOR — bilerek. Kullanıcı sonucu hemen görmeli ve
+         emoji/preset uygulayabilmeli. Kaynağa dönmek İSTERSE kendisi seçer; panel zorla
+         geri açarsa kullanıcı ürettiği Shorts'u bulamaz. Ama BUNU SÖYLEMEK ŞART (yukarıdaki
+         mesajın son parçası) — sessizce başka bir sekansta bırakmak, panelin öteki
+         kartlarını yanlış hedefe nişan aldırır. */
+      kaynakId = "";                                   // finally geri açmasın
+    } catch (e3) {
+      yaz("hata: " + (e3.message || e3), "var(--bad)");
+      logLine("Shorts hatası: " + (e3.stack || e3.message || e3));
+    } finally {
+      /* Hata/iptal durumunda kaynak sekans geri açılır — yarım bir Shorts'ta bırakmak
+         panelin bütün kartlarını yanlış sekansa nişan aldırır. */
+      if (kaynakId) {
+        try { await evalES('app.project.openSequence("' + kaynakId + '")'); } catch (eBack) {}
+      }
+      if (btn) btn.disabled = false;
+      var bi = $("btnShortsIptal"); if (bi) { bi.hidden = true; bi.disabled = false; }
+      _shortsIptal = false;
+    }
+  }
+
+  function _shortsSaat(sn) {
+    sn = Math.max(0, Math.floor(Number(sn) || 0));
+    var d = Math.floor(sn / 60), s = sn % 60;
+    return d + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function wireShorts() {
+    var b = $("btnShortsUret");
+    if (b) b.addEventListener("click", function () { shortsUret(); });
+    var bi = $("btnShortsIptal");
+    if (bi) bi.addEventListener("click", function () {
+      _shortsIptal = true;
+      if (VUR && VUR.iptal) VUR.iptal();
+      bi.disabled = true; bi.textContent = "durduruluyor…";
+    });
+  }
+
   function emojiKlasorVarsayilan() {
     try { if (cfg && cfg._engineRoot) return path.join(cfg._engineRoot, "Emoji"); } catch (e) {}
     var h = (typeof process !== "undefined" && process.env)
@@ -5924,6 +6205,16 @@
        sonuç mesajına yazılır (sessiz düşüş yok). Saf dosya işi, Premiere'e dokunmaz. */
     try { AYNA = require(path.join(extRoot, "js", "pngayna.js")); }
     catch (eAyna) { AYNA = null; logLine("PNG aynalama modülü yüklenemedi: " + (eAyna.message || eAyna)); }
+    /* Emoji konumu/ölçeği — saf hesap. ⚠ AYNA'dan FARKLI: bu yüklenemezse emoji özelliği
+       DURUR (emojiKonum throw eder). Sebep: konum hesabı olmadan emoji "biraz eksik" değil,
+       YANLIŞ YERE konur ve kullanıcı ancak videoyu izlerken fark eder. */
+    try { KONUM = require(path.join(extRoot, "js", "emojikonum.js")); }
+    catch (eKon) { KONUM = null; logLine("Emoji konum modülü yüklenemedi: " + (eKon.message || eKon)); }
+    /* Shorts modulleri — saf hesap + AI secimi. Yuklenemezse yalniz Shorts karti durur. */
+    try { SHORTS = require(path.join(extRoot, "js", "shorts.js")); }
+    catch (eSh) { SHORTS = null; logLine("Shorts modülü yüklenemedi: " + (eSh.message || eSh)); }
+    try { SZAMAN = require(path.join(extRoot, "js", "shortszaman.js")); }
+    catch (eSz) { SZAMAN = null; logLine("Shorts zaman modülü yüklenemedi: " + (eSz.message || eSz)); }
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
@@ -6070,6 +6361,7 @@
     _wire("preset kartı", wirePreset);
     _wire("stil aktarma", wireStilProje);
     _wire("emoji testi", wireEmojiTest);
+    _wire("Shorts sekansı", wireShorts);
     _wire("kanal tarama", function () {
       if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
     });
