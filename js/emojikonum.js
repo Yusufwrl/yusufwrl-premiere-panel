@@ -45,12 +45,18 @@ function taban(seqW, seqH) { return Math.min(seqW, seqH); }
  *             false/atlanır = ALT kenara daya (yatay videodaki bugünkü davranış)
  * Dönen x/y Premiere'in NORMALİZE (0..1) Position değerleri — piksel DEĞİL (ölçüldü, 26.3.0).
  */
-function hesapla(seqW, seqH, sag, ust) {
+function hesapla(seqW, seqH, sag, ust, orta) {
   var tb = taban(seqW, seqH);
   var boyPx = tb * ORAN;
   var yariPx = boyPx / 2;
   var bosX = Math.round(tb * BOSLUK_X), bosY = Math.round(tb * BOSLUK_Y);
-  var x = sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW);
+  /* ⚠ ORTA — Shorts için (kullanıcı isteği, 11 Ağustos 2026: "emojiler doğru yerde ama tam
+     ortada durmalı"). Dikey karede sağ/sol köşe emojiyi kenara itiyor ve dar karede bu
+     dengesiz duruyor. `orta` verildiğinde x kilitlenir; sağ/sol ayrımı YALNIZ yatayda
+     anlamını korur. ⚠ Ortadayken AYNALAMA da anlamsızlaşır (aynalama "karakter ekranın
+     içine baksın" diye vardı) — çağıran taraf onu ayrıca kapatmalı, bu fonksiyon yalnız
+     konum döndürür. */
+  var x = orta ? 0.5 : (sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW));
   var y = ust ? ((bosY + yariPx) / seqH) : ((seqH - bosY - yariPx) / seqH);
   /* ⚠ KELEPÇE DURUYOR ama artık ulaşılamaz olmalı: taban min(w,h) olduğu için emoji hiçbir
      karede kareden geniş çıkmıyor. Yine de bırakıldı — ORAN kullanıcı tarafından 1'in
@@ -58,8 +64,10 @@ function hesapla(seqW, seqH, sag, ust) {
      GİRİLDİĞİNİ bilmek gerekiyor, çünkü o an sağ ile sol aynı noktaya düşer: `kelepce`
      alanı bu yüzden dönüyor ve çağıran taraf ikinci emoji kanalını kapatabiliyor. */
   var kelepce = false;
-  if (sag && x < 0.5) { x = 0.5; kelepce = true; }
-  if (!sag && x > 0.5) { x = 0.5; kelepce = true; }
+  if (!orta) {
+    if (sag && x < 0.5) { x = 0.5; kelepce = true; }
+    if (!sag && x > 0.5) { x = 0.5; kelepce = true; }
+  }
   return {
     x: Math.round(x * 1000) / 1000,
     y: Math.round(y * 1000) / 1000,

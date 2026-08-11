@@ -1292,6 +1292,20 @@ function bitir() {
     esit("dikey emoji boyu (kısa kenardan)", ds.boyPx, 620);
     dogru("dikey kelepçeye GİRMİYOR (taban düzeltmesi sayesinde)", !ds.kelepce && !dl.kelepce);
 
+    /* --- ORTA (Shorts: kullanıcı "tam ortada dursun" dedi, 11 Ağustos 2026) --- */
+    var os = K.hesapla(1080, 1920, true, true, true);
+    var ol = K.hesapla(1080, 1920, false, true, true);
+    esit("orta modda x tam 0.5", os.x, 0.5);
+    esit("orta modda sağ ile sol AYNI (bilerek)", os.x, ol.x);
+    dogru("orta modda kelepçe İŞARETLENMİYOR (çakışma değil, kasıt)", !os.kelepce && !ol.kelepce);
+    dogru("orta mod y'yi bozmuyor", os.y === K.hesapla(1080, 1920, true, true).y);
+    /* ⚠ Orta modda x kilitli olduğu için taraflar ayrışmıyor — bu bir HATA DEĞİL, istek.
+       Ama çağıran taraf ikinci emoji kanalını açmamalı (aynı noktaya çizerdi). */
+    dogru("orta modda taraflarAyriMi false döner (ikinci kanal açılmamalı)",
+          K.hesapla(1080, 1920, true, true, true).x === K.hesapla(1080, 1920, false, true, true).x);
+    /* Yatayda orta İSTENMEDİĞİ sürece hiçbir şey değişmiyor — regresyon kilidi. */
+    esit("yatayda orta parametresi VERİLMEZSE eski davranış", K.hesapla(1920, 1080, true).x, 0.836);
+
     /* --- ÜST YERLEŞİM (Shorts: emoji üstte, altyazı altta) --- */
     var us = K.hesapla(1080, 1920, true, true);
     dogru("üst yerleşim y, alt yerleşimden KÜÇÜK", us.y < ds.y, "üst=" + us.y + " alt=" + ds.y);

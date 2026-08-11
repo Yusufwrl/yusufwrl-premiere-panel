@@ -3342,6 +3342,13 @@
       }
       if (sec.uyari) msg += " · ⚠ " + sec.uyari;
       if (emojiSonuc) msg += " · " + emojiSonuc;
+      /* ⚠ ALTYAZI STİLİNİ PANEL VEREMEZ — ölçülmüş ve kapanmış konu (üç API yüzeyi:
+         normal DOM'da yalnız createCaptionTrack var, stil parametresi sessizce yok
+         sayılıyor, QE DOM'da caption geçen tek metot bile yok). Dikey karede yatay için
+         ayarlanmış bir stil KÜÇÜK ve fazla aşağıda kalıyor; kullanıcı bunu bildirdi.
+         Panel yapamadığı şeyi SÖYLEMELİ — sessiz kalırsa kullanıcı panelde ayar arar. */
+      if (altOk) msg += " · ⚠ altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
+                        "Essential Graphics → Track Style (dikey için büyüt ve yukarı al)";
       msg += " · Shorts sekansı açık bırakıldı";
       yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : "var(--good)");
 
@@ -3420,9 +3427,13 @@
     }
     if (kanal < 0) return "emoji: boş video kanalı yok (kanal başlığına sağ tık → Add Track)";
 
-    var konSag = emojiKonum(hs.w, hs.h, true, true);       // ÜST + dikey taban
-    var konSol = emojiKonum(hs.w, hs.h, false, true);
-    var plan = [], sonBitis = -999, aynaBellek = {};
+    /* ⚠ SHORTS'TA EMOJİ ÜSTTE VE TAM ORTADA (kullanıcı isteği, 11 Ağustos 2026).
+       Dikey karede köşeye yaslamak emojiyi kenara itiyor ve dar karede dengesiz duruyor.
+       Ortada olduğu için AYNALAMA DA YAPILMIYOR: ayna "karakter ekranın içine baksın" diye
+       vardı, ortadaki bir resmin bakış yönünü çevirmek yalnız asimetrik detayı (yazı,
+       tek taraflı aksesuar) ters gösterir. */
+    var konOrta = emojiKonum(hs.w, hs.h, true, true, true);
+    var plan = [], sonBitis = -999;
     sec.secimler.forEach(function (s) {
       var c = indeks[s.sira];
       if (!c) return;
@@ -3434,17 +3445,7 @@
       var sure = Math.max(EMOJI_MIN_SURE, Math.min(EMOJI_MAX_SURE, c.bit - c.bas));
       if (c.bas + sure > hs.sure) sure = hs.sure - c.bas;   // Shorts dışına taşmasın
       if (sure < EMOJI_MIN_SURE) return;
-      var sagMi = emojiSagMi(c.kar.key, c.a1);
-      var kon = sagMi ? konSag : konSol;
-      var yol = png.yol;
-      if (!sagMi && AYNA) {
-        if (aynaBellek[png.yol] === undefined) {
-          try { var r = AYNA.aynaYolu(kok, png.yol); aynaBellek[png.yol] = (r && r.yol) || ""; }
-          catch (eA) { aynaBellek[png.yol] = ""; }
-        }
-        if (aynaBellek[png.yol]) yol = aynaBellek[png.yol];
-      }
-      plan.push([yol, kanal, c.bas.toFixed(3), sure.toFixed(3), kon.x, kon.y,
+      plan.push([png.yol, kanal, c.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
                  EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
                  png.duygu + " " + png.karakter].join("|"));
       sonBitis = c.bas + sure;
@@ -3472,7 +3473,35 @@
       var m2 = r2.match(/^ok:(\d+)\//); if (m2) kondu += parseInt(m2[1], 10);
     }
     try { fs.unlinkSync(yol2); } catch (e7) {}
-    return (kondu === plan.length ? "✓ " : "⚠ ") + kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")";
+
+    /* ── PRESET (pop in + shake) ──
+       Kullanıcı isteği (11 Ağustos 2026): "emoji sağ presetindeki pop in ve shake'i de olmalı,
+       pop out olmasa da olur". emojiEkle'deki desenle aynı: preset emoji kanalının TAMAMINA
+       tek çağrıda uygulanıyor. Panelin yazdığı konum/ölçek EZİLMEZ — panel MOTION bileşenine
+       yazıyor, preset ise Motion/Opacity'yi "içsel" sayıp dokunmuyor.
+       ⚠ Preset yoksa emoji DÜŞMEZ, yalnız animasyonsuz kalır ve bu SÖYLENİR. */
+    var presetNot = "";
+    var presetAd = String((($("emojiPreset") || {}).value) || "");
+    if (kondu && presetAd) {
+      var pYigin = "";
+      try { pYigin = presetYiginOku(presetAd); } catch (ePy) { pYigin = ""; }
+      if (!pYigin) presetNot = " · “" + presetAd + "” öğretilmemiş, animasyon YOK";
+      else {
+        var pYol = path.join(extRoot, "emoji_preset.json");
+        try {
+          fs.writeFileSync(pYol, pYigin, "utf8");
+          if (yaz) yaz("emoji animasyonu uygulanıyor: " + presetAd + "…");
+          var pr = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")',
+            function (sn) { if (yaz) yaz("emoji animasyonu uygulanıyor… (" + sn + " sn)"); }));
+          logLine("Shorts emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + pr);
+          presetNot = (pr.indexOf("ok:") === 0) ? (" + " + presetAd)
+                                                : (" · ⚠ animasyon UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 50));
+        } catch (ePr) { presetNot = " · ⚠ animasyon hatası: " + (ePr.message || ePr); }
+        try { fs.unlinkSync(pYol); } catch (ePu) {}
+      }
+    }
+    return (kondu === plan.length && presetNot.indexOf("⚠") === -1 ? "✓ " : "⚠ ") +
+           kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")" + presetNot;
   }
 
   function _shortsSaat(sn) {

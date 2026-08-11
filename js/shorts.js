@@ -48,23 +48,44 @@ var VARSAYILAN = {
   yapisalCikti: true
 };
 
+/* ⚠ İSTEM KULLANICI GERİ BİLDİRİMİYLE GÜÇLENDİRİLDİ (11 Ağustos 2026: "en iyi yerleri
+   Shorts için daha zekice düşünüp yapsın"). İlk sürüm yalnız "ilgi çekici an" diyordu ve
+   model sıradan sohbeti de seçebiliyordu. Artık Shorts'un GERÇEK kısıtları anlatılıyor:
+   izleyici videoyu görmedi, ilk saniyede kaçabilir, ses tek başına taşımalı. */
 var SISTEM_ELEME =
-  "Sen bir YouTube kurgucususun. Sana bir videonun konuşma dökümünden bir bölüm veriliyor. " +
-  "Görevin: bu bölümdeki EN İLGİ ÇEKİCİ anları seçmek — Shorts'a konacak anlar.\n\n" +
-  "İYİ AN: komik, şaşırtıcı, gergin, bir şeyin olduğu an; tepki, çığlık, başarı, başarısızlık, " +
-  "kavga, sürpriz. Kendi başına anlaşılır olmalı.\n" +
-  "KÖTÜ AN: bağlam gerektiren, sıradan sohbet, tekrar, yarım kalan cümle, sessizlik dolgusu.\n\n" +
-  "Her satır bir CÜMLE ve başında o parçaya ait sıra numarası var. Bir an birden çok ardışık " +
-  "cümleden oluşabilir: basNo ve bitNo ile aralık ver.\n" +
+  "Sen Minecraft/Roblox içerikleri kurgulayan deneyimli bir YouTube kurgucususun. " +
+  "Sana bir videonun konuşma dökümünden bir bölüm veriliyor.\n\n" +
+  "GÖREV: bu bölümdeki, YouTube Shorts'ta tek başına izlenebilecek anları seç.\n\n" +
+  "GÜÇLÜ AN (seç):\n" +
+  "· Bir ŞEY OLUYOR: ölüm, kazanma, kaybetme, yakalanma, sürpriz, plan tutması/tutmaması\n" +
+  "· GERÇEK TEPKİ: çığlık, panik, kahkaha, şok, kızgınlık, itiraz — sesin yükseldiği yer\n" +
+  "· ÇATIŞMA: birbirine laf atma, suçlama, iddia, meydan okuma, yakalanma anı\n" +
+  "· KOMİK: saçmalık, yanlış anlama, beklenmedik cevap, kendine gülme\n" +
+  "· MERAK: bir şeyin açıklandığı, ortaya çıktığı, ilk kez görüldüğü an\n\n" +
+  "ZAYIF AN (SEÇME):\n" +
+  "· Bağlam gerektiren: \"onu oraya koyalım\", \"az önce dediğim gibi\" — izleyici videoyu GÖRMEDİ\n" +
+  "· Sıradan koordinasyon: \"sen şuraya git\", \"tamam bekle\", \"geliyorum\"\n" +
+  "· Tekrar, düşünme sesi, yarım cümle, konu dışı sohbet\n" +
+  "· Yalnız bir kişinin tek düze anlattığı yer (diyalog daha güçlü)\n\n" +
+  "Her satır bir CÜMLE, başında o parçaya ait sıra numarası var. Bir an birden çok ardışık " +
+  "cümleden oluşabilir — basNo ve bitNo ile aralık ver ve anın TAMAMINI al: tepkinin " +
+  "öncesindeki kurulum cümlesi de içeride kalsın, yoksa an havada kalır.\n" +
   "SADECE bu parçadaki numaraları kullan. Numara uydurma.";
 
 var SISTEM_FINAL =
-  "Sen bir YouTube kurgucususun. Sana bir videodan seçilmiş aday anlar veriliyor. " +
-  "Görevin: bunlardan Shorts'a girecek EN İYİ olanları seçmek ve puanlamak.\n\n" +
-  "Shorts 30-40 saniye olacak ve bu anlar arka arkaya eklenecek. İzleyici videoyu görmemiş " +
-  "olacak, yani her an KENDİ BAŞINA anlaşılır olmalı.\n" +
-  "Çeşitlilik iyidir: hepsi aynı kişiden ya da aynı tip olmasın.\n" +
-  "puan: 1-10, 10 = kesinlikle girsin.\n" +
+  "Sen Minecraft/Roblox içerikleri kurgulayan deneyimli bir YouTube kurgucususun. " +
+  "Sana bir videodan seçilmiş aday anlar veriliyor.\n\n" +
+  "GÖREV: bunlardan 30-40 saniyelik bir Shorts kurmak. Anlar arka arkaya eklenecek.\n\n" +
+  "SHORTS'UN GERÇEĞİ — puanlarken bunları düşün:\n" +
+  "1. İzleyici videoyu GÖRMEDİ ve tanımıyor. Her an kendi başına anlaşılmalı.\n" +
+  "2. İlk 2 saniyede kaçıyor. EN GÜÇLÜ an, listedeki en yüksek puanı almalı — panel onu " +
+  "   zaman sırasına dizecek ama puan neyin taşıdığını belirler.\n" +
+  "3. Ses tek başına taşımalı: görüntüyü anlatan değil, DUYGUSU olan anlar kazanır.\n" +
+  "4. Çeşitlilik: hepsi aynı kişiden veya aynı tipten olmasın. Farklı karakterlerin " +
+  "   birbirine tepki verdiği anlar en iyisidir.\n" +
+  "5. Bir an tek başına komik/şaşırtıcı değilse, ne kadar önemli olursa olsun ALMA.\n\n" +
+  "puan: 1-10. 9-10 = tek başına Shorts taşır · 7-8 = güçlü · 5-6 = idare eder · " +
+  "4 ve altı = alma.\n" +
   "SADECE listedeki numaraları kullan. Numara uydurma.";
 
 var SEMA = {
