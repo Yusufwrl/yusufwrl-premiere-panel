@@ -1650,7 +1650,14 @@
   /* Bir evalScript'te kaç emoji. Klip başına 12-15 ExtendScript↔Premiere turu var ve tek
      çağrı boyunca Premiere'in arayüzü DONUYOR; 150 emoji tek seferde gitseydi kullanıcı ne
      kadar kaldığını göremez, "kilitlendi" sanıp Premiere'i öldürebilirdi. */
-  var EMOJI_PARCA = 40;
+  /* ⚠ 40 → 25 (11 Ağustos 2026). ParsMazi'de 172 emojilik bir planda 4. parça 127 saniye
+     boyunca döndü ve Premiere araya bir pencere soktu. Parça küçüldükçe: (a) her parça daha
+     kısa sürüyor, yani Premiere'in pencere açması için daha az fırsat kalıyor, (b) takılma
+     olursa KAYBEDİLEN iş daha az, (c) ilerleme sayısı daha sık güncelleniyor.
+     Bedeli: daha çok evalScript turu (toplam süre ~%5 artar) — takılmanın bedelinin yanında
+     önemsiz. ⚠ host.jsx `_TARA_TAVAN` (60) bu sayıdan BÜYÜK kalmak ZORUNDA, yoksa önceki
+     parçanın klipleri güvenlik taramasının dışında kalır; 25 < 60 olduğu için güvende. */
+  var EMOJI_PARCA = 25;
   /* Plandaki en fazla emoji (host tavanı 400). Aşılırsa REDDEDİLMEZ, eşit aralıkla
      SEYRELTİLİR: host'un eski davranışı (plan > 100 ise tek emoji koymadan "err:") ödenmiş
      API isteğini ve 25 dakikalık GPU işini çöpe atıyordu. */
@@ -3004,6 +3011,15 @@
       logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
               " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
               "Durdurmak istersen “İptal” (süren parça bitince durur).");
+      /* ⚠ AUTO SAVE UYARISI — ParsMazi'de iki kez takılmaya sebep oldu (10 ve 11 Ağustos
+         2026). Premiere uzun işlem sırasında otomatik kaydetmeye kalkıyor, pencere açıyor ve
+         panelin evalScript'i o pencere kapanana kadar DÖNMÜYOR. Panel bunu ölçemiyor
+         (Preferences'a erişim yok), ama SÖYLEYEBİLİR. */
+      if (plan.length > 80) {
+        logLine("⚠ 80'den fazla emoji var: Premiere'in Auto Save'i araya girerse iş duruyor. " +
+                "Edit > Preferences > Auto Save'den aralığı uzatmak (ya da geçici kapatmak) " +
+                "bu takılmayı önler.");
+      }
       var kgi, kgPlan;
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
@@ -3027,8 +3043,14 @@
             var m0 = "emoji yerleştiriliyor… " + kondu + "/" + plan.length +
                      " · parça " + _parcaNo + " (" + sn + " sn)";
             if (sn >= 60) {
-              yaz(m0 + " · ⚠ Premiere yanıt vermiyor olabilir — ekranda açık bir pencere " +
-                  "(Save Project / Import) var mı? Kapatınca kaldığı yerden devam eder.", "var(--warn)");
+              /* ⚠ MESAJ EN SIK SUÇLUYU ADIYLA SÖYLER. ParsMazi'de ölçüldü: Premiere %0,3
+                 CPU ile kendi açtığı pencereyi bekliyordu. "Bir pencere var mı?" demek
+                 yetmiyor — kullanıcı Premiere'i öne alıp bakmayı akıl etmiyor ve paneli
+                 öldürüyor. AUTO SAVE en sık sebep: uzun işlem sırasında tetikleniyor. */
+              yaz(m0 + " · ⚠ Premiere YANIT VERMİYOR. Premiere'i öne al ve bak: " +
+                  "Auto Save / Save Project / Import penceresi açık mı? Kapat ya da onayla — " +
+                  "panel kaldığı yerden DEVAM EDER, konan " + kondu + " emoji kaybolmaz.",
+                  "var(--warn)");
             } else yaz(m0);
           }));
         logLine("Emoji parça " + (Math.floor(p / EMOJI_PARCA) + 1) + " (" + dilim.length +

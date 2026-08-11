@@ -1013,7 +1013,16 @@ function bitir() {
     dogru("emoji yerleştirme nöbetçiyi kullanıyor",
           /emojiYerlestir\("[\s\S]{0,300}function \(sn\)/.test(a));
     dogru("60 sn sonra kullanıcıya ne yapacağı yazılıyor",
-          /sn >= 60[\s\S]{0,300}Premiere yanıt vermiyor/.test(a));
+          /sn >= 60[\s\S]{0,600}Premiere YANIT VERMİYOR/.test(a));
+    /* ⚠ MESAJ EN SIK SUÇLUYU ADIYLA SÖYLEMELİ (ParsMazi'de iki kez takıldı, 10 ve 11
+       Ağustos 2026). "Bir pencere var mı?" demek yetmiyor — kullanıcı Premiere'i öne alıp
+       bakmayı akıl etmiyor ve paneli öldürüyor. */
+    dogru("nöbetçi Auto Save'i ADIYLA söylüyor", /sn >= 60[\s\S]{0,600}Auto Save/.test(a));
+    dogru("nöbetçi 'devam eder, kaybolmaz' güvencesini veriyor",
+          /sn >= 60[\s\S]{0,700}DEVAM EDER[\s\S]{0,120}kaybolmaz/.test(a));
+    /* Uzun planda Auto Save uyarısı log'a düşüyor mu — takılmanın önlenebilir tek kolu. */
+    dogru("80+ emojide Auto Save uyarısı veriliyor",
+          /plan\.length > 80[\s\S]{0,400}Auto Save/.test(a));
 
     /* İPTAL: parça sınırında. Çalışan evalScript kesilemez ama sıradaki parça başlamamalı. */
     dogru("emoji iptal bayrağı var", /var _emojiIptal = false/.test(a));
