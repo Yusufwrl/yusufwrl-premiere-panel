@@ -3432,13 +3432,15 @@
        Ortada olduğu için AYNALAMA DA YAPILMIYOR: ayna "karakter ekranın içine baksın" diye
        vardı, ortadaki bir resmin bakış yönünü çevirmek yalnız asimetrik detayı (yazı,
        tek taraflı aksesuar) ters gösterir. */
-    /* ⚠ SHORTS EMOJISI "FULL" (kullanici, 11 Agustos 2026: "emoji de full olmalı").
-       Yatay videodaki 0.574 kullanici onayli ve DEGISMEZ; dikey karede emoji ekranin
-       genisligini doldurmali. 1080x1920'de: 1080 * 1.0 = 1080 px, yani kare genisligi kadar.
-       ⚠ AYNI ORAN olcekHesapla'ya da verilir (asagida) — biri digerinden farkli olursa
-       konum ile boyut ayrisir ve emoji hesaplanan yerin disina tasar. */
-    var SHORTS_EMOJI_ORAN = 1.0;
-    var konOrta = emojiKonum(hs.w, hs.h, true, true, true, SHORTS_EMOJI_ORAN);
+    /* ⚠ BOYUT: VARSAYILAN ORAN (0.574) — "full" DENENDI VE GERI ALINDI.
+       11 Agustos 2026: kullanici once "emoji de full olmalı" dedi, oran 1.0 yapildi
+       (1080x1920'de 1080 px, kare genisligi kadar) ve sonucu gorunce GERI ISTEDI:
+       "az önce çok iyi çalışıyordu, az önceki haline döndür". Dikey karede kare
+       genisligini dolduran emoji goruntunun cogunu kapatiyor.
+       ⚠ TEKRAR BUYUTME — bu karar olculdu ve kullanici tarafindan reddedildi.
+       emojikonum.js'in `oran` parametresi DURUYOR (testleri var, ileride gerekebilir);
+       burada gecilmiyor, yani varsayilan 0.574 kullaniliyor. */
+    var konOrta = emojiKonum(hs.w, hs.h, true, true, true);
     var plan = [], sonBitis = -999;
     sec.secimler.forEach(function (s) {
       var c = indeks[s.sira];
@@ -3452,7 +3454,7 @@
       if (c.bas + sure > hs.sure) sure = hs.sure - c.bas;   // Shorts dışına taşmasın
       if (sure < EMOJI_MIN_SURE) return;
       plan.push([png.yol, kanal, c.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
-                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), SHORTS_EMOJI_ORAN),
+                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
                  png.duygu + " " + png.karakter].join("|"));
       sonBitis = c.bas + sure;
     });
@@ -3480,38 +3482,22 @@
     }
     try { fs.unlinkSync(yol2); } catch (e7) {}
 
-    /* ── PRESET (pop in + shake) ──
-       Kullanıcı isteği (11 Ağustos 2026): "emoji sağ presetindeki pop in ve shake'i de olmalı,
-       pop out olmasa da olur". emojiEkle'deki desenle aynı: preset emoji kanalının TAMAMINA
-       tek çağrıda uygulanıyor. Panelin yazdığı konum/ölçek EZİLMEZ — panel MOTION bileşenine
-       yazıyor, preset ise Motion/Opacity'yi "içsel" sayıp dokunmuyor.
-       ⚠ Preset yoksa emoji DÜŞMEZ, yalnız animasyonsuz kalır ve bu SÖYLENİR. */
-    var presetNot = "";
-    var presetAd = String((($("emojiPreset") || {}).value) || "");
-    if (kondu && presetAd) {
-      var pYigin = "";
-      try { pYigin = presetYiginOku(presetAd); } catch (ePy) { pYigin = ""; }
-      if (!pYigin) presetNot = " · “" + presetAd + "” öğretilmemiş, animasyon YOK";
-      else {
-        var pYol = path.join(extRoot, "emoji_preset.json");
-        try {
-          fs.writeFileSync(pYol, pYigin, "utf8");
-          if (yaz) yaz("emoji animasyonu uygulanıyor: " + presetAd + "…");
-          /* ⚠ 4. ARGUMAN "1" = KONUM ATLA. Kullanicinin "Emoji Sag Taraf" preseti YATAY
-             video icin ogretilmis ve icinde Position var; Shorts'ta panel emojiyi ortaya
-             koyuyor, preset onu SAGA itiyordu (kullanici bildirdi, 11 Agustos 2026).
-             Pop-in ve shake (Scale/Opacity/efekt keyframe'leri) aynen geciyor. */
-          var pr = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '","1")',
-            function (sn) { if (yaz) yaz("emoji animasyonu uygulanıyor… (" + sn + " sn)"); }));
-          logLine("Shorts emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + pr);
-          presetNot = (pr.indexOf("ok:") === 0) ? (" + " + presetAd)
-                                                : (" · ⚠ animasyon UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 50));
-        } catch (ePr) { presetNot = " · ⚠ animasyon hatası: " + (ePr.message || ePr); }
-        try { fs.unlinkSync(pYol); } catch (ePu) {}
-      }
-    }
-    return (kondu === plan.length && presetNot.indexOf("⚠") === -1 ? "✓ " : "⚠ ") +
-           kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")" + presetNot;
+    /* ⚠⚠ SHORTS'TA PRESET OTOMATİK UYGULANMAZ — DENENDİ VE KULLANICI TARAFINDAN İPTAL EDİLDİ.
+       Tarihçe (11 Ağustos 2026, hepsi aynı gün):
+       (1) Kullanıcı "emoji sağ presetindeki pop in ve shake'i de olmalı" dedi → Emoji
+           ekranındaki preset seçicisi Shorts'a da bağlandı.
+       (2) Sonuç: "Emoji Sağ Taraf" preseti YATAY video için öğretilmiş ve içinde Position
+           var; panel emojiyi ortaya koyuyor, preset onu SAĞA itiyordu.
+       (3) `presetYaz`'a `konumAtla` (4. argüman) eklendi — Position/Anchor Point atlanıp
+           yalnız Scale/Opacity/efekt keyframe'leri geçsin diye.
+       (4) Kullanıcı bunu da istemedi: "sadece emoji sağ taraf efektini oto uygulamayı kapat,
+           efektsiz sadece emojiyi yukarıda aynı hizada ortada aynasız istiyorum."
+       ⚠ GERİ EKLEME. Kullanıcı Shorts emojisini SADE istiyor. Animasyon isterse Preset
+       ekranından kendisi seçip uyguluyor — o yol duruyor ve çalışıyor.
+       ⚠ `presetYaz`'daki `konumAtla` parametresi KALDI: nöbetçi testleri var, zararsız ve
+       ileride "konumu ben koydum, preset ezmesin" gereken her yerde doğru davranış. */
+    return (kondu === plan.length ? "✓ " : "⚠ ") +
+           kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")";
   }
 
   function _shortsSaat(sn) {

@@ -83,7 +83,12 @@ var SISTEM_FINAL =
   "3. Ses tek başına taşımalı: görüntüyü anlatan değil, DUYGUSU olan anlar kazanır.\n" +
   "4. Çeşitlilik: hepsi aynı kişiden veya aynı tipten olmasın. Farklı karakterlerin " +
   "   birbirine tepki verdiği anlar en iyisidir.\n" +
-  "5. Bir an tek başına komik/şaşırtıcı değilse, ne kadar önemli olursa olsun ALMA.\n\n" +
+  "5. Bir an tek başına komik/şaşırtıcı değilse, ne kadar önemli olursa olsun ALMA.\n" +
+  "6. VİDEONUN HER YERİNDEN seç — başı, ortası, sonu. Shorts izleyiciyi asıl videoya " +
+  "   yönlendirmeli, yani videonun tamamından bir tat vermeli. Hepsini videonun ilk " +
+  "   dakikalarından seçme; sonlara doğru olan güçlü anları özellikle ara.\n\n" +
+  "⚠ PUANLARI AYIRT EDİCİ VER. Hepsine 9-10 verirsen sıralama anlamsızlaşır ve seçim " +
+  "videonun başına yığılır. Gerçekten en güçlü 2-3 ana 9-10, ötekilere 5-8 ver.\n" +
   "puan: 1-10. 9-10 = tek başına Shorts taşır · 7-8 = güçlü · 5-6 = idare eder · " +
   "4 ve altı = alma.\n" +
   "SADECE listedeki numaraları kullan. Numara uydurma.";
@@ -205,37 +210,80 @@ function _cevapCoz(VUR, metin, dilim, sayac) {
   return out;
 }
 
-/* Kesitleri süre/çakışma/adet kurallarına göre eler. ⚠ Bu aritmetik MODELDE DEĞİL BURADA. */
+/* Kesitleri süre/çakışma/adet/DAĞILIM kurallarına göre eler.
+   ⚠ Bu aritmetik MODELDE DEĞİL BURADA — model saniye toplayamaz.
+
+   ⚠⚠ ZAMAN DAĞILIMI ŞART — GERÇEK HATA (kullanıcı, 11 Ağustos 2026: "klip seçimleri de
+   olmamış, dümdüz videonun başını almışsın").
+   SEBEP: eski sürüm yalnız puana göre sıralıyor, eşit puanda `a.bas - b.bas` ile ERKEN olanı
+   seçiyordu. Model 8-10 ana aynı puanı verince (veriyor — 9-10 arası puanlar yığılıyor)
+   sıralama tamamen zamana düşüyor ve HEP videonun başındakiler kazanıyordu. Sonuç "videonun
+   özeti" değil "videonun ilk 40 saniyesi" oluyordu.
+   ÇÖZÜM: video eşit bölgelere ayrılır ve İLK GEÇİŞTE her bölgeden yalnız BİR kesit alınır.
+   Yer kalırsa ikinci geçiş bölge kuralını gevşetir — yani dağılım öncelikli, ama bütçe boş
+   kalmıyor. Kullanıcının gerekçesi: "Shorts videoya yönlendirebilmeli", yani videonun her
+   yerinden bir tat vermeli. */
 function _butceUygula(adaylar, opts, sayac) {
   var kesitMin = _sayi(_ayar(opts, "kesitMin")), kesitMax = _sayi(_ayar(opts, "kesitMax"));
   var maxSure = _sayi(_ayar(opts, "maxSure")), adetMax = _sayi(_ayar(opts, "adetMax"));
-  var i, secili = [];
-  /* Puan sırası: en iyiden başla, çakışanı ve bütçeyi aşanı düşür. */
+  var i, secili = [], toplam = 0, doluBolge = {};
+
+  /* Bölge sınırları adayların YAYILIMINDAN kurulur (video süresi elde yok). İlk aday 0'dan
+     çok sonra başlıyorsa bölgeler o aralığa sıkışır — istenen de bu: "videonun her yeri"
+     demek, konuşmanın olduğu her yer demek. */
+  var enErken = Infinity, enGec = 0;
+  for (i = 0; i < adaylar.length; i++) {
+    if (adaylar[i].bas < enErken) enErken = adaylar[i].bas;
+    if (adaylar[i].bit > enGec) enGec = adaylar[i].bit;
+  }
+  if (!isFinite(enErken)) enErken = 0;
+  var yayilim = Math.max(1, enGec - enErken);
+  var bolgeSay = Math.max(1, adetMax);
+  function bolgeNo(k) {
+    var b = Math.floor(((k.bas - enErken) / yayilim) * bolgeSay);
+    return Math.max(0, Math.min(bolgeSay - 1, b));
+  }
+
   var sirali = adaylar.slice().sort(function (a, b) {
     if (b.puan !== a.puan) return b.puan - a.puan;
     return a.bas - b.bas;
   });
-  var toplam = 0;
-  for (i = 0; i < sirali.length && secili.length < adetMax; i++) {
-    var k = sirali[i];
+
+  /* Bir adayı almayı dener. `bolgeSarti` false ise bölge kuralı uygulanmaz (2. geçiş). */
+  function dene(k, bolgeSarti, say) {
+    if (secili.length >= adetMax) return false;
     var sure = k.bit - k.bas;
-    if (sure < kesitMin) { sayac.kisaElenen++; continue; }
-    /* ⚠ KIRPMA CÜMLE SINIRINDAN — asla ortadan bölünmez. Kesit çok uzunsa BAŞTAN alınır
-       (ilk cümleler bağlamı kurar); sonu kırpmak "yarım cümle" üretmez çünkü bit zaten
-       bir cümle sonu değil, kesit sonu olur. Bu yüzden uzun kesit tümden ELENİR, kırpılmaz —
-       kırpmak cümlenin ortasına denk gelir ve kullanıcının açık isteğini bozar. */
-    if (sure > kesitMax) { sayac.uzunElenen++; continue; }
-    var cakisma = false;
+    if (sure < kesitMin) { if (say) sayac.kisaElenen++; return false; }
+    /* ⚠ KIRPMA CÜMLE SINIRINDAN — asla ortadan bölünmez. Uzun kesit tümden ELENİR,
+       kırpılmaz: kırpmak cümlenin ortasına denk gelir ve kullanıcının açık isteğini bozar. */
+    if (sure > kesitMax) { if (say) sayac.uzunElenen++; return false; }
+    if (bolgeSarti && doluBolge[bolgeNo(k)]) { return false; }
     for (var q = 0; q < secili.length; q++) {
-      if (k.bas < secili[q].bit && k.bit > secili[q].bas) { cakisma = true; break; }
+      if (k.bas < secili[q].bit && k.bit > secili[q].bas) { if (say) sayac.cakismaElenen++; return false; }
     }
-    if (cakisma) { sayac.cakismaElenen++; continue; }
-    if (toplam + sure > maxSure) { sayac.sureElenen++; continue; }
+    if (toplam + sure > maxSure) { if (say) sayac.sureElenen++; return false; }
     secili.push(k);
+    doluBolge[bolgeNo(k)] = 1;
     toplam += sure;
+    return true;
   }
+
+  /* ⚠ SAYAÇLAR YALNIZ 2. GEÇİŞTE — her aday TAM BİR KEZ sayılsın diye.
+     1. geçişte sayılsaydı bölge kuralına takılan aday hem orada hem 2. geçişte sayılır ve
+     kullanıcıya gösterilen "kaç tanesi neden elendi" sayısı şişerdi. Elenme sebebi ancak
+     ikinci geçişten sonra KESİNLEŞİYOR (bölge kuralı orada kalkıyor). */
+  /* 1. GEÇİŞ — her bölgeden en iyi bir tane. */
+  for (i = 0; i < sirali.length; i++) dene(sirali[i], true, false);
+  /* 2. GEÇİŞ — bölge kuralını gevşet, seçilmeyen her adayın sebebini say. */
+  for (i = 0; i < sirali.length; i++) {
+    if (secili.indexOf(sirali[i]) === -1) dene(sirali[i], false, true);
+  }
+
   /* Timeline sırasına diz — Shorts kronolojik akmalı, puan sırasına değil. */
   secili.sort(function (a, b) { return a.bas - b.bas; });
+  sayac.bolgeSay = bolgeSay;
+  sayac.doluBolgeSay = 0;
+  for (var bk in doluBolge) if (Object.prototype.hasOwnProperty.call(doluBolge, bk)) sayac.doluBolgeSay++;
   return { kesitler: secili, toplam: toplam };
 }
 
@@ -303,8 +351,16 @@ async function shortsSec(VUR, anahtar, gruplar, opts) {
      ⚠ Bu tur olmadan parçalar ARASI karşılaştırma hiç yapılmaz: her parça kendi en iyisini
      döndürür ve panel hangisinin daha iyi olduğunu bilemez. */
   if (VUR.iptalEdildiMi && VUR.iptalEdildiMi(damga)) return { hata: "İptal edildi", kesitler: [] };
-  var finalDilim = adaylar.slice(0, 120);        // token tavanı; puan sırası yok, zaman sırası korunur
+  /* ⚠ TOKEN TAVANI BAŞTAN KESMEZ, EŞİT ARALIKLA SEYRELTİR. `slice(0,120)` videonun ilk
+     parçalarını alıp sonunu tümden atıyordu — "hep başından seçiyor" hatasının ikinci
+     kaynağı buydu (birincisi _butceUygula'daki eşit-puan sıralaması). */
+  var finalDilim = adaylar.slice();
   finalDilim.sort(function (a, b) { return a.bas - b.bas; });
+  if (finalDilim.length > 120) {
+    var seyrek = [], adim = finalDilim.length / 120, sx;
+    for (sx = 0; sx < 120; sx++) seyrek.push(finalDilim[Math.floor(sx * adim)]);
+    finalDilim = seyrek;
+  }
   var adetMin = _sayi(_ayar(opts, "adetMin")), adetMax2 = _sayi(_ayar(opts, "adetMax"));
   var hedef = _sayi(_ayar(opts, "hedefSure"));
   var finalIcerik = "Toplam " + hedef + " saniyelik bir Shorts için " + adetMin + "-" + adetMax2 +

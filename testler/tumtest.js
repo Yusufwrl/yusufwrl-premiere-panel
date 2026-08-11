@@ -1536,13 +1536,44 @@ function bitir() {
     esit("uzun elendi", s4.uzunElenen, 1);
     esit("bütçeyi aşan elendi", s4.sureElenen, 1);
     esit("seçilen kesit sayısı", b.kesitler.length, 3);
-    esit("toplam süre bütçe içinde", b.toplam, 32);
+    /* ⚠ 32 DEĞİL 34 — zaman dağılımı eklendikten sonra bilerek değişti (11 Ağustos 2026).
+       Eski kod bölge kuralı olmadığı için 30. saniyedeki adayı (videonun başı) alıyordu;
+       artık 200. saniyedeki aday kendi bölgesinden geldiği için tercih ediliyor. Yani
+       toplam süre 2 sn arttı ama seçim videonun tamamına yayıldı — istenen tam buydu. */
+    esit("toplam süre bütçe içinde", b.toplam, 34);
     dogru("toplam 42 sn tavanını aşmıyor", b.toplam <= 42);
+    dogru("videonun SONUNDAKİ aday da seçildi (dağılım çalışıyor)",
+          b.kesitler.some(function (k) { return k.bas === 200; }),
+          "seçilenler: " + b.kesitler.map(function (k) { return k.bas; }).join(", "));
 
     /* ⚠ SHORTS KRONOLOJİK AKMALI — puan sırasına göre değil zaman sırasına dizilmeli. */
     var artan = true;
     for (var q = 1; q < b.kesitler.length; q++) if (b.kesitler[q].bas < b.kesitler[q - 1].bas) artan = false;
     dogru("kesitler ZAMAN sırasına dizildi (puan sırasına değil)", artan);
+
+    /* --- ZAMAN DAĞILIMI (kullanıcı: "dümdüz videonun başını almışsın", 11 Ağustos 2026) ---
+       ⚠ ASIL NÖBETÇİ. Model adayların çoğuna AYNI puanı verdiğinde eski kod sıralamayı
+       tamamen zamana düşürüyor ve hep videonun başındakileri seçiyordu. Aşağıdaki senaryo
+       tam o durumu kuruyor: 12 adayın HEPSİ 9 puan, video 600 saniyeye yayılmış. */
+    (function () {
+      var s6 = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+      var esitPuan = [];
+      for (var t = 0; t < 12; t++) esitPuan.push({ bas: t * 50, bit: t * 50 + 8, puan: 9 });
+      var b6 = SH._butceUygula(esitPuan, {}, s6);
+      dogru("eşit puanda bile kesit seçildi", b6.kesitler.length >= 3, "olan: " + b6.kesitler.length);
+      /* Videonun ilk çeyreğine YIĞILMAMALI: son kesit videonun ikinci yarısından gelmeli. */
+      var sonKesit = b6.kesitler[b6.kesitler.length - 1];
+      var videoOrta = (0 + (11 * 50 + 8)) / 2;
+      dogru("kesitler videonun BAŞINA yığılmıyor", sonKesit.bas > videoOrta,
+            "son kesit " + sonKesit.bas + " sn, video ortası " + videoOrta.toFixed(0) + " sn");
+      /* Her kesit ayrı bölgeden gelmeli (bölge sayısı = adetMax = 5). */
+      esit("dolu bölge sayısı = seçilen kesit sayısı (her bölgeden bir)",
+           s6.doluBolgeSay, b6.kesitler.length);
+      /* Yayılım gerçekten geniş mi: ilk ve son kesit arası videonun yarısından fazla. */
+      var kapsam = sonKesit.bas - b6.kesitler[0].bas;
+      dogru("seçim videonun geniş bir bölümünü kapsıyor", kapsam > videoOrta,
+            "kapsam " + kapsam + " sn");
+    })();
 
     /* --- adetMax tavanı --- */
     var s5 = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
