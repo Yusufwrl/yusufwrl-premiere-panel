@@ -1721,9 +1721,14 @@
      bkz. o dosyanın başı). Burası yalnız ince bir sarmalayıcı: modül yüklenemezse emoji
      özelliği DURUR, sessizce yanlış konuma emoji koymaz.
      `ust` parametresi Shorts içindir (emoji üstte, altyazı altta — kullanıcı isteği). */
-  function emojiKonum(seqW, seqH, sag, ust) {
+  /* ⚠ BÜTÜN PARAMETRELER GEÇİRİLMEK ZORUNDA — GERÇEK HATA (11 Ağustos 2026).
+     Sarmalayıcı bir ara yalnız (seqW, seqH, sag, ust) alıyordu; Shorts ise beş argümanla
+     çağırıyordu ve 5.'si (`orta`) BURADA SESSİZCE YUTULUYORDU. Emoji "ortada" istenmişken
+     sağ köşeye gidiyordu ve hiçbir test yakalamıyordu: testler doğrudan modülü çağırıyor,
+     yani modül doğru, KÖPRÜ kırıktı. Nöbetçi testi eklendi (imza + gövde metin taraması). */
+  function emojiKonum(seqW, seqH, sag, ust, orta, oran) {
     if (!KONUM) throw new Error("emojikonum.js yüklenemedi — paneli yeniden kur");
-    return KONUM.hesapla(seqW, seqH, sag, ust);
+    return KONUM.hesapla(seqW, seqH, sag, ust, orta, oran);
   }
 
   /* Tarama sonucunda bir karakter anahtarını bul (yoksa null). Eşleşme ASCII üzerinden:

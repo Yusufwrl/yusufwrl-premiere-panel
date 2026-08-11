@@ -1279,6 +1279,34 @@ function bitir() {
 
     esit("sabitler korundu (ORAN kullanıcı onaylı)", [K.ORAN, K.BOSLUK_X, K.BOSLUK_Y], [0.574, 0.005, 0]);
 
+    /* ⚠ KÖPRÜ NÖBETÇİSİ — GERÇEK HATA (11 Ağustos 2026). app.js'teki emojiKonum sarmalayıcısı
+       bir ara yalnız 4 parametre alıyordu; Shorts 5 argümanla çağırıyor ve 5.'si (`orta`)
+       sessizce YUTULUYORDU → emoji "ortada" istenmişken sağ köşeye gidiyordu.
+       Modül testleri bunu YAKALAYAMAZ (onlar modülü doğrudan çağırıyor), o yüzden köprünün
+       kendisi metin olarak denetleniyor. */
+    (function () {
+      var a = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+      var m = a.match(/function\s+emojiKonum\s*\(([^)]*)\)\s*\{[\s\S]{0,400}?\n\s*\}/);
+      dogru("app.js'te emojiKonum sarmalayıcısı bulundu", !!m);
+      if (!m) return;
+      var imza = m[1].replace(/\s/g, "");
+      esit("sarmalayıcı imzası TÜM parametreleri alıyor", imza, "seqW,seqH,sag,ust,orta,oran");
+      dogru("sarmalayıcı hepsini modüle GEÇİRİYOR",
+            /KONUM\.hesapla\(\s*seqW\s*,\s*seqH\s*,\s*sag\s*,\s*ust\s*,\s*orta\s*,\s*oran\s*\)/.test(m[0]),
+            "gövde: " + m[0].replace(/\s+/g, " ").slice(0, 160));
+      /* Shorts gerçekten `orta` istiyor mu — çağrı tarafı da denetlensin. */
+      dogru("Shorts emojisi ORTA modda çağırıyor",
+            /emojiKonum\(\s*hs\.w\s*,\s*hs\.h\s*,\s*true\s*,\s*true\s*,\s*true\s*\)/.test(a));
+      /* ⚠ Shorts'ta preset ÇAĞRILMAMALI (kullanıcı: "efektsiz istiyorum"). */
+      var shortsBlok = a.slice(a.indexOf("async function shortsEmojiKoy"));
+      shortsBlok = shortsBlok.slice(0, shortsBlok.indexOf("function _shortsSaat"));
+      dogru("Shorts emoji yolunda presetYaz ÇAĞRISI YOK",
+            shortsBlok.indexOf("evalES('presetYaz") === -1 && shortsBlok.indexOf('evalES("presetYaz') === -1);
+      /* Normal emoji yolunda preset DURUYOR — bozulmadığının kanıtı. */
+      dogru("normal emoji yolunda presetYaz çağrısı DURUYOR",
+            (a.match(/evalES\('presetYaz\(/g) || []).length >= 2);
+    })();
+
     /* --- YATAY: DEĞİŞMEMELİ (regresyon kilidi) --- */
     var ys = K.hesapla(1920, 1080, true), yl = K.hesapla(1920, 1080, false);
     esit("yatay 1080p sağ  x", ys.x, 0.836);
@@ -1580,7 +1608,22 @@ function bitir() {
     var cok = [];
     for (var i = 0; i < 20; i++) cok.push({ bas: i * 20, bit: i * 20 + 5, puan: 9 });
     var b5 = SH._butceUygula(cok, {}, s5);
-    dogru("adetMax (5) aşılmıyor", b5.kesitler.length <= 5, "olan: " + b5.kesitler.length);
+    /* ⚠ ADET TAVANI ARTIK SÜRE HEDEFİNE GÖRE GEVŞİYOR (kullanıcı: "30-40 aralığında saniye
+       demiştim", 11 Ağustos 2026). 5 kesit × 5 sn = 25 sn, minSure 28'in altında → 3. geçiş
+       bir kesit daha ekliyor. SERT sınır artık adet değil SÜRE: maxSure asla aşılmaz. */
+    dogru("süre hedefi için adet tavanı gevşiyor", b5.kesitler.length > 5,
+          "olan: " + b5.kesitler.length + " kesit / " + b5.toplam + " sn");
+    dogru("gevşemiş olsa bile maxSure (42) SERT sınır", b5.toplam <= 42, "toplam: " + b5.toplam);
+    dogru("minSure (28) tutturuldu", b5.toplam >= 28, "toplam: " + b5.toplam);
+    dogru("gevşetme SAYILDI (sessiz değil)", s5.adetGevsetildi === b5.kesitler.length);
+    /* Süre zaten yetiyorsa tavan gevşememeli — 3. geçişin koşulu gerçekten çalışıyor mu. */
+    var s5b = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var uzunlar = [];
+    for (var u = 0; u < 20; u++) uzunlar.push({ bas: u * 30, bit: u * 30 + 12, puan: 9 });
+    var b5b = SH._butceUygula(uzunlar, {}, s5b);
+    dogru("süre yetiyorsa adetMax (5) korunuyor", b5b.kesitler.length <= 5,
+          "olan: " + b5b.kesitler.length + " / " + b5b.toplam + " sn");
+    dogru("süre yetiyorsa gevşetme HİÇ olmadı", !s5b.adetGevsetildi);
 
     /* --- dilim metni: numara 1'DEN başlamalı, global indeksten DEĞİL --- */
     var mt = SH._dilimMetni(dilim, 200);

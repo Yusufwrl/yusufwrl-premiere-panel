@@ -41,7 +41,7 @@ var VARSAYILAN = {
   adetMax: 5,
   kesitMin: 4,          // bir kesit en az bu kadar sürsün (daha kısası "an" değil, kırpıntı)
   kesitMax: 14,         // en fazla — tek kesit Shorts'u yemesin
-  elemeAday: 6,         // eleme turunda parça başına kaç aday
+  elemeAday: 8,         // eleme turunda parça başına kaç aday (6'ydı: final turuna az aday kalıyordu)
   parcaCumle: 250,      // emoji.js ile aynı: bir istekte kaç cümle
   metinSiniri: 220,     // cümle metni bu kadar karakterde kesilir (token bütçesi)
   maxTokens: 4000,
@@ -278,6 +278,20 @@ function _butceUygula(adaylar, opts, sayac) {
   for (i = 0; i < sirali.length; i++) {
     if (secili.indexOf(sirali[i]) === -1) dene(sirali[i], false, true);
   }
+  /* ⚠ 3. GEÇİŞ — SÜRE HEDEFİ ADET TAVANINDAN ÖNCELİKLİ (kullanıcı, 11 Ağustos 2026:
+     "30-40 aralığında saniye demiştim"). Shorts 17.9 sn / 2 kesit çıkmıştı: adetMax'a
+     ulaşılmamıştı ama uygun aday kalmamıştı. Kullanıcının asıl ölçüsü SÜRE; kesit sayısı
+     onu tutturmanın aracı. Bu yüzden minSure'ın altında kalındıysa adet tavanı gevşetilir
+     — maxSure yine SERT sınır, yani Shorts asla 42 sn'yi aşmaz. */
+  var minSure = _sayi(_ayar(opts, "minSure"));
+  if (toplam < minSure) {
+    var eskiTavan = adetMax;
+    adetMax = Math.max(adetMax, 8);
+    for (i = 0; i < sirali.length && toplam < minSure; i++) {
+      if (secili.indexOf(sirali[i]) === -1) dene(sirali[i], false, false);
+    }
+    if (secili.length > eskiTavan) sayac.adetGevsetildi = secili.length;
+  }
 
   /* Timeline sırasına diz — Shorts kronolojik akmalı, puan sırasına değil. */
   secili.sort(function (a, b) { return a.bas - b.bas; });
@@ -363,10 +377,16 @@ async function shortsSec(VUR, anahtar, gruplar, opts) {
   }
   var adetMin = _sayi(_ayar(opts, "adetMin")), adetMax2 = _sayi(_ayar(opts, "adetMax"));
   var hedef = _sayi(_ayar(opts, "hedefSure"));
-  var finalIcerik = "Toplam " + hedef + " saniyelik bir Shorts için " + adetMin + "-" + adetMax2 +
-                    " an seç ve puanla. Her an yaklaşık " + _sayi(_ayar(opts, "kesitMin")) + "-" +
-                    _sayi(_ayar(opts, "kesitMax")) + " saniye olmalı.\n\n" +
-                    _dilimMetni(finalDilim, metinSiniri);
+  /* ⚠ MODELDEN GEREKENDEN FAZLA ADAY İSTENİR (8-12), panel bunlardan bütçeye uyanı seçer.
+     Gerçek hata (11 Ağustos 2026): "3-5 an seç" denince model 2-3 aday döndürüyor, biri de
+     çakışma/süre kuralına takılınca Shorts 17.9 saniyeye düşüyordu. Fazla aday BEDAVA —
+     aynı istekte geliyor ve panel zaten adetMax + maxSure ile kendi tavanını uyguluyor. */
+  var finalIcerik = "Toplam " + hedef + " saniyelik bir Shorts kurulacak (en az " +
+                    _sayi(_ayar(opts, "minSure")) + " sn). Bana 8-12 ADAY an seç ve puanla — " +
+                    "hepsi kullanılmayacak, ben en iyilerinden " + adetMin + "-" + adetMax2 +
+                    " tanesini seçip birleştireceğim. Her an yaklaşık " +
+                    _sayi(_ayar(opts, "kesitMin")) + "-" + _sayi(_ayar(opts, "kesitMax")) +
+                    " saniye olmalı.\n\n" + _dilimMetni(finalDilim, metinSiniri);
   var finalMetin;
   try {
     finalMetin = await VUR.istekGonder(anahtar, _govde(SISTEM_FINAL, finalIcerik, opts), opts, damga, log);
