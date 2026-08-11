@@ -593,28 +593,54 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
    Kullanıcı isteği: "o klibe uygun en çok izlenecek başlığı bulacak, emojiyi ve hashtagleri
    ekleyecek, sonra Shorts'a özel etiket üretecek, biz oradan direkt kopyalayabilecez."
    Örnek biçim: EJDERHA Sen KIZLARI ETKİLEDİN !! 😍 #shorts #minecraft */
+/* ⚠ BAŞLIK İSTEMİ KULLANICI GERİ BİLDİRİMİYLE İKİ KEZ SIKILAŞTIRILDI (11 Ağustos 2026).
+   İlk sürüm "merak uyandır, 60 karakter" diyordu ve şu çıktı geldi:
+       "Yetimhaneden KAÇIYORUZ !! Kimse Bizi Sahiplenmedi 😢"
+   Kullanıcı reddetti: "yetimhaneden kaçıyoruz değil de böyle daha ilgi çekici şeyler olmalı".
+   Sorun ölçülebilir: (a) olayı ANLATIYOR, merak bırakmıyor · (b) 50 karakter, iki satıra
+   taşıyor · (c) izleyiciye seslenmiyor.
+   Kullanıcının verdiği ÖRNEK bunların üçünü de çözüyor:
+       EJDERHA Sen KIZLARI ETKİLEDİN !! 😍     (35 karakter, "Sen" var, sonucu ima ediyor)
+   Aşağıdaki kurallar o örnekten TÜRETİLDİ — gevşetirken bu tarihçeyi oku. */
 var SISTEM_BASLIK =
-  "Sen YouTube Shorts başlığı yazan bir uzmansın. Türkçe, Minecraft/Roblox içerikleri.\n\n" +
-  "Sana bir Shorts'un konuşma metni veriliyor. Üreteceklerin:\n\n" +
-  "1) BAŞLIK — tıklanma için yazılmış, MERAK uyandıran, kısa (en fazla 60 karakter).\n" +
-  "   · Büyük harf VURGU için kullanılır ama tamamı büyük olmaz\n" +
-  "   · Sonunda 1-2 emoji\n" +
-  "   · Ünlem serbest (!!)\n" +
-  "   · İçeriği ANLATMA, merak uyandır: \"ne olduğunu\" değil \"ne olacağını\" hissettir\n" +
-  "   · Örnek biçim: EJDERHA Sen KIZLARI ETKİLEDİN !! 😍\n" +
-  "2) HASHTAG — 3-5 tane, #shorts MUTLAKA olsun, oyun adı olsun (#minecraft/#roblox), " +
-  "   kalanı içerikle ilgili. Küçük harf, Türkçe karakter YOK.\n" +
-  "3) ETIKETLER — YouTube \"tags\" alanı için 12-18 arama terimi. Virgülle ayrılacak, " +
-  "   küçük harf. Karışım: oyun adı, içerik türü, karakter adları, arama kalıpları " +
-  "   (\"minecraft komik anlar\" gibi). Hashtag işareti KOYMA.\n\n" +
-  "Metinde geçen karakter adlarını kullan. Uydurma olay ekleme.";
+  "Sen YouTube Shorts başlığı yazan bir uzmansın. Türkçe, Minecraft/Roblox içerikleri, " +
+  "hedef kitle 8-14 yaş.\n\n" +
+  "Sana bir Shorts'un konuşma metni veriliyor.\n\n" +
+  "═══ BAŞLIK KURALLARI (hepsi ZORUNLU) ═══\n" +
+  "1. EN FAZLA 42 KARAKTER (emoji dahil). Tek satıra sığmalı. Uzun başlık kesilir.\n" +
+  "2. İZLEYİCİYE SESLEN: \"Sen\", \"Sana\", \"Senin\" geçsin — izleyici olayın içinde hissetsin.\n" +
+  "3. 1-2 kelime TAMAMEN BÜYÜK HARF (vurgu). Tamamı büyük OLMASIN.\n" +
+  "4. Sonunda TEK emoji.\n" +
+  "5. \"!!\" kullanabilirsin.\n" +
+  "6. OLAYI ANLATMA — SONUCU İMA ET. İzleyici \"ne olmuş?\" diye merak edip tıklamalı.\n\n" +
+  "═══ İYİ ÖRNEKLER ═══\n" +
+  "  EJDERHA Sen KIZLARI ETKİLEDİN !! 😍\n" +
+  "  Sana TUZAK Kurdular ve KAÇAMADIN 😱\n" +
+  "  Bu KAFESTEN Çıkamazsın Sandılar 🔓\n" +
+  "  Seni KANDIRDILAR ama Fark Ettin 👀\n\n" +
+  "═══ KÖTÜ ÖRNEKLER (ve nedeni) ═══\n" +
+  "  \"Yetimhaneden Kaçıyoruz Kimse Bizi Sahiplenmedi\" → olayı anlatıyor, merak bırakmıyor, " +
+  "çok uzun, izleyiciye seslenmiyor\n" +
+  "  \"Minecraft'ta Ev Yaptık\" → hiçbir merak yok\n" +
+  "  \"ÇOK KOMİK ANLAR\" → içerikle ilgisi yok, herkes yazıyor\n\n" +
+  "═══ OYUN ═══\n" +
+  "Metne bakıp oyunu belirle: \"minecraft\" mı \"roblox\" mu. Emin değilsen \"minecraft\" yaz.\n\n" +
+  "═══ ETİKETLER ═══\n" +
+  "YouTube \"tags\" alanı için 12-18 arama terimi. Küçük harf, hashtag işareti YOK. " +
+  "Karışım: oyun adı, içerik türü, karakter adları, gerçek arama kalıpları " +
+  "(\"minecraft komik anlar\", \"minecraft türkçe\" gibi).\n\n" +
+  "Metinde geçen karakter adlarını kullanabilirsin. Uydurma olay EKLEME.";
 
 var SEMA_BASLIK = {
   type: "object", additionalProperties: false,
-  required: ["baslik", "hashtagler", "etiketler"],
+  required: ["baslik", "oyun", "etiketler"],
   properties: {
     baslik: { type: "string" },
-    hashtagler: { type: "array", items: { type: "string" } },
+    /* ⚠ HASHTAG MODELDEN İSTENMİYOR — kullanıcı isteği: "hashtagde sadece #shorts ve
+       #minecraft yazsın, onlara başka yazmaya gerek yok". Model serbest bırakılınca
+       #yetimhane #dostluk #sahiplenme gibi kimsenin aramadığı etiketler ekliyor ve
+       başlık satırı ikiye taşıyordu. Panel yalnız oyunu soruyor, hashtag'i KENDİ kuruyor. */
+    oyun: { type: "string" },
     etiketler: { type: "array", items: { type: "string" } }
   }
 };
@@ -634,30 +660,45 @@ async function baslikUret(VUR, anahtar, metin, opts) {
     var m = String(cevap).match(/\{[\s\S]*\}/);
     if (m) { try { j = JSON.parse(m[0]); } catch (e3) { j = null; } }
   }
+  return _baslikCoz(j);
+}
+
+/* Model cevabını panel kurallarına göre çözer — AĞ YOK, test edilebilir. */
+function _baslikCoz(j) {
   if (!j || !j.baslik) return { hata: "Başlık çözülemedi" };
-  var ht = (j.hashtagler || []).map(function (h) {
-    h = String(h).replace(/^#+/, "").trim().toLowerCase();
-    return h ? ("#" + h) : "";
-  }).filter(Boolean);
-  /* ⚠ #shorts GARANTİ — kullanıcının verdiği biçimde var ve YouTube'da Shorts olarak
-     sınıflanması için gerekiyor. Model unutursa panel ekler. */
-  if (ht.indexOf("#shorts") === -1) ht.unshift("#shorts");
+
+  /* ⚠ HASHTAG PANELDE KURULUR, MODELDEN GELMEZ (kullanıcı isteği: "sadece #shorts ve
+     #minecraft yazsın"). Model yalnız oyunu söylüyor; serbest bırakılınca kimsenin
+     aramadığı etiketler ekleyip başlığı ikinci satıra taşıyordu. */
+  var oyun = String(j.oyun || "").toLowerCase().replace(/[^a-z]/g, "");
+  if (oyun !== "roblox") oyun = "minecraft";        // emin değilse minecraft (kullanıcının ana oyunu)
+  var ht = ["#shorts", "#" + oyun];
+
+  var baslik = String(j.baslik).trim();
+  /* ⚠ UZUNLUK FRENİ PANELDE — istemde "en fazla 42 karakter" yazıyor ama model bunu
+     aşabiliyor ve uzun başlık kutuda ikinci satıra taşıyor (kullanıcı bildirdi).
+     Kesmek yerine SAYIYI döndürüyoruz: kesmek cümlenin ortasında bırakır ve emojiyi yer;
+     panel uzunluğu gösterip kullanıcıya kararı bırakıyor. */
+  var uzun = baslik.length > 42;
+
   var et = (j.etiketler || []).map(function (t) {
     return String(t).replace(/^#+/, "").trim().toLowerCase();
   }).filter(Boolean);
   return {
-    baslik: String(j.baslik).trim(),
+    baslik: baslik,
+    oyun: oyun,
     hashtagler: ht,
     etiketler: et,
-    /* Kopyala-yapıştır satırı: başlık + hashtagler (kullanıcının örnek biçimi). */
-    tamBaslik: String(j.baslik).trim() + " " + ht.join(" ")
+    uzun: uzun,
+    /* Kopyala-yapıştır satırı: başlık + iki hashtag (kullanıcının örnek biçimi). */
+    tamBaslik: baslik + " " + ht.join(" ")
   };
 }
 
 module.exports = {
   MODEL: MODEL, VARSAYILAN: VARSAYILAN, SEMA: SEMA,
   shortsSec: shortsSec, coklukSec: coklukSec, baslikUret: baslikUret,
-  _bolumCoz: _bolumCoz,
+  _bolumCoz: _bolumCoz, _baslikCoz: _baslikCoz, SISTEM_BASLIK: SISTEM_BASLIK,
   // test edilebilirlik için iç parçalar
   cumleleriTopla: cumleleriTopla, _cevapCoz: _cevapCoz, _butceUygula: _butceUygula,
   _dilimMetni: _dilimMetni

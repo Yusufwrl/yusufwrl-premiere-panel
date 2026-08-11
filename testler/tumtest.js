@@ -1677,6 +1677,51 @@ function bitir() {
       esit("bölüm çözme GİRDİYİ değiştirmedi", JSON.stringify(d), JSON.stringify(dilimKur()));
     })();
 
+    /* --- BAŞLIK / HASHTAG (kullanıcı isteği, 11 Ağustos 2026) ---
+       ⚠ İKİ KEZ DÜZELTİLDİ: (1) model serbest hashtag ekliyordu (#yetimhane #dostluk
+       #sahiplenme) ve başlık satırı ikiye taşıyordu → "sadece #shorts ve #minecraft yazsın";
+       (2) başlık olayı anlatıyordu ("Yetimhaneden KAÇIYORUZ...") → "daha ilgi çekici olmalı".
+       Hashtag artık MODELDEN GELMİYOR, panel kuruyor. */
+    (function () {
+      var iyi = SH._baslikCoz({ baslik: "Sana TUZAK Kurdular ve KAÇAMADIN 😱",
+                                oyun: "Minecraft", etiketler: ["#Minecraft", "komik anlar"] });
+      esit("hashtag YALNIZ iki tane", iyi.hashtagler, ["#shorts", "#minecraft"]);
+      esit("tam başlık biçimi", iyi.tamBaslik,
+           "Sana TUZAK Kurdular ve KAÇAMADIN 😱 #shorts #minecraft");
+      dogru("42 karakter altı UZUN sayılmıyor", iyi.uzun === false, iyi.baslik.length + " karakter");
+      esit("etiketlerden # temizlendi", iyi.etiketler, ["minecraft", "komik anlar"]);
+
+      /* ⚠ MODEL HASHTAG GÖNDERSE BİLE PANEL EKLEMEZ — asıl düzeltme bu. */
+      var kirli = SH._baslikCoz({ baslik: "x", oyun: "minecraft",
+                                  hashtagler: ["#yetimhane", "#dostluk", "#sahiplenme"],
+                                  etiketler: [] });
+      esit("modelin gönderdiği fazla hashtag YOK SAYILIYOR", kirli.hashtagler,
+           ["#shorts", "#minecraft"]);
+
+      var uzunB = SH._baslikCoz({ baslik: "Yetimhaneden KAÇIYORUZ !! Kimse Bizi Sahiplenmedi 😢",
+                                  oyun: "", etiketler: [] });
+      dogru("42 karakteri aşan başlık UZUN işaretleniyor", uzunB.uzun === true,
+            uzunB.baslik.length + " karakter");
+      dogru("uzun başlık KESİLMİYOR (cümle ortasında bırakmaz)",
+            uzunB.baslik.indexOf("Sahiplenmedi") !== -1);
+      esit("oyun boşsa minecraft'a düşer", uzunB.hashtagler, ["#shorts", "#minecraft"]);
+      esit("roblox tanınıyor", SH._baslikCoz({ baslik: "x", oyun: "ROBLOX", etiketler: [] }).hashtagler,
+           ["#shorts", "#roblox"]);
+      esit("bilinmeyen oyun minecraft'a düşer",
+           SH._baslikCoz({ baslik: "x", oyun: "fortnite", etiketler: [] }).hashtagler,
+           ["#shorts", "#minecraft"]);
+      dogru("başlıksız cevap hata döndürür", !!SH._baslikCoz({ oyun: "minecraft" }).hata);
+
+      /* İstemin kullanıcı örneğini ve yasakladığı örneği İÇERMESİ — istem gevşetilirse
+         bu test kırmızı olur ve tarihçe hatırlanır. */
+      dogru("istem kullanıcının ÖRNEK başlığını içeriyor",
+            SH.SISTEM_BASLIK.indexOf("EJDERHA Sen KIZLARI ETKİLEDİN") !== -1);
+      dogru("istem reddedilen örneği KÖTÜ olarak gösteriyor",
+            SH.SISTEM_BASLIK.indexOf("Yetimhaneden") !== -1);
+      dogru("istem 42 karakter sınırını söylüyor", SH.SISTEM_BASLIK.indexOf("42 KARAKTER") !== -1);
+      dogru("istem izleyiciye seslenmeyi şart koşuyor", SH.SISTEM_BASLIK.indexOf("İZLEYİCİYE SESLEN") !== -1);
+    })();
+
     /* --- shortsAdet varsayılanı kullanıcı isteğiyle 5 --- */
     esit("çoklu Shorts varsayılan adedi", SH.VARSAYILAN.shortsAdet, 5);
     dogru("coklukSec dışa açık", typeof SH.coklukSec === "function");

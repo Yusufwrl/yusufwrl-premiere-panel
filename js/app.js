@@ -3408,14 +3408,19 @@
         blok.appendChild(h); kutu.appendChild(blok); return;
       }
       /* Üç ayrı kopyalanabilir alan: başlık+hashtag, yalnız etiketler. */
-      [["Başlık", k.tamBaslik], ["Etiketler (tags)", (k.etiketler || []).join(", ")]].forEach(function (p) {
+      /* ⚠ BAŞLIK UZUNLUĞU GÖSTERİLİYOR. Kullanıcı "tek satır olsun" dedi; model 42 karakteri
+         aşarsa panel kesmiyor (cümlenin ortasında bırakır ve emojiyi yer) ama SÖYLÜYOR. */
+      var basEtiket = "Başlık" + (k.baslik ? ("  (" + k.baslik.length + " karakter" +
+                      (k.uzun ? " — UZUN, ikinci satıra taşabilir" : "") + ")") : "");
+      [[basEtiket, k.tamBaslik], ["Etiketler (tags)", (k.etiketler || []).join(", ")]].forEach(function (p) {
         var s = document.createElement("div");
         s.style.cssText = "margin-bottom:8px";
         var lbl = document.createElement("div");
         lbl.className = "note"; lbl.style.margin = "0 0 4px";
+        if (k.uzun && p[0] === basEtiket) lbl.style.color = "var(--warn)";
         lbl.textContent = p[0];
         var ta = document.createElement("textarea");
-        ta.className = "dict-text"; ta.rows = (p[0] === "Başlık") ? 2 : 3;
+        ta.className = "dict-text"; ta.rows = (p[0] === basEtiket) ? 2 : 3;
         ta.readOnly = true; ta.value = p[1] || "";
         ta.addEventListener("focus", function () { this.select(); });
         var btn = document.createElement("button");
