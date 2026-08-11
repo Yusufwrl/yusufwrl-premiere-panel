@@ -1305,6 +1305,22 @@ function bitir() {
       /* Normal emoji yolunda preset DURUYOR — bozulmadığının kanıtı. */
       dogru("normal emoji yolunda presetYaz çağrısı DURUYOR",
             (a.match(/evalES\('presetYaz\(/g) || []).length >= 2);
+
+      /* ⚠ ÇOKLU SHORTS: HER TURDAN SONRA KAYNAK SEKANSA DÖNÜŞ — GERÇEK HATA (11 Ağustos 2026).
+         shortsSekansKur yeni Shorts'u AKTİF bırakıyor (tekli için doğru). Çoklu döngüde ikinci
+         tur başlarken activeSequence 20 saniyelik Shorts oluyor ve kaynak videodaki 211./243./
+         334./559. saniyeler orada yok — kullanıcının denemesinde 5 Shorts'un 4'ü "hiçbir klibe
+         denk gelmiyor" diye düştü. Bu üç satır o düzeltmeyi kilitliyor. */
+      var cokluBlok = a.slice(a.indexOf("async function cokluUret"));
+      cokluBlok = cokluBlok.slice(0, cokluBlok.indexOf("function shortsGruplariTopla"));
+      dogru("çoklu döngü kaynak sekansa GERİ DÖNÜYOR",
+            /openSequence\("'\s*\+\s*kaynakId/.test(cokluBlok));
+      dogru("geri dönüş GERİ OKUNARAK doğrulanıyor",
+            cokluBlok.indexOf("activeSequence.name") !== -1);
+      dogru("dönülemezse döngü DURUYOR (sessizce yanlış sekanstan kesmiyor)",
+            /geri !== kaynakAd[\s\S]{0,400}?break;/.test(cokluBlok));
+      dogru("kaynak sekans adı BAŞTA okunuyor (ad karşılaştırması için)",
+            a.indexOf("kaynakAd = String(await evalES") !== -1);
     })();
 
     /* --- YATAY: DEĞİŞMEMELİ (regresyon kilidi) --- */

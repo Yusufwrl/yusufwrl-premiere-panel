@@ -3621,7 +3621,14 @@
     var btn = $("btnCokluUret"); if (btn) btn.disabled = true;
     _shortsIptal = false;
     var bIptal = $("btnCokluIptal"); if (bIptal) bIptal.hidden = false;
-    var kaynakId = "";
+    var kaynakId = "", kaynakAd = "";
+    /* ⚠ KAYNAK SEKANSIN ADI BAŞTA OKUNUR. Geri dönüşü "adı Shorts N değilse tamam" diye
+       denetlemek kırılgan: kullanıcının kaynak sekansı da "Shorts 1" adında olabilir.
+       Gerçek adla karşılaştırmak tek doğru yol. */
+    try {
+      kaynakAd = String(await evalES(
+        '(function(){try{return String(app.project.activeSequence.name);}catch(e){return "";}})()'));
+    } catch (eKa) { kaynakAd = ""; }
     shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", []);
     try {
       var adet = parseInt(($("cokluAdet") || {}).value || "5", 10) || 5;
@@ -3661,6 +3668,34 @@
         }
         if (!kaynakId) kaynakId = String(r.hs.kaynakId || "");
         sonuclar.push({ baslik: sh.baslik, ozet: r.ozet, kismi: r.kismi, ad: r.hs.ad });
+
+        /* ⚠⚠ HER TURDAN SONRA KAYNAK SEKANSA DÖN — YOKSA SONRAKİ TURLARIN HEPSİ ÖLÜR.
+           GERÇEK HATA (11 Ağustos 2026): `shortsSekansKur` işini bitirince yeni Shorts'u
+           AKTİF bırakıyor (tekli akışta doğru — kullanıcı sonucu görmeli). Çoklu döngüde
+           ikinci tur başlarken activeSequence artık 20 saniyelik Shorts 1 oluyor ve kaynak
+           videodaki 211./243./334./559. saniyeler orada YOK: host haklı olarak "hiçbir klibe
+           denk gelmiyor" diyor. Kullanıcının denemesinde 5 Shorts'un 4'ü bu yüzden düştü.
+           ⚠ GERİ DÖNÜŞ GERİ OKUNARAK DOĞRULANIR: openSequence sessizce başarısız olursa
+           sonraki tur yine yanlış sekansta kesit arar ve aynı hata "kesit zamanları bayat"
+           diye görünür — yani sebep gizlenir. */
+        if (kaynakId && i + 1 < bol.shortslar.length) {
+          var geri = "";
+          try {
+            await evalES('app.project.openSequence("' + kaynakId + '")');
+            /* try/catch ExtendScript İÇİNDE: activeSequence null olabiliyor ve çıplak
+               ifade "EvalScript error" döndürüp sebebi gizlerdi. */
+            geri = String(await evalES(
+              '(function(){try{return String(app.project.activeSequence.name);}catch(e){return "";}})()'));
+          } catch (eG) { geri = ""; }
+          logLine("Çoklu Shorts: kaynak sekansa dönüldü → " + (geri || "okunamadı") +
+                  (kaynakAd ? (" (beklenen: " + kaynakAd + ")") : ""));
+          if (!geri || (kaynakAd && geri !== kaynakAd)) {
+            yaz("⚠ Kaynak sekansa dönülemedi (şu an: " + (geri || "?") + ") — kalan Shorts'lar " +
+                "yanlış sekanstan kesilirdi, durduruldu.", "var(--bad)");
+            logLine("Çoklu Shorts DURDU: aktif sekans kaynağa dönmedi.");
+            break;
+          }
+        }
         /* ── BAŞLIK / HASHTAG / ETİKET ──
            ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır: sekans zaten kuruldu ve
            kullanıcı başlığı elle de yazabilir. */
