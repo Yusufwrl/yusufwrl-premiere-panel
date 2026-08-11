@@ -245,6 +245,21 @@
             <input type="checkbox" id="chkCakisma">
           </label>
           <p class="note" style="margin-top:8px">Önce altyazının <b>bitişi kırpılır</b> — başlangıç zamanına dokunulmaz, yani sesle bağı bozulmaz. Kırpmak yetmezse (iki kişi gerçekten aynı anda konuşuyorsa) <b>alt sıradaki karakterin</b> o altyazısı gizlenir; kaç tane ve kimden gizlendiği sonuçta yazar. Kutuyu kapatırsan hiçbir şey gizlenmez, üst üste binenler yalnızca sayılır.<br>Hiç altyazı kaybetmeden çözmek istersen: Premiere'de her altyazı kanalına <b>farklı dikey konum</b> ver (Track Style), sonra bu kutuyu kapat.</p>
+
+          <!-- ⚠ HIZLI MOD — DENEYSEL, VARSAYILAN KAPALI.
+               `--batched` desteği pipeline.js'te yazılıydı ama hiçbir yerden açılmıyordu.
+               Faster-Whisper'ın batched inference'ı tipik olarak 2-4 kat hızlandırıyor.
+               AMA: panel `--word_timestamps true` kullanıyor ve bütün cue mantığı ona bağlı;
+               batched modun kelime damgalarıyla uyumu BU MOTOR SÜRÜMÜNDE ÖLÇÜLMEDİ.
+               Bozuksa altyazı zamanları kayar ve ancak video izlenirken fark edilir — bu
+               yüzden varsayılan KAPALI ve kutu ne olduğunu açıkça söylüyor. -->
+          <label class="switch-row" style="margin-top:14px">
+            <span>Hızlı mod <small>(deneysel — 2-4 kat hızlı olabilir)</small></span>
+            <input type="checkbox" id="chkBatched">
+          </label>
+          <p class="note" style="margin-top:8px">Motorun <b>toplu işleme</b> kipini açar. Uzun videolarda süreyi belirgin kısaltır.
+            <b style="color:var(--warn)">⚠ İlk kez kullanıyorsan tek kanalda dene ve altyazının sesle uyumunu kontrol et.</b>
+            Bu kip kelime zaman damgalarını farklı üretebiliyor; bu motor sürümünde ölçülmedi. Zamanlar kayarsa kutuyu kapat, altyazıyı yeniden üret.</p>
         </div>
 
 

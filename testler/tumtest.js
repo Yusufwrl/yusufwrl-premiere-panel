@@ -1081,6 +1081,18 @@ function bitir() {
     /* ⚠ EMOJİ KONUŞMANIN BAŞINDA (kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne zaman
        geliyo, ses dalgasına bak"). Ölçülen: ses 02:11'de, emoji 02:13'te — 5 kelime filtresi
        kısa açılış cümlelerini elediği için emoji geç görünüyordu. */
+    /* ⚠ HIZLI MOD (--batched): destek pipeline.js'te yazılıydı ama hiçbir yerden AÇILMIYORDU
+       (kullanıcı sordu, 11 Ağustos 2026: "altyazıyı hızlandıramaz mıyız"). Artık trOpts'tan
+       geçiyor. VARSAYILAN KAPALI olmak ZORUNDA: batched modun word_timestamps ile uyumu bu
+       motor sürümünde ölçülmedi, bozuksa altyazı zamanları kayar. */
+    dogru("hızlı mod trOpts'tan motora geçiyor", /batched:\s*\(function/.test(a));
+    dogru("hızlı mod kutusu HTML'de var",
+          fs.readFileSync(path.join(KOK, "index.html"), "utf8").indexOf("id=\"chkBatched\"") !== -1);
+    dogru("hızlı mod VARSAYILAN KAPALI", /lsGet\("batchedMod", "0"\)/.test(a),
+          "varsayılan açık olursa ölçülmemiş bir kip sessizce devreye girer");
+    dogru("pipeline --batched argümanını gerçekten gönderiyor",
+          /opts\.batched[\s\S]{0,60}"--batched"/.test(fs.readFileSync(path.join(KOK, "js", "pipeline.js"), "utf8")));
+
     dogru("emoji öne çekme sabitleri tanımlı",
           /var EMOJI_ONE_CEK = [\d.]+/.test(a) && /var EMOJI_KESINTI = [\d.]+/.test(a));
     dogru("öne çekme SINIRLI (tavanı aşınca duruyor)",

@@ -656,6 +656,18 @@
     var c = $("chkCakisma"); if (!c) return;
     c.checked = (lsGet("cakismaGizle", "1") === "1");
     c.addEventListener("change", function () { lsSet("cakismaGizle", c.checked ? "1" : "0"); });
+    /* ⚠ HIZLI MOD VARSAYILAN KAPALI ("0") — deneysel ve zamanları bozabilir. Seçim
+       hatırlanıyor ama açılışta kendiliğinden AÇILMIYOR. */
+    var b = $("chkBatched");
+    if (b) {
+      b.checked = (lsGet("batchedMod", "0") === "1");
+      b.addEventListener("change", function () {
+        lsSet("batchedMod", b.checked ? "1" : "0");
+        logLine(b.checked
+          ? "Hızlı mod AÇIK (--batched): motor toplu işleme kipinde çalışacak. İlk kullanımda altyazının sesle uyumunu kontrol et."
+          : "Hızlı mod kapalı — motor normal kipte çalışıyor.");
+      });
+    }
   }
 
   function wireVurucu() {
@@ -4089,6 +4101,13 @@
        Türkçe'de belirgin kötü, sansürü kapatmak da YouTube için istenmiyor. */
     var o = { model: cfg.model || "large-v3", language: cfg.language, diarize: false,
       censor: "all",
+      /* ⚠ HIZLI MOD (--batched) — DENEYSEL, VARSAYILAN KAPALI.
+         Destek pipeline.js'te yazılıydı ama hiçbir yerden AÇILMIYORDU; batched inference
+         tipik olarak 2-4 kat hızlandırıyor. Ama panel `--word_timestamps true` kullanıyor ve
+         bütün cue mantığı ona bağlı — batched modun kelime damgalarıyla uyumu BU MOTOR
+         SÜRÜMÜNDE ÖLÇÜLMEDİ. Bozuksa zamanlar kayar ve ancak video izlenirken fark edilir,
+         o yüzden kullanıcı bilerek açıyor ve kutu bunu söylüyor. */
+      batched: (function () { var c = $("chkBatched"); return !!(c && c.checked); })(),
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
     /* KELİME TAVANI HER ZAMAN 2 (kullanıcı isteği): ekranın altındaki Minecraft hotbar'ını
        aşacak uzunlukta satır istenmiyor. Eskiden yalnız Shorts'ta 2'ydi, normal videoda
