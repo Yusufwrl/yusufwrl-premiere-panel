@@ -1,5 +1,14 @@
 # PremiereExtension — Yusufwrl Altyazı Paneli
 
+## ⚠⚠ ALTYAZI VE EMOJİ AYARLARI DONDURULDU (11 Ağustos 2026, v1.11.0)
+Kullanıcının kendi sözleri: *"bundan sonra doğru çalışıyo, her zaman bu ayarlarda kalsın. **ben desem bile 2 kere sormadan değiştirme.**"*
+- **Her ayar değişikliği İKİ ONAY ister.** Önce ayarın bugünkü değerinin NEDEN öyle olduğunu söyle, onay al; uygulamadan hemen önce bir kez daha sor.
+- Bu, "kapsamlı işte tam yetki, ara onay sorma" kuralının **açık istisnasıdır**.
+- Değiştirirsen eski değeri koda yorum olarak yaz: *"ÖNCEKİ: N — kullanıcı iki onayla M'ye çekti (tarih)"*.
+- **Sebep:** bu sayılar bir günde onlarca turda gerçek videolarla oturdu. Emoji boyutu bir kez "full" yapılıp geri alındı, taraf kararı üç kez döndü, başlık kalıbı iki kez değişti. Her sarkaç dönüşü kullanıcıya bir video, panele bir sürüm kaybettiriyor.
+- Dondurulan değerlerin tam listesi kullanıcı hafızasında (`altyazi-emoji-ayarlari-DONDU`); gerekçeleri aşağıdaki ilgili bölümlerde.
+
+
 Adobe Premiere Pro **CEP uzantısı**. A1 mikrofon kanalındaki Türkçe konuşmayı Faster-Whisper-XXL (large-v3, GPU) ile otomatik **2-3 kelimelik** altyazıya çevirir. Sadece Windows.
 
 ## Yapı
