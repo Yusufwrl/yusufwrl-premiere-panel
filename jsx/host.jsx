@@ -2726,12 +2726,19 @@ function _statikTuttu(pr, beklenen) {
                tabanini bu kadar oteleriz (bkz. asagidaki delta). */
 /* kafaVar (11. arguman, istege bagli): "oynatma kafasina uygula" modu. Verilmezse eski
    davranis birebir korunur — eski cagri yerleri icin ES3'te fazladan parametre sorun degil. */
-function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa, hedefSure, kafaVar) {
+function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz, strateji, sayac, capa, hedefSure, kafaVar, konumAtla) {
     var ps = null, i, j;
     try { ps = hedefBilesen.properties; } catch (e) { if (rapor) rapor.push("properties-yok"); return 0; }
     if (!ps) { if (rapor) rapor.push("properties-bos"); return 0; }
     for (i = 0; i < plist.length; i++) {
         var kayit = plist[i], pr = null;
+        /* ⚠ KONUM ATLAMA: cagiran taraf klibi kendisi konumlandirdiysa preset'in Position/
+           Anchor Point'i onu EZMEMELI. Yalniz bu iki parametre atlanir; Scale/Opacity ve
+           efekt keyframe'leri aynen yazilir (pop-in + shake calismaya devam eder). */
+        if (konumAtla && _spatialMi(kayit.ad)) {
+            if (rapor) rapor.push((kayit.ad || "?") + " (konum atlandi - cagiran kendi koydu)");
+            continue;
+        }
         /* ADI BOS parametrede INDEKSE dus (bkz. presetOkuJSON'daki `ix` notu): ada gore
            arama iki adsiz parametreyi ayni ozellige esliyor ve ikincisi birincinin
            uzerine yaziyordu. Eski kayitlarda `ix` yok -> eski davranis. */
@@ -3078,7 +3085,12 @@ function _yiginOlcekle(veri, k) {
 /* emojiKanal (istege bagli): verilirse hedef klipler SECIMDEN degil O KANALIN TAMAMINDAN
    alinir — emoji yerlestirmesi kendi kanalindaki butun kliplere preset uygulayabilsin diye.
    Verilmezse davranis birebir eskisi gibi (getSelection). */
-function presetYaz(jsonYol, kafaKullan, emojiKanal) {
+/* ⚠ 4. ARGUMAN konumAtla — SHORTS ICIN (kullanici, 11 Agustos 2026: "emoji sag taraf olayi
+   olmasin ... tam ortada dursun"). Kullanicinin "Emoji Sag Taraf" preseti YATAY video icin
+   ogretilmis ve icinde Position var; Shorts'ta panel emojiyi ortaya koyuyor, preset onu
+   SAGA itiyordu. "1" verilince Position/Anchor Point YAZILMAZ, pop-in ve shake gibi
+   Scale/Opacity/efekt animasyonlari aynen gecer. */
+function presetYaz(jsonYol, kafaKullan, emojiKanal, konumAtla) {
     /* UNDO GRUBU: bir preset onlarca keyframe yaziyor. Grup olmadan Ctrl+Z bunlari TEK TEK
        geri aliyor ve kullanicinin 30-40 kez basmasi gerekiyordu. finally ile kapatiliyor —
        arada hata olursa grup ACIK kalir ve kullanicinin sonraki her duzenlemesi ayni gruba
@@ -3279,7 +3291,8 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
                    uretmesin (bkz. _paramlariYaz'daki capaDelta notu). capa'nin kendisi yine
                    kayittan gelir — yalniz zamansal delta sifirlanir. */
                 _paramlariYaz(taze.components[ix], b.p, adaylar, rapor, b.ad,
-                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa, hedefSure, kafaVar);
+                              !_icselMi(b.ad, b.match), strateji, sayac, veri.capa, hedefSure, kafaVar,
+                              (String(konumAtla) === "1"));
             }
             var ad = "?"; try { ad = String(ti.name); } catch (eN) {}
             toplamYaz += sayac.kf; toplamStatik += sayac.st; toplamTemiz += sayac.temiz;

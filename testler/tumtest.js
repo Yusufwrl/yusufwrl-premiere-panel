@@ -748,10 +748,22 @@ function bitir() {
     /* ⚠ TANIMI DEĞİL ÇAĞRIYI DENETLE. Eski regex `_paramlariYaz([^)]*kafaVar)` hem
        `function _paramlariYaz(..., kafaVar)` TANIMINI hem çağrıyı eşliyordu; yani parametre
        eklenip ÇAĞRIDA geçirilmese bile test yeşil kalırdı — tam da yakalaması gereken hata. */
-    dogru("_paramlariYaz tanımı kafaVar alıyor", /function\s+_paramlariYaz\([^)]*kafaVar\s*\)/.test(h));
-    var cagriM = h.match(/_paramlariYaz\(\s*taze\.components\[[\s\S]{0,240}?\);/);
-    dogru("presetYaz ÇAĞRISI kafaVar'ı geçiriyor", !!cagriM && /kafaVar\s*\)/.test(cagriM[0]),
-          cagriM ? ("çağrı: " + cagriM[0].replace(/\s+/g, " ").slice(0, 160)) : "çağrı bulunamadı");
+    dogru("_paramlariYaz tanımı kafaVar alıyor", /function\s+_paramlariYaz\([^)]*kafaVar/.test(h));
+    var cagriM = h.match(/_paramlariYaz\(\s*taze\.components\[[\s\S]{0,300}?\);/);
+    dogru("presetYaz ÇAĞRISI kafaVar'ı geçiriyor",
+          !!cagriM && cagriM[0].indexOf("kafaVar") !== -1,
+          cagriM ? ("çağrı: " + cagriM[0].replace(/\s+/g, " ").slice(0, 200)) : "çağrı bulunamadı");
+    /* ⚠ konumAtla (12. argüman) — Shorts emojisinde preset'in Position'ı paneli ezmesin diye
+       eklendi (kullanıcı: "emoji sağ taraf olayı olmasın, tam ortada dursun"). Tanım, çağrı
+       ve gerçek atlama dalı AYRI AYRI denetlenir: yalnız imzaya bakmak, parametrenin
+       geçirilip hiç KULLANILMAMASI hâlini kaçırırdı (bu testin kendi geçmişindeki hata). */
+    dogru("_paramlariYaz tanımı konumAtla alıyor", /function\s+_paramlariYaz\([^)]*konumAtla\s*\)/.test(h));
+    dogru("presetYaz ÇAĞRISI konumAtla'yı geçiriyor",
+          !!cagriM && cagriM[0].indexOf("konumAtla") !== -1);
+    dogru("konumAtla GERÇEKTEN spatial parametreyi atlıyor",
+          /if\s*\(konumAtla\s*&&\s*_spatialMi\(/.test(h));
+    dogru("presetYaz 4. argüman olarak konumAtla alıyor",
+          /function\s+presetYaz\([^)]*konumAtla\s*\)/.test(h));
     dogru("kafa modunda capaDelta sıfırlanıyor", /if\s*\(kafaVar\)\s*capaDelta\s*=\s*0/.test(h));
     /* Ses klibi süzgeci ÜÇ yolda da olmalı (efektUygula, presetYaz, animasyonUygula). */
     esit("_sesKlibiMi süzgeci üç uygulama yolunda da var",
@@ -1305,6 +1317,21 @@ function bitir() {
           K.hesapla(1080, 1920, true, true, true).x === K.hesapla(1080, 1920, false, true, true).x);
     /* Yatayda orta İSTENMEDİĞİ sürece hiçbir şey değişmiyor — regresyon kilidi. */
     esit("yatayda orta parametresi VERİLMEZSE eski davranış", K.hesapla(1920, 1080, true).x, 0.836);
+
+    /* --- ORAN EZME (Shorts "full emoji", kullanıcı isteği 11 Ağustos 2026) --- */
+    var fullE = K.hesapla(1080, 1920, true, true, true, 1.0);
+    esit("oran 1.0 → emoji kare genişliği kadar", fullE.boyPx, 1080);
+    esit("full emoji hâlâ ortada", fullE.x, 0.5);
+    dogru("full emoji üstte (y küçük)", fullE.y < 0.5, "y=" + fullE.y);
+    /* ⚠ Oran verilmezse varsayılan DEĞİŞMEMELİ — yatay yol bu satıra bağlı. */
+    esit("oran verilmezse varsayılan ORAN", K.hesapla(1080, 1920, true, true, true).boyPx,
+         Math.round(1080 * K.ORAN));
+    esit("geçersiz oran (0) varsayılana düşer",
+         K.hesapla(1080, 1920, true, true, true, 0).boyPx, Math.round(1080 * K.ORAN));
+    /* ⚠ KONUM İLE BOYUT AYNI ORANA OTURMALI: app.js olcekHesapla'ya aynı oranı geçiriyor.
+       Bu test o sözleşmeyi sabitliyor — boyPx gerçekten taban*oran. */
+    esit("boyPx = taban × verilen oran", K.hesapla(1080, 1920, true, true, true, 0.8).boyPx,
+         Math.round(1080 * 0.8));
 
     /* --- ÜST YERLEŞİM (Shorts: emoji üstte, altyazı altta) --- */
     var us = K.hesapla(1080, 1920, true, true);

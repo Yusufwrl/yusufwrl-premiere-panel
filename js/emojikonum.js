@@ -45,9 +45,15 @@ function taban(seqW, seqH) { return Math.min(seqW, seqH); }
  *             false/atlanır = ALT kenara daya (yatay videodaki bugünkü davranış)
  * Dönen x/y Premiere'in NORMALİZE (0..1) Position değerleri — piksel DEĞİL (ölçüldü, 26.3.0).
  */
-function hesapla(seqW, seqH, sag, ust, orta) {
+function hesapla(seqW, seqH, sag, ust, orta, oran) {
   var tb = taban(seqW, seqH);
-  var boyPx = tb * ORAN;
+  /* ⚠ ORAN DIŞARIDAN EZİLEBİLİR — Shorts için (kullanıcı: "emoji de full olmalı").
+     Yatay videodaki 0.574 kullanıcı onaylı ve DEĞİŞMEZ; dikey karede emoji ekranın
+     genişliğini doldurmalı, o yüzden Shorts kendi oranını geçiriyor.
+     ⚠ `olcekHesapla` çağrısına AYNI oran verilmek zorunda, yoksa konum bir orana, boyut
+     başka orana oturur ve emoji hesaplanan yerin dışına taşar. */
+  var kullanilanOran = (typeof oran === "number" && oran > 0) ? oran : ORAN;
+  var boyPx = tb * kullanilanOran;
   var yariPx = boyPx / 2;
   var bosX = Math.round(tb * BOSLUK_X), bosY = Math.round(tb * BOSLUK_Y);
   /* ⚠ ORTA — Shorts için (kullanıcı isteği, 11 Ağustos 2026: "emojiler doğru yerde ama tam

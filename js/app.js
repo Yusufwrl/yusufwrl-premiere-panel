@@ -3432,7 +3432,13 @@
        Ortada olduğu için AYNALAMA DA YAPILMIYOR: ayna "karakter ekranın içine baksın" diye
        vardı, ortadaki bir resmin bakış yönünü çevirmek yalnız asimetrik detayı (yazı,
        tek taraflı aksesuar) ters gösterir. */
-    var konOrta = emojiKonum(hs.w, hs.h, true, true, true);
+    /* ⚠ SHORTS EMOJISI "FULL" (kullanici, 11 Agustos 2026: "emoji de full olmalı").
+       Yatay videodaki 0.574 kullanici onayli ve DEGISMEZ; dikey karede emoji ekranin
+       genisligini doldurmali. 1080x1920'de: 1080 * 1.0 = 1080 px, yani kare genisligi kadar.
+       ⚠ AYNI ORAN olcekHesapla'ya da verilir (asagida) — biri digerinden farkli olursa
+       konum ile boyut ayrisir ve emoji hesaplanan yerin disina tasar. */
+    var SHORTS_EMOJI_ORAN = 1.0;
+    var konOrta = emojiKonum(hs.w, hs.h, true, true, true, SHORTS_EMOJI_ORAN);
     var plan = [], sonBitis = -999;
     sec.secimler.forEach(function (s) {
       var c = indeks[s.sira];
@@ -3446,7 +3452,7 @@
       if (c.bas + sure > hs.sure) sure = hs.sure - c.bas;   // Shorts dışına taşmasın
       if (sure < EMOJI_MIN_SURE) return;
       plan.push([png.yol, kanal, c.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
-                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
+                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), SHORTS_EMOJI_ORAN),
                  png.duygu + " " + png.karakter].join("|"));
       sonBitis = c.bas + sure;
     });
@@ -3491,7 +3497,11 @@
         try {
           fs.writeFileSync(pYol, pYigin, "utf8");
           if (yaz) yaz("emoji animasyonu uygulanıyor: " + presetAd + "…");
-          var pr = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")',
+          /* ⚠ 4. ARGUMAN "1" = KONUM ATLA. Kullanicinin "Emoji Sag Taraf" preseti YATAY
+             video icin ogretilmis ve icinde Position var; Shorts'ta panel emojiyi ortaya
+             koyuyor, preset onu SAGA itiyordu (kullanici bildirdi, 11 Agustos 2026).
+             Pop-in ve shake (Scale/Opacity/efekt keyframe'leri) aynen geciyor. */
+          var pr = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '","1")',
             function (sn) { if (yaz) yaz("emoji animasyonu uygulanıyor… (" + sn + " sn)"); }));
           logLine("Shorts emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + pr);
           presetNot = (pr.indexOf("ok:") === 0) ? (" + " + presetAd)
