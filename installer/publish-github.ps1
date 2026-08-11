@@ -19,6 +19,23 @@ $ErrorActionPreference = "Stop"
 $proj = Split-Path -Parent $PSScriptRoot   # PremiereExtension koku
 Set-Location $proj
 
+# ============================================================================
+#  0) SURUM ONCESI DENETIM - KIRMIZI VARSA YAYINLAMA
+#  GERCEKTEN OLDU (v1.10.5, 11 Agustos 2026): app.js'te bir dizgenin icine gercek
+#  satir sonu kacti, dosya ayristirilamaz hale geldi ve BOZUK HALIYLE YAYINLANDI.
+#  Belirtisi olduruculdu: panel aciliyor, kartlar gorunuyor, hicbir dugme calismiyor.
+#  Daha kotusu: bozuk panel KENDINI GUNCELLEYEMIYOR (guncelleme kontrolu de app.js
+#  icinde), yani ikinci kullanici kilitlendi ve elle kurulum gerekti.
+#  Denetim elle calistiriliyordu ve o gun sozdizimi kontrolu paket icinde YOKTU.
+#  Artik yayin akisi denetimi KENDISI calistiriyor - unutulamaz.
+# ============================================================================
+Write-Host "Surum oncesi denetim calistiriliyor (node testler\tumtest.js)..."
+& node (Join-Path $proj "testler\tumtest.js")
+if ($LASTEXITCODE -ne 0) {
+  throw "DENETIM KIRMIZI - yayinlanmadi. Yukaridaki KALDI satirlarini duzelt, sonra tekrar dene."
+}
+Write-Host "Denetim temiz, yayina devam ediliyor."
+
 # gh cagrilarini PS 5.1 "native stderr = hata" tuzagina dusmeden calistirir; $LASTEXITCODE doner
 function Invoke-Gh {
   param([Parameter(ValueFromRemainingArguments=$true)]$Args)
