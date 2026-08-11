@@ -1078,6 +1078,24 @@ function bitir() {
     dogru("onay reddedilirse Emojileri Sil düğmesine yönlendiriyor",
           /temizOnay[\s\S]{0,400}Emojileri Sil/.test(a));
 
+    /* ⚠ EMOJİ KONUŞMANIN BAŞINDA (kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne zaman
+       geliyo, ses dalgasına bak"). Ölçülen: ses 02:11'de, emoji 02:13'te — 5 kelime filtresi
+       kısa açılış cümlelerini elediği için emoji geç görünüyordu. */
+    dogru("emoji öne çekme sabitleri tanımlı",
+          /var EMOJI_ONE_CEK = [\d.]+/.test(a) && /var EMOJI_KESINTI = [\d.]+/.test(a));
+    dogru("öne çekme SINIRLI (tavanı aşınca duruyor)",
+          /c\.bas - kc\.start > EMOJI_ONE_CEK[\s\S]{0,40}break/.test(a));
+    dogru("araya sessizlik girerse öne çekme DURUYOR (başka repliğe kaymasın)",
+          /kc\.end > EMOJI_KESINTI[\s\S]{0,40}break/.test(a));
+    dogru("plan satırı gerçekBas kullanıyor (c.bas değil)",
+          /plan\.push\(\[pngYol[\s\S]{0,80}gercekBas\.toFixed/.test(a));
+    dogru("çakışma freni de gerçekBas'tan kuruluyor",
+          /sonBitisSag = gercekBas \+ sure/.test(a));
+    dogru("öne çekme sonrası süre tavanı YENİDEN uygulanıyor",
+          /sure \+= \(c\.bas - gercekBas\)[\s\S]{0,400}sure > EMOJI_MAX_SURE/.test(a));
+    dogru("kaynakCues cümleye iliştiriliyor (öne çekme buna bağlı)",
+          (a.match(/k\.kaynakCues = cues/g) || []).length >= 2);
+
     dogru("ilk parçada kanal BOŞ olma kuralı duruyor",
           /if \(!devam\) return "err:V"[\s\S]{0,120}BOS DEGIL/.test(yerBlok));
   })();

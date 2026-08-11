@@ -1629,6 +1629,13 @@
      hesaplandığı için "Bol emoji" seçeneği sözünü tutuyor.
      Kelime sayısı boşluktan sayılır; cue metni cleanPunct'tan geçtiği için noktalama yok. */
   var EMOJI_MIN_KELIME = 5;
+  /* ⚠ EMOJİ KONUŞMANIN BAŞINA ÇEKİLİR (kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne
+     zaman geliyo"). 5 kelime filtresi kısa açılış cümlelerini elediği için emoji ilk sesin
+     2-3 saniye sonrasında görünüyordu. En fazla bu kadar geriye çekilir. */
+  var EMOJI_ONE_CEK = 2.5;
+  /* İki cue arasında bu kadardan uzun sessizlik varsa konuşma KESİLMİŞ sayılır ve öne
+     çekme orada durur — yoksa emoji bambaşka bir repliğin üstüne kayar. */
+  var EMOJI_KESINTI = 0.7;
   /* İKİ EMOJİ ARASI EN AZ BOŞLUK. Artık süre değişken olduğu için fren "başlangıçlar arası
      mesafe" değil "önceki emojinin BİTİŞİ" üzerinden çalışıyor — sabit süre varsayımına
      dayanan eski EMOJI_ARA (2.2) bu yüzden kaldırıldı.
@@ -2037,7 +2044,7 @@
           var dEl = dokum(ad);
           dEl.ham += oncekiSayEl; dEl.kisa += (oncekiSayEl - kayitlar.length); dEl.aday += kayitlar.length;
           if (!kayitlar.length) return;
-          kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; liste.push(k); });
+          kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; k.kaynakCues = cues; liste.push(k); });
           return;
         }
         /* Seçilen karakter klasörden silinmişse seçim GEÇERSİZ — sessizce ada düşme, aşağıdaki
@@ -2085,7 +2092,10 @@
       dN.ham += oncekiSay; dN.kisa += (oncekiSay - kayitlar.length); dN.aday += kayitlar.length;
       if (!kayitlar.length) return;
 
-      kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; liste.push(k); });
+      /* ⚠ kaynakCues: emojiyi konuşmanın başına çekmek için o kanalın cue listesi gerekiyor
+         (bkz. denePlanaEkle'deki öne çekme). Referans tutuluyor, KOPYA DEĞİL — yalnız
+         okunuyor, hiçbir alanı değiştirilmiyor. */
+      kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; k.kaynakCues = cues; liste.push(k); });
     }
 
     /* KARAKTER ADI KANALDAN GELİR — ayrı bir "senin karakterin" ayarı YOK. */
@@ -2702,9 +2712,41 @@
         if (c.bas < (kanal2 < 0 ? sonBitisSag : (sagMi ? sonBitisSag : sonBitisSol)) + EMOJI_GAP) {
           atlanan.yakin++; return false;
         }
+        /* ══ EMOJİ KONUŞMANIN BAŞINDA GÖRÜNSÜN ══
+           GERÇEK ŞİKÂYET (ParsMazi/kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne zaman
+           geliyo, ses dalgasına bak"). Ölçülen durum: ses 02:11'de başlıyor, emoji 02:13'te.
+           SEBEP: emoji SEÇİLEN CÜMLENİN başına konuyor, ama EMOJI_MIN_KELIME (5) filtresi
+           kısa cümleleri eliyor. Konuşma kısa bir cümleyle başlayıp ("Aa!", "Ya ne") uzun
+           cümleye geçince emoji ilk sesin 2-3 saniye SONRASINDA görünüyor — kullanıcı için
+           "emoji geç geldi" demek.
+           ÇÖZÜM: emojiyi, aynı kanalda kesintisiz devam eden konuşmanın BAŞINA çek.
+           ⚠ SINIRLI VE TEK YÖNLÜ: en fazla EMOJI_ONE_CEK saniye ve YALNIZ geriye. Sınırsız
+           öne çekmek emojiyi başka bir konuşmacının cümlesine bindirirdi.
+           ⚠ SÜRE DE BÜYÜR (bas öne gider, bit sabit) — emoji erken gelip aynı yerde bitiyor,
+           yani konuşmanın tamamını kapsıyor. */
+        var gercekBas = c.bas;
+        if (EMOJI_ONE_CEK > 0 && c.kaynakCues && c.kaynakCues.length) {
+          var enErkenC = c.bas, kc, ki2;
+          for (ki2 = c.kaynakCues.length - 1; ki2 >= 0; ki2--) {
+            kc = c.kaynakCues[ki2];
+            if (!kc || !isFinite(kc.start) || !isFinite(kc.end)) continue;
+            if (kc.end > c.bas) continue;                       // cümlenin içinde/sonrasında
+            if (enErkenC - kc.end > EMOJI_KESINTI) break;       // araya sessizlik girmiş: dur
+            if (c.bas - kc.start > EMOJI_ONE_CEK) break;        // tavanı aştı
+            enErkenC = kc.start;
+          }
+          gercekBas = enErkenC;
+        }
+        if (gercekBas < 0) gercekBas = 0;
+        sure += (c.bas - gercekBas);                            // bitiş aynı kalsın
+        /* ⚠ TAVAN YENİDEN UYGULANIR: öne çekme süreyi büyütüyor ve EMOJI_MAX_SURE kontrolü
+           bu satırdan ÖNCE yapılmıştı — kontrolsüz bırakılsa emoji tavanı aşardı.
+           Tavana çarparsa BAŞLANGIÇ korunur (konuşmayla birlikte gelmesi asıl istek),
+           kısalan taraf bitiş olur. */
+        if (sure > EMOJI_MAX_SURE) { sure = EMOJI_MAX_SURE; kisaltilan++; }
         var kon = sagMi ? konSag : konSol;
         var pngYol = sagMi ? png.yol : aynaliYol(png.yol);
-        plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, c.bas.toFixed(3), sure.toFixed(3),
+        plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, gercekBas.toFixed(3), sure.toFixed(3),
                    /* ⚠ ÖLÇEK TABANI KONUM TABANIYLA AYNI OLMAK ZORUNDA. Burada `seqH`
                       geçiliyordu; konum tarafı min(w,h)'ye çevrilince dikey sekansta ikisi
                       AYRIŞIYOR ve emoji hesaplanan yerin dışına taşıyordu (konum 620 px'e
@@ -2733,9 +2775,9 @@
         /* ⚠ FREN TARAF BAŞINA. İki kanal varken sol ve sağ birbirini engellemez —
            "Tofi konuşurken Mimi cevap verdi" durumunda ikisi de ekrana gelir. Tek kanal
            moduna düşüldüyse (kanal2 < 0) ikisi de AYNI freni paylaşır, yani eski davranış. */
-        if (kanal2 < 0) { sonBitisSag = c.bas + sure; sonBitisSol = sonBitisSag; }
-        else if (sagMi) sonBitisSag = c.bas + sure;
-        else sonBitisSol = c.bas + sure;
+        if (kanal2 < 0) { sonBitisSag = gercekBas + sure; sonBitisSol = sonBitisSag; }
+        else if (sagMi) sonBitisSag = gercekBas + sure;
+        else sonBitisSol = gercekBas + sure;
         sureTop += sure;
         return true;
       }
@@ -5002,8 +5044,18 @@
             ekrana çıkacak komşuya kurulur.
          3) Cue KOPYASI üzerinde çalışıyoruz (yukarıdaki kopya bloğu) — panelin listesi,
             oturum dosyası ve emoji süreleri hiç etkilenmez. */
+    /* ⚠ SAYAÇ SONUÇ MESAJINA TAŞINDI (ParsMazi, 11 Ağustos 2026: "kelimeler arası boşluk
+       kalmış ama aynı cümlede"). Köprü sayaçları bugüne kadar YALNIZ log'a yazılıyordu;
+       kullanıcı "boşluk kaldı" diyor ama panel neden kurulmadığını söylemiyordu — üç ayrı
+       sebep var ve üçünün çaresi bambaşka:
+         · uzakBosluk   → boşluk 0.15 sn'den büyük, yani GERÇEK duraklama (doğru davranış)
+         · farkliCumle  → cümle sınırı, bilerek bırakılıyor
+         · kanalEngeli  → o anda başka kanalda altyazı var; köprü kurulsa üst üste binerdi
+       ⚠ Çok karakterli videoda (ParsMazi'de 5 kanal) `kanalEngeli` baskın olabilir ve
+       bu YAPISAL — MAX_KOPRU'yu büyütmek çözmez, yalnız gerçek duraklamaları da kapatır. */
+    var koprü = null;
     if (pipeline && typeof pipeline.cumleBirlestir === "function") {
-      try { pipeline.cumleBirlestir(isler, {}, logLine); }
+      try { koprü = pipeline.cumleBirlestir(isler, {}, logLine); }
       catch (eKp) { logLine("Cümle birleştirme yapılamadı: " + (eKp.message || eKp)); }
     } else logLine("UYARI: cümle birleştirici yok (pipeline.js eski) — altyazılar arasında boşluk kalır.");
 
@@ -5054,6 +5106,18 @@
        Bu yüzden hangi track'in kimin olduğunu yukarıda yazmak ŞART: 4-5 track hepsi "C1, C2…"
        diye görünüyor ve isim olmadan hangisine hangi stili vereceği bilinemez. */
     if (basarili.length > 1) msg += " | Stilleri Premiere'de ver: altyazıya tıkla → Track Style";
+    /* ⚠ KÖPRÜ SAYAÇLARI MESAJDA (ParsMazi: "kelimeler arası boşluk kalmış ama aynı cümlede").
+       Sayaçlar bugüne kadar yalnız log'daydı; kullanıcı boşluk görüyor ama sebebini
+       bilmiyordu. Üç sebebin çaresi bambaşka olduğu için AYRI AYRI yazılıyor. */
+    if (koprü && (koprü.koprulen || koprü.uzakBosluk || koprü.kanalEngeli || koprü.farkliCumle)) {
+      var kp = [];
+      if (koprü.koprulen) kp.push(koprü.koprulen + " boşluk kapatıldı");
+      if (koprü.kanalEngeli) kp.push(koprü.kanalEngeli + " tanesi kapatılamadı (o anda BAŞKA " +
+                                     "kanalda altyazı var, kapatılsa üst üste binerdi)");
+      if (koprü.uzakBosluk) kp.push(koprü.uzakBosluk + " tanesi 0.15 sn'den uzun (gerçek duraklama)");
+      if (koprü.farkliCumle) kp.push(koprü.farkliCumle + " tanesi cümle sınırı");
+      msg += " | kelime arası: " + kp.join(" · ");
+    }
     /* GİZLENEN / ÜST ÜSTE KALAN SAYISI MESAJA GİRER — sessiz geçmek yasak. Gizleme metin
        kaybıdır ve kullanıcı ekranda olmayan bir repliğin panelde BİLEREK düşürüldüğünü ancak
        buradan öğrenir. Kırılım da yazılıyor ("Sage 3 · Mimi 4"): öncelik sabit olduğu için
