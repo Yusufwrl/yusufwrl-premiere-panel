@@ -111,8 +111,23 @@
               <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
             </div>
             <div class="tc-body">
-              <div class="tc-title">Shorts Sekansı</div>
-              <div class="tc-desc">Videonun en iyi anlarından 30-40 sn'lik dikey özet — altyazı ve emoji dahil</div>
+              <div class="tc-title">Tekli Shorts</div>
+              <div class="tc-desc">Videonun her yerinden en iyi anlar — tek bir 30-40 sn'lik dikey özet</div>
+            </div>
+            <div class="tc-arrow">›</div>
+          </button>
+
+          <!-- ÇOKLU SHORTS — TEKLİDEN TEMELDE FARKLI (kullanıcı isteği, 11 Ağustos 2026):
+               tekli videonun HER YERİNDEN en iyi anları toplayıp TEK özet kurar; çoklu ise
+               videoyu önce anlatı bölümlerine (kaçırılma / kafes / kurtarılma) ayırır ve HER
+               BÖLÜMÜN KENDİ İÇİNDEN ayrı bir Shorts üretir. Beş bağımsız hikâye. -->
+          <button class="tool-card" data-view="cokluShorts">
+            <div class="tc-icon grad-e">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="16" rx="1.5"/><rect x="10.5" y="4" width="6" height="16" rx="1.5"/><path d="M19 5v14"/><path d="M22 7v10"/></svg>
+            </div>
+            <div class="tc-body">
+              <div class="tc-title">Çoklu Shorts</div>
+              <div class="tc-desc">Videoyu bölümlere ayırır — her bölümden ayrı bir Shorts (5 sekans)</div>
             </div>
             <div class="tc-arrow">›</div>
           </button>
@@ -405,7 +420,7 @@
            ölçüldü) ve kesitler birleşince zamanlar zaten kayıyor. -->
       <div class="view" id="viewShortsSekans" hidden>
         <div class="card">
-          <div class="card-title">Shorts Sekansı</div>
+          <div class="card-title">Tekli Shorts</div>
           <p class="note" style="margin:0 0 10px">
             Videonun <b>en iyi anlarını</b> yapay zekâya seçtirir, yeni bir <b>dikey (1080×1920)</b>
             sekans açar ve kesitleri arka arkaya dizer. Altyazı ve emoji o sekansa yeniden yazılır.
@@ -431,6 +446,61 @@
             <button class="btn-ghost" id="btnShortsIptal" type="button" hidden>İptal</button>
           </div>
           <div class="dict-status" id="shortsDurum" style="margin-top:10px"></div>
+        </div>
+
+        <!-- ⚠ BAŞLIK BÖLÜMÜ ÜRETİMDEN SONRA DOLAR. Kullanıcı isteği: "o klibe uygun en çok
+             izlenecek başlığı bulacak, emojiyi ve hashtagleri ekleyecek, sonra Shorts'a özel
+             etiket üretecek, biz oradan direkt kopyalayabilecez." -->
+        <div class="card" id="shortsBaslikKart" hidden>
+          <div class="card-title">Başlık ve Etiketler</div>
+          <p class="note" style="margin:0 0 10px">YouTube'a yüklerken kopyala-yapıştır.</p>
+          <div id="shortsBaslikListe"></div>
+        </div>
+      </div>
+
+      <!-- ══ ÇOKLU SHORTS ══ -->
+      <div class="view" id="viewCokluShorts" hidden>
+        <div class="card">
+          <div class="card-title">Çoklu Shorts</div>
+          <p class="note" style="margin:0 0 10px">
+            Videoyu <b>anlatı bölümlerine</b> ayırır (kaçırılma · kafes sahnesi · kurtarılma gibi)
+            ve <b>her bölümden ayrı bir Shorts</b> üretir. Tekli Shorts videonun her yerinden
+            karışık en iyi anları alır; bu ise her Shorts'u <b>tek bir olaydan</b> kurar.
+          </p>
+          <p class="note" style="margin:0 0 10px">
+            Her sekans 30-40 sn, <b>full altyazı ve full emoji</b> ile. Önce Altyazı ekranında altyazı üret.
+          </p>
+
+          <div class="kanal-liste" style="margin-bottom:10px">
+            <label class="chk"><input type="checkbox" id="cokluEmoji" checked> Emoji de koy</label>
+            <label class="chk"><input type="checkbox" id="cokluAltyazi" checked> Altyazı da yaz</label>
+          </div>
+          <div style="margin-bottom:10px">
+            <label class="note" for="cokluAdet">Kaç Shorts üretilsin?</label>
+            <select id="cokluAdet" class="kanal-ad" style="margin-top:6px">
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5" selected>5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+
+          <p class="note" style="margin:0 0 10px;color:var(--warn)">
+            ⚠ Uzun sürer: her sekans için ayrı yapay zekâ isteği, ayrı sekans kurulumu, ayrı
+            altyazı ve emoji. Premiere bu sırada <b>donuk görünür</b> — normaldir.
+          </p>
+
+          <div class="dict-actions">
+            <button class="btn" id="btnCokluUret" type="button">Çoklu Shorts Oluştur</button>
+            <button class="btn-ghost" id="btnCokluIptal" type="button" hidden>İptal</button>
+          </div>
+          <div class="dict-status" id="cokluDurum" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card" id="cokluBaslikKart" hidden>
+          <div class="card-title">Başlık ve Etiketler</div>
+          <p class="note" style="margin:0 0 10px">Her Shorts için ayrı — YouTube'a yüklerken kopyala-yapıştır.</p>
+          <div id="cokluBaslikListe"></div>
         </div>
       </div>
 

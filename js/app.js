@@ -285,7 +285,8 @@
     var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
            : name === "senkron" ? "viewSenkron" : name === "ayarlar" ? "viewAyarlar"
            : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji"
-           : name === "shortsSekans" ? "viewShortsSekans" : "viewHome";
+           : name === "shortsSekans" ? "viewShortsSekans"
+           : name === "cokluShorts" ? "viewCokluShorts" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
@@ -3203,17 +3204,7 @@
     try { anahtar = VUR.anahtarOku(extRoot); }
     catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle (Shorts anları onunla seçiliyor)", "var(--bad)"); return; }
 
-    /* Kaynak: altyazı ekranındaki cue'lar. "Herkes" modunda kanal başına ayrı liste var. */
-    var gruplar = [];
-    if (state.genMode === "channels") {
-      if (state.a1Cues && state.a1Cues.length) gruplar.push({ ad: a1Adi() || "A1", cues: state.a1Cues });
-      aktifKanallar().forEach(function (ch) {
-        if (ch.cues && ch.cues.length) gruplar.push({ ad: kanalAdi(ch) || ("A" + (ch.idx + 1)), cues: ch.cues });
-      });
-    } else if (state.singleCues && state.singleCues.length) {
-      gruplar.push({ ad: (state.track === "1" ? (String(lsGet("kanalAd.1", "")).trim() || "A2") : (a1Adi() || "A1")),
-                     cues: state.singleCues });
-    }
+    var gruplar = shortsGruplariTopla();
     if (!gruplar.length) { yaz("Önce Altyazı ekranından altyazı üret — Shorts anları o metinden seçiliyor.", "var(--warn)"); return; }
 
     /* AUTOCUT BAYATLIK FRENİ — altyazı ve emojide var, burada olmaması tutarsızlık olurdu.
@@ -3257,126 +3248,32 @@
         "Shorts");
       if (!onay) { yaz("İptal edildi.", "var(--warn)"); return; }
 
-      /* --- 4) SEKANSI KUR --- */
+      /* --- 4-6) SEKANSI KUR, ALTYAZI + EMOJİ, SONUÇ (ortak gövde) --- */
       yaz("dikey sekans kuruluyor… (Premiere kısa süre donuk görünebilir)");
-      var planYol = path.join(extRoot, "shorts_plan.txt");
-      var planSatir = ["#OLCU|1080|1920"];
-      sec.kesitler.forEach(function (k) { planSatir.push(k.bas.toFixed(3) + "|" + k.bit.toFixed(3)); });
-      fs.writeFileSync(planYol, planSatir.join("\n"), "utf8");
-      var hr = String(await evalES('shortsSekansKur("' + esPath(planYol) + '")',
-        function (sn) {
-          yaz("dikey sekans kuruluyor… (" + sn + " sn)" +
-              (sn >= 60 ? " · ⚠ Premiere'de açık bir pencere var mı? Kapatınca devam eder." : ""));
-        }));
-      try { fs.unlinkSync(planYol); } catch (eU) {}
-      var hs = null;
-      try { hs = JSON.parse(hr); } catch (eJ) { hs = null; }
-      if (!hs) { yaz("Sekans kurulamadı — Premiere'i TAMAMEN kapatıp aç (host.jsx yalnız açılışta yüklenir). Dönen: " + String(hr).slice(0, 120), "var(--bad)"); return; }
-      if (hs.error) { yaz("Sekans kurulamadı: " + hs.error, "var(--bad)"); return; }
-      kaynakId = String(hs.kaynakId || "");
-      logLine("Shorts sekansı: " + hs.ad + " · " + hs.w + "x" + hs.h + " · " +
-              hs.sure.toFixed(2) + " sn · ölçek %" + hs.olcek + " (" + hs.olcekOk + " klipte tuttu) · " +
-              hs.sesKanal + " ses kanalı / " + hs.sesKlip + " ses klibi");
+      var r = await shortsKurVeDoldur(sec.kesitler, gruplar, {
+        altyazi: !!($("shortsAltyazi") && $("shortsAltyazi").checked),
+        emoji: !!($("shortsEmoji") && $("shortsEmoji").checked)
+      }, yaz);
+      if (r.hata) { yaz(r.hata, "var(--bad)"); return; }
+      kaynakId = String(r.hs.kaynakId || "");
 
-      /* --- 5) ALTYAZIYI YENİDEN YAZ ---
-         ⚠ Kopyalanamaz: panel caption track'e hiç erişemiyor (üç API yüzeyi ölçüldü).
-         Zaten kesitler birleşince zamanlar kayıyor, yeniden yazmak doğrusu.
-         ⚠ Cue'lar host'un GERİ OKUDUĞU kesit listesinden haritalanır, panelin varsaydığı
-         aritmetikten DEĞİL — Premiere klip sınırlarını kareye yuvarlıyor. */
-      /* ⚠ PANELİN İSTEDİĞİ DEĞİL HOST'UN GERÇEKTEN KULLANDIĞI ARALIK.
-         Kesit klip sınırına kırpılmış olabilir (AutoCut'lı timeline'da bir kesit birden çok
-         klibe yayılıyor ve parçalanıyor). Panel kendi aritmetiğini kullanırsa cue'lar yanlış
-         yere düşer — kullanıcının ilk denemesinde altyazının yarısı eksik geldi, sebebi buydu.
-         Host `kaynakBas/kaynakBit` döndürmüyorsa (eski host) panelin isteğine düşülür. */
-      var kaynakKesit = (hs.kesitler && hs.kesitler.length && hs.kesitler[0].kaynakBas !== undefined)
-        ? hs.kesitler.map(function (k) { return { bas: k.kaynakBas, bit: k.kaynakBit }; })
-        : sec.kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
-      var altOk = 0, altHata = "", gizli = 0, disarida = 0, sonaKirpilan = 0;
-      if ($("shortsAltyazi") && $("shortsAltyazi").checked) {
-        yaz("altyazı yazılıyor…");
-        var capDir = path.join(cfg.workDir, "captions");
-        try { pipeline.ensureDir(capDir); } catch (eCd) {}
-        for (var gi = 0; gi < gruplar.length; gi++) {
-          var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
-          var yazilacak = hm.cues.filter(function (c) { return !c.gizliKesit && String(c.text || "").trim(); });
-          gizli += hm.sayac.gizlenen; disarida += hm.sayac.disarida;
-          if (!yazilacak.length) continue;
-          /* ⚠ ÖNCE KIRP, SONRA DOĞRULA — İKİSİ AYRI ŞEY.
-             Host `hs.sure`yi son klibin GERİ OKUNAN bitişinden alıyor, panel cue'ları kaynak
-             kesit sınırlarından hesaplıyor; Premiere kareye yuvarladığı için arada ~0.06 sn
-             fark kalabiliyor. Eskiden bu "geçersiz zaman" sayılıp BÜTÜN altyazı yazımını
-             durduruyordu (5 karakterden yalnız 1'i yazıldı — kullanıcı bildirdi).
-             Artık yuvarlama payı (0.5 sn) sessizce kırpılıyor; onun ÜSTÜ hâlâ hata. */
-          var kirp = SZAMAN.sonaKirp(yazilacak, hs.sure);
-          yazilacak = kirp.cues;
-          sonaKirpilan += kirp.sayac.kirpilan;
-          /* ⚠ SON NÖBETÇİ DURUYOR: fmtTime negatif zamanı SESSİZCE 0 yapıyor, yani ters bir
-             ofset bütün altyazıyı 00:00:00'a yığar ve panel "ok" derdi. */
-          var ihlal = SZAMAN.dogrula(yazilacak, hs.sure);
-          if (ihlal.length) {
-            /* ⚠ `break` DEĞİL `continue`: gruplar BAĞIMSIZ. Bir karakterin cue'ları bozuksa
-               ötekilerin altyazısı yine yazılmalı — eskiden ilk hata kalan HERKESİ
-               susturuyordu ve sebebi sonuç mesajında tek satırdı. */
-            altHata = (altHata ? altHata + " ; " : "") + gruplar[gi].ad + ": " +
-                      ihlal.length + " zaman geçersiz (" + ihlal[0] + ")";
-            logLine("Shorts altyazı ATLANDI (" + gruplar[gi].ad + "): " + ihlal.slice(0, 3).join(" · "));
-            continue;
-          }
-          var srtFile = path.join(capDir, "shorts_" + Date.now() + "_" + gi + ".srt");
-          fs.writeFileSync(srtFile, pipeline.cuesToSrt(yazilacak), "utf8");
-          var rc = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
-          logLine("Shorts altyazı " + gruplar[gi].ad + " (" + yazilacak.length + " satır): " + rc);
-          if (rc.indexOf("ok:") === 0) altOk++;
-          else altHata = gruplar[gi].ad + " — " + rc.replace(/^[a-z_]+:/, "");
-        }
-      }
+      /* --- 7) BAŞLIK / HASHTAG / ETİKET ---
+         ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır — sekans zaten kuruldu. */
+      yaz("başlık üretiliyor…");
+      var bp = await SHORTS.baslikUret(VUR, anahtar, r.metin || "",
+        { onLog: logLine, damga: VUR.iptalDamgasi() });
+      bp.sekansAd = r.hs.ad;
+      shortsBaslikCiz("shortsBaslikListe", "shortsBaslikKart", [bp]);
 
-      /* --- 5.5) EMOJİ --- */
-      var emojiSonuc = "";
-      if ($("shortsEmoji") && $("shortsEmoji").checked) {
-        yaz("emoji seçiliyor…");
-        try { emojiSonuc = await shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz); }
-        catch (eEm) { emojiSonuc = "emoji hatası: " + (eEm.message || eEm); }
-        logLine("Shorts emoji: " + emojiSonuc);
-      }
-
-      /* --- 6) SONUÇ — DÜRÜST --- */
-      var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) || !!sec.uyari ||
-                  (emojiSonuc && emojiSonuc.indexOf("✓") !== 0);
-      var msg = "“" + hs.ad + "” oluşturuldu · " + hs.kesitler.length + " kesit · " +
-                hs.sure.toFixed(1) + " sn · " + hs.w + "x" + hs.h;
-      if (altOk) msg += " · " + altOk + " altyazı kanalı";
-      if (gizli || disarida) msg += " (" + disarida + " cümle kesit dışı, " + gizli + " sınırda gizlendi)";
-      /* Yuvarlama kırpması SESSİZ KALMAZ ama HATA da değil — sonuç yeşil kalabilir. */
-      if (sonaKirpilan) msg += " · " + sonaKirpilan + " altyazı Shorts sonuna kırpıldı (kare payı)";
-      if (altHata) msg += " · ⚠ altyazı: " + altHata;
-      if (hs.olcekHata) msg += " · ⚠ ölçek: " + hs.olcekHata;
-      /* ⚠ SES UYARISI — ÖLÇÜLMEDİ, o yüzden SORULUYOR. createSubClip yalnız o project
-         item'ın sesini getiriyor; A1/A2/A3 aynı OBS dosyasının farklı AKIŞLARI, Craig
-         kayıtları ise ayrı öğeler. Arkadaşların sesi Shorts'a hiç gelmemiş olabilir ve
-         belirtisi tamamen sessiz: altyazısı akar, sesi duyulmaz. */
-      if (hs.sesKanal < gruplar.length) {
-        msg += " · ⚠ " + gruplar.length + " karakter var ama Shorts'ta " + hs.sesKanal +
-               " ses kanalı — bazı seslerin gelmemiş olabilir, BİR KEZ DİNLE";
-        kismi = true;
-      }
+      var kismi = r.kismi || !!sec.uyari;
+      var msg = r.ozet;
+      if (r.gizli || r.disarida) msg += " (" + r.disarida + " cümle kesit dışı, " + r.gizli + " sınırda gizlendi)";
       if (sec.uyari) msg += " · ⚠ " + sec.uyari;
-      if (emojiSonuc) msg += " · " + emojiSonuc;
-      /* ⚠ ALTYAZI STİLİNİ PANEL VEREMEZ — ölçülmüş ve kapanmış konu (üç API yüzeyi:
-         normal DOM'da yalnız createCaptionTrack var, stil parametresi sessizce yok
-         sayılıyor, QE DOM'da caption geçen tek metot bile yok). Dikey karede yatay için
-         ayarlanmış bir stil KÜÇÜK ve fazla aşağıda kalıyor; kullanıcı bunu bildirdi.
-         Panel yapamadığı şeyi SÖYLEMELİ — sessiz kalırsa kullanıcı panelde ayar arar. */
-      if (altOk) msg += " · ⚠ altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
-                        "Essential Graphics → Track Style (dikey için büyüt ve yukarı al)";
+      if (r.altOk) msg += " · ⚠ altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
+                          "Essential Graphics → Track Style (Shorts stillerinden birini seç)";
       msg += " · Shorts sekansı açık bırakıldı";
       yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : "var(--good)");
 
-      /* ⚠ SHORTS SEKANSI AÇIK BIRAKILIYOR — bilerek. Kullanıcı sonucu hemen görmeli ve
-         emoji/preset uygulayabilmeli. Kaynağa dönmek İSTERSE kendisi seçer; panel zorla
-         geri açarsa kullanıcı ürettiği Shorts'u bulamaz. Ama BUNU SÖYLEMEK ŞART (yukarıdaki
-         mesajın son parçası) — sessizce başka bir sekansta bırakmak, panelin öteki
-         kartlarını yanlış hedefe nişan aldırır. */
       kaynakId = "";                                   // finally geri açmasın
     } catch (e3) {
       yaz("hata: " + (e3.message || e3), "var(--bad)");
@@ -3402,6 +3299,142 @@
      Burada kaynak PARAMETRE, state'e hiç dokunulmuyor.
      ⚠ KONUM DİKEY + ÜST: kullanıcı "emojiler ekranın üstünde" dedi. emojikonum.js'in `ust`
      dalı bunun için var; dikeyde sağ 0.708 · sol 0.292 (ölçüldü, kareye sığıyor). */
+  /* ══ TEK BİR SHORTS SEKANSI KUR VE DOLDUR ══
+     Tekli ve Çoklu Shorts'un ORTAK gövdesi: sekans kurar, altyazıyı yeniden yazar, emojiyi
+     koyar ve dürüst bir özet döndürür.
+     ⚠ İKİ AKIŞIN AYNI KODU KULLANMASI ŞART: bu projede aynı işi iki yerde yazmanın bedeli
+     ölçülü (retry/iptal mantığı üç kez yazılırsa üçü de ayrı ayrı bozulur — vurucu.js'teki
+     istekGonder notu). Çoklu Shorts bunu N kez çağırıyor.
+     Dönen: { hs, altOk, altHata, emojiSonuc, kismi, ozet, hata } */
+  async function shortsKurVeDoldur(kesitler, gruplar, ayar, yaz) {
+    ayar = ayar || {};
+    var planYol = path.join(extRoot, "shorts_plan.txt");
+    var planSatir = ["#OLCU|1080|1920"];
+    kesitler.forEach(function (k) { planSatir.push(k.bas.toFixed(3) + "|" + k.bit.toFixed(3)); });
+    fs.writeFileSync(planYol, planSatir.join("\n"), "utf8");
+    var etiket = ayar.etiket || "";
+    var hr = String(await evalES('shortsSekansKur("' + esPath(planYol) + '")',
+      function (sn) {
+        if (yaz) yaz(etiket + "dikey sekans kuruluyor… (" + sn + " sn)" +
+          (sn >= 60 ? " · ⚠ Premiere'de açık bir pencere var mı? Kapatınca devam eder." : ""));
+      }));
+    try { fs.unlinkSync(planYol); } catch (eU) {}
+    var hs = null;
+    try { hs = JSON.parse(hr); } catch (eJ) { hs = null; }
+    if (!hs) return { hata: "Sekans kurulamadı — Premiere'i TAMAMEN kapatıp aç. Dönen: " + String(hr).slice(0, 120) };
+    if (hs.error) return { hata: "Sekans kurulamadı: " + hs.error };
+    logLine("Shorts sekansı: " + hs.ad + " · " + hs.w + "x" + hs.h + " · " + hs.sure.toFixed(2) +
+            " sn · ölçek %" + hs.olcek + " (" + hs.olcekOk + " klipte tuttu) · " +
+            hs.sesKanal + " ses kanalı / " + hs.sesKlip + " ses klibi");
+
+    /* ⚠ HOST'UN GERÇEKTEN KULLANDIĞI ARALIK — panelin isteği değil (kesit klip sınırına
+       kırpılmış olabilir; kullanıcının ilk denemesinde altyazının yarısı bu yüzden eksikti). */
+    var kaynakKesit = (hs.kesitler && hs.kesitler.length && hs.kesitler[0].kaynakBas !== undefined)
+      ? hs.kesitler.map(function (k) { return { bas: k.kaynakBas, bit: k.kaynakBit }; })
+      : kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
+
+    var altOk = 0, altHata = "", gizli = 0, disarida = 0, sonaKirpilan = 0, metin = "";
+    if (ayar.altyazi) {
+      if (yaz) yaz(etiket + "altyazı yazılıyor…");
+      var capDir = path.join(cfg.workDir, "captions");
+      try { pipeline.ensureDir(capDir); } catch (eCd) {}
+      for (var gi = 0; gi < gruplar.length; gi++) {
+        var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
+        var yazilacak = hm.cues.filter(function (c) { return !c.gizliKesit && String(c.text || "").trim(); });
+        gizli += hm.sayac.gizlenen; disarida += hm.sayac.disarida;
+        if (!yazilacak.length) continue;
+        var kirp = SZAMAN.sonaKirp(yazilacak, hs.sure);
+        yazilacak = kirp.cues;
+        sonaKirpilan += kirp.sayac.kirpilan;
+        var ihlal = SZAMAN.dogrula(yazilacak, hs.sure);
+        if (ihlal.length) {
+          altHata = (altHata ? altHata + " ; " : "") + gruplar[gi].ad + ": " + ihlal.length +
+                    " zaman geçersiz (" + ihlal[0] + ")";
+          logLine("Shorts altyazı ATLANDI (" + gruplar[gi].ad + "): " + ihlal.slice(0, 3).join(" · "));
+          continue;
+        }
+        /* Başlık üretimi için metin biriktir — Shorts'un ne anlattığını yalnız bu söylüyor. */
+        yazilacak.forEach(function (c) { metin += " " + String(c.text || ""); });
+        var srtFile = path.join(capDir, "shorts_" + Date.now() + "_" + gi + ".srt");
+        fs.writeFileSync(srtFile, pipeline.cuesToSrt(yazilacak), "utf8");
+        var rc = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
+        logLine("Shorts altyazı " + gruplar[gi].ad + " (" + yazilacak.length + " satır): " + rc);
+        if (rc.indexOf("ok:") === 0) altOk++;
+        else altHata = gruplar[gi].ad + " — " + rc.replace(/^[a-z_]+:/, "");
+      }
+    }
+
+    var emojiSonuc = "";
+    if (ayar.emoji) {
+      if (yaz) yaz(etiket + "emoji seçiliyor…");
+      try { emojiSonuc = await shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz); }
+      catch (eEm) { emojiSonuc = "emoji hatası: " + (eEm.message || eEm); }
+      logLine("Shorts emoji: " + emojiSonuc);
+    }
+
+    var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) ||
+                (emojiSonuc && emojiSonuc.indexOf("✓") !== 0) || (hs.sesKanal < gruplar.length);
+    var ozet = "“" + hs.ad + "” · " + hs.kesitler.length + " kesit · " + hs.sure.toFixed(1) + " sn";
+    if (altOk) ozet += " · " + altOk + " altyazı kanalı";
+    if (sonaKirpilan) ozet += " · " + sonaKirpilan + " altyazı sona kırpıldı";
+    if (altHata) ozet += " · ⚠ altyazı: " + altHata;
+    if (hs.olcekHata) ozet += " · ⚠ ölçek: " + hs.olcekHata;
+    if (hs.sesKanal < gruplar.length)
+      ozet += " · ⚠ " + gruplar.length + " karakter ama " + hs.sesKanal + " ses kanalı — BİR KEZ DİNLE";
+    if (emojiSonuc) ozet += " · " + emojiSonuc;
+    return { hs: hs, altOk: altOk, altHata: altHata, emojiSonuc: emojiSonuc,
+             kismi: kismi, ozet: ozet, metin: metin.trim(),
+             gizli: gizli, disarida: disarida, sonaKirpilan: sonaKirpilan };
+  }
+
+  /* Başlık paketini ekranda kopyalanabilir biçimde gösterir. */
+  function shortsBaslikCiz(kutuId, kartId, kayitlar) {
+    var kutu = $(kutuId), kart = $(kartId);
+    if (!kutu || !kart) return;
+    kutu.innerHTML = "";
+    if (!kayitlar || !kayitlar.length) { kart.hidden = true; return; }
+    kayitlar.forEach(function (k, ix) {
+      var blok = document.createElement("div");
+      blok.style.cssText = "margin-bottom:14px;padding:10px;border:1px solid var(--line);border-radius:8px";
+      var ad = document.createElement("div");
+      ad.className = "note";
+      ad.style.cssText = "margin:0 0 6px;color:var(--acc)";
+      ad.textContent = (kayitlar.length > 1 ? ((ix + 1) + ") ") : "") + (k.sekansAd || "Shorts");
+      blok.appendChild(ad);
+      if (k.hata) {
+        var h = document.createElement("div");
+        h.className = "note"; h.style.color = "var(--warn)";
+        h.textContent = "Başlık üretilemedi: " + k.hata;
+        blok.appendChild(h); kutu.appendChild(blok); return;
+      }
+      /* Üç ayrı kopyalanabilir alan: başlık+hashtag, yalnız etiketler. */
+      [["Başlık", k.tamBaslik], ["Etiketler (tags)", (k.etiketler || []).join(", ")]].forEach(function (p) {
+        var s = document.createElement("div");
+        s.style.cssText = "margin-bottom:8px";
+        var lbl = document.createElement("div");
+        lbl.className = "note"; lbl.style.margin = "0 0 4px";
+        lbl.textContent = p[0];
+        var ta = document.createElement("textarea");
+        ta.className = "dict-text"; ta.rows = (p[0] === "Başlık") ? 2 : 3;
+        ta.readOnly = true; ta.value = p[1] || "";
+        ta.addEventListener("focus", function () { this.select(); });
+        var btn = document.createElement("button");
+        btn.className = "btn-ghost"; btn.type = "button"; btn.textContent = "Kopyala";
+        btn.style.marginTop = "4px";
+        btn.addEventListener("click", function () {
+          ta.select();
+          try { document.execCommand("copy"); btn.textContent = "✓ Kopyalandı"; }
+          catch (e) { btn.textContent = "kopyalanamadı — elle seç"; }
+          setTimeout(function () { btn.textContent = "Kopyala"; }, 1500);
+        });
+        s.appendChild(lbl); s.appendChild(ta); s.appendChild(btn);
+        blok.appendChild(s);
+      });
+      kutu.appendChild(blok);
+    });
+    kart.hidden = false;
+  }
+
   async function shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz) {
     if (!EMJ || !VUR || !KONUM || !SZAMAN) return "emoji modülü yok";
     var kok = String(($("emojiKlasor") || {}).value || "").trim() || emojiKlasorVarsayilan();
@@ -3555,6 +3588,121 @@
            kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")";
   }
 
+  /* ══════════════════════ ÇOKLU SHORTS ══════════════════════
+     Kullanıcı isteği (11 Ağustos 2026): "5 tane Shorts sequence'ı oluşturacak ve videonun 5
+     tane kısmını alacak — parça parça anları gibi. Videonun başında kaçırılma, sonra kafes
+     sahnesi, sonra kurtarılma; biri kaçırılmayı, biri kafesi, biri kurtarılmayı alsın."
+     ⚠ TEKLİDEN FARKI: tekli videonun HER YERİNDEN en iyi anları toplar (zaman dağılımı
+     kuralı bunun için); çoklu ise önce anlatı bölümlerini bulur ve her Shorts'u TEK BİR
+     bölümün içinden kurar. Beş bağımsız hikâye. */
+  async function cokluUret() {
+    var dur = $("cokluDurum");
+    function yaz(m, renk) { if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; } }
+    if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
+    if (!SHORTS || !SZAMAN || !VUR) { yaz("Shorts modülleri yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
+    var anahtar = "";
+    try { anahtar = VUR.anahtarOku(extRoot); }
+    catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle", "var(--bad)"); return; }
+
+    var gruplar = shortsGruplariTopla();
+    if (!gruplar.length) { yaz("Önce Altyazı ekranından altyazı üret.", "var(--warn)"); return; }
+    if (state.cuesStale) {
+      var dvm = await uiConfirm(
+        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\nKesitler YANLIŞ anlardan alınır.\n\n" +
+        "Yine de devam edeyim mi?", "Çoklu Shorts");
+      if (!dvm) { yaz("İptal edildi.", "var(--warn)"); return; }
+    }
+
+    var btn = $("btnCokluUret"); if (btn) btn.disabled = true;
+    _shortsIptal = false;
+    var bIptal = $("btnCokluIptal"); if (bIptal) bIptal.hidden = false;
+    var kaynakId = "";
+    shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", []);
+    try {
+      var adet = parseInt(($("cokluAdet") || {}).value || "5", 10) || 5;
+      yaz("video bölümlere ayrılıyor…");
+      var bol = await SHORTS.coklukSec(VUR, anahtar, gruplar,
+        { onLog: logLine, damga: VUR.iptalDamgasi(), shortsAdet: adet });
+      if (bol.hata) { yaz(bol.hata, "var(--bad)"); return; }
+      if (!bol.shortslar.length) { yaz("Bölüm bulunamadı.", "var(--warn)"); return; }
+      if (_shortsIptal) { yaz("İptal edildi.", "var(--warn)"); return; }
+
+      /* ONAY KAPISI — beş sekans yaratılmadan ÖNCE. Emsal: tekli Shorts ve emoji kimlik kapısı. */
+      var satirlar = bol.shortslar.map(function (s, ix) {
+        return "  " + (ix + 1) + ") " + s.baslik + "  (" + s.kesitler.length + " kesit · " +
+               s.toplamSure.toFixed(1) + " sn · video " + _shortsSaat(s.bolumBas) + "-" +
+               _shortsSaat(s.bolumBit) + ")";
+      });
+      var onay = await uiConfirm(
+        bol.shortslar.length + " ayrı Shorts sekansı oluşturulacak:\n\n" + satirlar.join("\n") +
+        "\n\nHer biri altyazılı ve emojili olacak. Uzun sürer, Premiere donuk görünür.\n\n" +
+        "Devam edeyim mi?", "Çoklu Shorts");
+      if (!onay) { yaz("İptal edildi.", "var(--warn)"); return; }
+
+      var altYaz = !!($("cokluAltyazi") && $("cokluAltyazi").checked);
+      var emj = !!($("cokluEmoji") && $("cokluEmoji").checked);
+      var sonuclar = [], basliklar = [], i;
+      for (i = 0; i < bol.shortslar.length; i++) {
+        if (_shortsIptal) { logLine("Çoklu Shorts: kullanıcı iptal etti (" + i + " sekans yapıldı)."); break; }
+        var sh = bol.shortslar[i];
+        var etk = "[" + (i + 1) + "/" + bol.shortslar.length + " " + sh.baslik + "] ";
+        yaz(etk + "sekans kuruluyor…");
+        var r = await shortsKurVeDoldur(sh.kesitler, gruplar,
+          { altyazi: altYaz, emoji: emj, etiket: etk }, yaz);
+        if (r.hata) {
+          logLine("Çoklu Shorts " + (i + 1) + " başarısız: " + r.hata);
+          sonuclar.push({ baslik: sh.baslik, hata: r.hata });
+          continue;
+        }
+        if (!kaynakId) kaynakId = String(r.hs.kaynakId || "");
+        sonuclar.push({ baslik: sh.baslik, ozet: r.ozet, kismi: r.kismi, ad: r.hs.ad });
+        /* ── BAŞLIK / HASHTAG / ETİKET ──
+           ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır: sekans zaten kuruldu ve
+           kullanıcı başlığı elle de yazabilir. */
+        yaz(etk + "başlık üretiliyor…");
+        var bp = await SHORTS.baslikUret(VUR, anahtar, r.metin || sh.baslik,
+          { onLog: logLine, damga: VUR.iptalDamgasi() });
+        bp.sekansAd = r.hs.ad + " — " + sh.baslik;
+        basliklar.push(bp);
+        shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", basliklar);
+      }
+
+      var basarili = sonuclar.filter(function (s) { return !s.hata; });
+      var kismiVar = basarili.some(function (s) { return s.kismi; }) || basarili.length < sonuclar.length;
+      var msg = basarili.length + "/" + sonuclar.length + " Shorts oluşturuldu";
+      sonuclar.forEach(function (s, ix) {
+        msg += "\n  " + (ix + 1) + ") " + (s.hata ? ("✕ " + s.baslik + " — " + s.hata) : s.ozet);
+      });
+      if (basarili.length) msg += "\n⚠ Altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
+                                  "Essential Graphics → Track Style (Shorts stillerinden birini seç)";
+      yaz((kismiVar ? "⚠ " : "✓ ") + msg, kismiVar ? "var(--warn)" : "var(--good)");
+      kaynakId = "";                                   // finally geri açmasın
+    } catch (e3) {
+      yaz("hata: " + (e3.message || e3), "var(--bad)");
+      logLine("Çoklu Shorts hatası: " + (e3.stack || e3.message || e3));
+    } finally {
+      if (kaynakId) { try { await evalES('app.project.openSequence("' + kaynakId + '")'); } catch (eB) {} }
+      if (btn) btn.disabled = false;
+      var bi = $("btnCokluIptal"); if (bi) { bi.hidden = true; bi.disabled = false; }
+      _shortsIptal = false;
+    }
+  }
+
+  /* Altyazı ekranındaki cue'lardan kanal gruplarını toplar — tekli ve çoklu ORTAK kullanır. */
+  function shortsGruplariTopla() {
+    var gruplar = [];
+    if (state.genMode === "channels") {
+      if (state.a1Cues && state.a1Cues.length) gruplar.push({ ad: a1Adi() || "A1", cues: state.a1Cues });
+      aktifKanallar().forEach(function (ch) {
+        if (ch.cues && ch.cues.length) gruplar.push({ ad: kanalAdi(ch) || ("A" + (ch.idx + 1)), cues: ch.cues });
+      });
+    } else if (state.singleCues && state.singleCues.length) {
+      gruplar.push({ ad: (state.track === "1" ? (String(lsGet("kanalAd.1", "")).trim() || "A2") : (a1Adi() || "A1")),
+                     cues: state.singleCues });
+    }
+    return gruplar;
+  }
+
   function _shortsSaat(sn) {
     sn = Math.max(0, Math.floor(Number(sn) || 0));
     var d = Math.floor(sn / 60), s = sn % 60;
@@ -3569,6 +3717,14 @@
       _shortsIptal = true;
       if (VUR && VUR.iptal) VUR.iptal();
       bi.disabled = true; bi.textContent = "durduruluyor…";
+    });
+    var bc = $("btnCokluUret");
+    if (bc) bc.addEventListener("click", function () { cokluUret(); });
+    var bci = $("btnCokluIptal");
+    if (bci) bci.addEventListener("click", function () {
+      _shortsIptal = true;
+      if (VUR && VUR.iptal) VUR.iptal();
+      bci.disabled = true; bci.textContent = "durduruluyor…";
     });
   }
 

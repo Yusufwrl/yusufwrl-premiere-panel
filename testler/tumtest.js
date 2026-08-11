@@ -1652,6 +1652,36 @@ function bitir() {
           "olan: " + b5b.kesitler.length + " / " + b5b.toplam + " sn");
     dogru("süre yetiyorsa gevşetme HİÇ olmadı", !s5b.adetGevsetildi);
 
+    /* --- ÇOKLU SHORTS: BÖLÜM ÇÖZME ---
+       ⚠ Aynı numaralandırma korumaları burada da geçerli: bölüm sınırı yanlış numaraya
+       düşerse KOCA BİR SHORTS bambaşka bir sahneden kurulur. */
+    (function () {
+      var d = dilimKur();
+      var sb = { siraDisi: 0 };
+      var br = SH._bolumCoz(JSON.stringify({ bolumler: [
+        { basNo: 1, bitNo: 2, baslik: "kaçırılma", puan: 9 },
+        { basNo: 3, bitNo: 5, baslik: "kafes sahnesi", puan: 8 },
+        { basNo: 99, bitNo: 99, baslik: "UYDURMA", puan: 9 },
+        { basNo: 4, bitNo: 2, baslik: "ters", puan: 7 }
+      ] }), d, sb);
+      esit("iki geçerli bölüm çözüldü", br.length, 2);
+      esit("aralık dışı + ters bölüm SAYILDI", sb.siraDisi, 2);
+      esit("1. bölüm doğru cümlelere düştü", [br[0].bas, br[0].bit], [10, 25]);
+      esit("2. bölüm doğru cümlelere düştü", [br[1].bas, br[1].bit], [30, 58]);
+      esit("bölüm başlığı korundu", br[0].baslik, "kaçırılma");
+      /* Bölümler ZAMAN sırasına dizilmeli — Shorts'lar kronolojik üretilsin. */
+      dogru("bölümler zaman sırasında", br[0].bas < br[1].bas);
+      /* ⚠ ÇAKIŞMAMALI: iki bölüm aynı anı içerirse iki Shorts aynı sahneyi anlatır. */
+      dogru("bölümler çakışmıyor", br[0].bit <= br[1].bas,
+            br[0].bit + " <= " + br[1].bas);
+      esit("bölüm çözme GİRDİYİ değiştirmedi", JSON.stringify(d), JSON.stringify(dilimKur()));
+    })();
+
+    /* --- shortsAdet varsayılanı kullanıcı isteğiyle 5 --- */
+    esit("çoklu Shorts varsayılan adedi", SH.VARSAYILAN.shortsAdet, 5);
+    dogru("coklukSec dışa açık", typeof SH.coklukSec === "function");
+    dogru("baslikUret dışa açık", typeof SH.baslikUret === "function");
+
     /* --- dilim metni: numara 1'DEN başlamalı, global indeksten DEĞİL --- */
     var mt = SH._dilimMetni(dilim, 200);
     dogru("dilim metni 1'den numaralanıyor", mt.indexOf("1 [") === 0, mt.split("\n")[0]);

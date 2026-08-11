@@ -45,7 +45,8 @@ var VARSAYILAN = {
   parcaCumle: 250,      // emoji.js ile aynı: bir istekte kaç cümle
   metinSiniri: 220,     // cümle metni bu kadar karakterde kesilir (token bütçesi)
   maxTokens: 4000,
-  yapisalCikti: true
+  yapisalCikti: true,
+  shortsAdet: 5          // Çoklu Shorts: kaç ayrı sekans (kullanıcı isteği: 5)
 };
 
 /* ⚠ İSTEM KULLANICI GERİ BİLDİRİMİYLE GÜÇLENDİRİLDİ (11 Ağustos 2026: "en iyi yerleri
@@ -163,7 +164,7 @@ function _dilimMetni(dilim, metinSiniri) {
   return out.join("\n");
 }
 
-function _govde(sistem, icerik, opts) {
+function _govde(sistem, icerik, opts, sema) {
   var g = {
     model: String(_ayar(opts, "model") || MODEL),
     max_tokens: _sayi(_ayar(opts, "maxTokens")),
@@ -173,7 +174,7 @@ function _govde(sistem, icerik, opts) {
     thinking: { type: "disabled" },
     messages: [{ role: "user", content: icerik }]
   };
-  if (_ayar(opts, "yapisalCikti")) g.output_config = { format: { type: "json_schema", schema: SEMA } };
+  if (_ayar(opts, "yapisalCikti")) g.output_config = { format: { type: "json_schema", schema: (sema || SEMA) } };
   return g;
 }
 
@@ -429,9 +430,234 @@ async function shortsSec(VUR, anahtar, gruplar, opts) {
   };
 }
 
+/* ══════════════════════ ÇOKLU SHORTS ══════════════════════
+   Kullanıcı isteği (11 Ağustos 2026): "5 tane Shorts sequence'ı oluşturacak ve videonun 5
+   tane kısmını alacak — tekli Shorts'taki gibi videonun karışık en iyi anları DEĞİL, parça
+   parça anları gibi olacak. Örneğin videonun başında kaçırılma oluyor, sonra kafes sahnesi,
+   sonra kurtarılma; çoklu Shorts biri kaçırılmayı, biri kafesi, biri kurtarılmayı alsın."
+
+   ⚠ TEKLİDEN FARKI TEMELDE: tekli Shorts videonun HER YERİNDEN en iyi anları toplayıp tek
+   bir özet kuruyor (zaman dağılımı kuralı bunun için var). Çoklu Shorts ise videoyu ÖNCE
+   anlatı bölümlerine (sahne) ayırıyor, sonra HER BÖLÜMÜN KENDİ İÇİNDEN bir Shorts kuruyor.
+   Yani beş Shorts birbirinden bağımsız beş hikâye — aynı havuzdan beş kesit değil. */
+
+var SISTEM_BOLUM =
+  "Sen Minecraft/Roblox içerikleri kurgulayan deneyimli bir YouTube kurgucususun. " +
+  "Sana bir videonun konuşma dökümü veriliyor.\n\n" +
+  "GÖREV: bu videoyu ANLATI BÖLÜMLERİNE ayır. Her bölüm kendi başına bir hikâye parçası " +
+  "olmalı — bir olayın başladığı, geliştiği ve sonuçlandığı bir kesit.\n\n" +
+  "ÖRNEK BÖLÜMLEME: (1) kaçırılma sahnesi · (2) kafeste mahsur kalma · (3) kaçış planı · " +
+  "(4) kurtarılma · (5) intikam.\n\n" +
+  "İYİ BÖLÜM:\n" +
+  "· Kendi içinde bir OLAY var: bir şey başlıyor ve bitiyor\n" +
+  "· Tek başına izlenince anlaşılıyor — izleyici videonun geri kalanını görmedi\n" +
+  "· İçinde güçlü an var: tepki, çatışma, sürpriz, kahkaha\n\n" +
+  "KÖTÜ BÖLÜM: yalnız yer değişikliği, hazırlık/koordinasyon, konu dışı sohbet.\n\n" +
+  "Bölümler ARDIŞIK ve ÇAKIŞMASIZ olmalı, videonun tamamına yayılsın. Her satır bir CÜMLE " +
+  "ve başında o parçaya ait sıra numarası var; bölümü basNo-bitNo aralığıyla ver.\n" +
+  "baslik: bölümü 2-5 kelimeyle anlat (\"kafes sahnesi\", \"kaçırılma\").\n" +
+  "SADECE bu listedeki numaraları kullan. Numara uydurma.";
+
+var SEMA_BOLUM = {
+  type: "object", additionalProperties: false, required: ["bolumler"],
+  properties: {
+    bolumler: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["basNo", "bitNo", "baslik", "puan"],
+        properties: {
+          basNo: { type: "integer" }, bitNo: { type: "integer" },
+          baslik: { type: "string" }, puan: { type: "integer" }
+        }
+      }
+    }
+  }
+};
+
+/* Bölüm cevabını çözer — numaralandırma korumaları shortsSec ile BİREBİR aynı. */
+function _bolumCoz(metin, dilim, sayac) {
+  var j = null;
+  try { j = JSON.parse(String(metin)); }
+  catch (e) {
+    var m = String(metin).match(/\{[\s\S]*\}/);
+    if (m) { try { j = JSON.parse(m[0]); } catch (e2) { j = null; } }
+  }
+  if (!j || !j.bolumler || !j.bolumler.length) return [];
+  var out = [], i;
+  for (i = 0; i < j.bolumler.length; i++) {
+    var b = j.bolumler[i];
+    var bn = Math.round(Number(b.basNo)), sn = Math.round(Number(b.bitNo));
+    if (!isFinite(bn) || !isFinite(sn) || bn < 1 || sn < 1 ||
+        bn > dilim.length || sn > dilim.length || sn < bn) { sayac.siraDisi++; continue; }
+    out.push({
+      bas: dilim[bn - 1].bas, bit: dilim[sn - 1].bit,
+      basIdx: bn - 1, bitIdx: sn - 1,
+      baslik: String(b.baslik || "").slice(0, 60),
+      puan: Math.max(1, Math.min(10, Math.round(Number(b.puan)) || 5))
+    });
+  }
+  out.sort(function (a, b2) { return a.bas - b2.bas; });
+  return out;
+}
+
+/*
+ * Videoyu anlatı bölümlerine ayırır ve HER BÖLÜM İÇİN ayrı bir kesit listesi kurar.
+ * Dönüş: { shortslar: [{baslik, kesitler, toplamSure}], ... }
+ * Her eleman TEK BİR Shorts sekansına karşılık gelir.
+ */
+async function coklukSec(VUR, anahtar, gruplar, opts) {
+  opts = opts || {};
+  var log = opts.onLog || function () {};
+  var damga = opts.damga;
+  var adet = _sayi(_ayar(opts, "shortsAdet"));
+  var sayac = { siraDisi: 0, bolumElenen: 0 };
+
+  var cumleler = cumleleriTopla(VUR, gruplar, opts);
+  if (!cumleler.length) return { hata: "Cümle bulunamadı — önce altyazı üret.", shortslar: [] };
+  log("Çoklu Shorts: " + cumleler.length + " cümle, " + adet + " bölüm aranıyor.");
+
+  /* ⚠ BÖLÜMLEME TEK İSTEKTE — parçalara bölünürse model videonun TAMAMINI göremez ve
+     "anlatı bölümü" kavramı çöker (her parça kendi içinde bölümlenirdi). Bu yüzden
+     cümleler seyreltilerek tek dilime sığdırılıyor: bölüm sınırı için kaba çözünürlük
+     yeter, kesitler zaten bölüm İÇİNDE ayrıca seçiliyor. */
+  var metinSiniri = _sayi(_ayar(opts, "metinSiniri"));
+  var kabaDilim = cumleler;
+  var KABA_TAVAN = 200;
+  if (cumleler.length > KABA_TAVAN) {
+    var seyrek = [], adim = cumleler.length / KABA_TAVAN, si;
+    for (si = 0; si < KABA_TAVAN; si++) seyrek.push(cumleler[Math.floor(si * adim)]);
+    kabaDilim = seyrek;
+    log("Çoklu Shorts: " + cumleler.length + " cümle " + KABA_TAVAN + "'e seyreltildi (bölümleme için).");
+  }
+  var icerik = "Bu videoyu " + adet + " anlatı bölümüne ayır. Her bölüm 30-40 saniyelik bir " +
+               "Shorts'a kaynak olacak, yani içinde en az bir dakikalık konuşma bulunsun.\n" +
+               "puan: bölümün Shorts potansiyeli, 1-10.\n\n" + _dilimMetni(kabaDilim, metinSiniri);
+  var cevap;
+  try {
+    cevap = await VUR.istekGonder(anahtar, _govde(SISTEM_BOLUM, icerik, opts, SEMA_BOLUM), opts, damga, log);
+  } catch (e) {
+    if (e && e.iptal) return { hata: "İptal edildi", shortslar: [] };
+    return { hata: "Bölümleme alınamadı: " + (e.message || e), shortslar: [] };
+  }
+  var bolumler = _bolumCoz(cevap, kabaDilim, sayac);
+  if (!bolumler.length) {
+    return { hata: "Yapay zekâ bölüm bulamadı" +
+                   (sayac.siraDisi ? " (" + sayac.siraDisi + " numara aralık dışı)" : "") + ".",
+             shortslar: [], sayac: sayac };
+  }
+  log("Çoklu Shorts: " + bolumler.length + " bölüm bulundu — " +
+      bolumler.map(function (b) { return b.baslik; }).join(" · "));
+
+  /* ── HER BÖLÜM İÇİN KENDİ KESİTLERİ ──
+     ⚠ Bölüm İÇİNDEKİ cümlelerle çalışılır: bir bölümün Shorts'u başka bölümden kesit
+     ALMAMALI, yoksa "parça parça" isteği bozulur ve tekli Shorts'a dönüşür. */
+  var shortslar = [], bi;
+  for (bi = 0; bi < bolumler.length && shortslar.length < adet; bi++) {
+    if (VUR.iptalEdildiMi && VUR.iptalEdildiMi(damga)) return { hata: "İptal edildi", shortslar: [] };
+    var b = bolumler[bi];
+    var icCumle = cumleler.filter(function (c) { return c.bas >= b.bas && c.bit <= b.bit; });
+    if (icCumle.length < 3) { sayac.bolumElenen++; log("Bölüm atlandı (çok az cümle): " + b.baslik); continue; }
+    /* Numaralar bölüm içinde YENİDEN verilir (1..N) — parça numaralandırma kuralı. */
+    var yerel = icCumle.slice();
+    var bIcerik = "Bu bölümün adı: \"" + b.baslik + "\". Buradan " +
+                  _sayi(_ayar(opts, "adetMin")) + "-" + _sayi(_ayar(opts, "adetMax")) +
+                  " an seç ve puanla; toplam " + _sayi(_ayar(opts, "hedefSure")) +
+                  " saniyelik bir Shorts kurulacak (en az " + _sayi(_ayar(opts, "minSure")) + " sn).\n\n" +
+                  _dilimMetni(yerel, metinSiniri);
+    var bCevap;
+    try {
+      bCevap = await VUR.istekGonder(anahtar, _govde(SISTEM_FINAL, bIcerik, opts), opts, damga, log);
+    } catch (e2) {
+      if (e2 && e2.iptal) return { hata: "İptal edildi", shortslar: [] };
+      log("Bölüm '" + b.baslik + "' seçimi alınamadı: " + (e2.message || e2));
+      continue;
+    }
+    var adaylar = _cevapCoz(VUR, bCevap, yerel, sayac);
+    if (!adaylar.length) { sayac.bolumElenen++; log("Bölüm '" + b.baslik + "' → geçerli aday yok."); continue; }
+    var bSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var son = _butceUygula(adaylar, opts, bSay);
+    if (!son.kesitler.length) { sayac.bolumElenen++; continue; }
+    shortslar.push({
+      baslik: b.baslik, kesitler: son.kesitler, toplamSure: son.toplam,
+      bolumBas: b.bas, bolumBit: b.bit, puan: b.puan, sayac: bSay
+    });
+    log("Bölüm " + shortslar.length + "/" + adet + " hazır: " + b.baslik + " · " +
+        son.kesitler.length + " kesit · " + son.toplam.toFixed(1) + " sn");
+  }
+  if (!shortslar.length) return { hata: "Hiçbir bölümden Shorts çıkmadı.", shortslar: [], sayac: sayac };
+  return { shortslar: shortslar, sayac: sayac, bolumSay: bolumler.length };
+}
+
+/* ══════════════════════ BAŞLIK / HASHTAG / ETİKET ══════════════════════
+   Kullanıcı isteği: "o klibe uygun en çok izlenecek başlığı bulacak, emojiyi ve hashtagleri
+   ekleyecek, sonra Shorts'a özel etiket üretecek, biz oradan direkt kopyalayabilecez."
+   Örnek biçim: EJDERHA Sen KIZLARI ETKİLEDİN !! 😍 #shorts #minecraft */
+var SISTEM_BASLIK =
+  "Sen YouTube Shorts başlığı yazan bir uzmansın. Türkçe, Minecraft/Roblox içerikleri.\n\n" +
+  "Sana bir Shorts'un konuşma metni veriliyor. Üreteceklerin:\n\n" +
+  "1) BAŞLIK — tıklanma için yazılmış, MERAK uyandıran, kısa (en fazla 60 karakter).\n" +
+  "   · Büyük harf VURGU için kullanılır ama tamamı büyük olmaz\n" +
+  "   · Sonunda 1-2 emoji\n" +
+  "   · Ünlem serbest (!!)\n" +
+  "   · İçeriği ANLATMA, merak uyandır: \"ne olduğunu\" değil \"ne olacağını\" hissettir\n" +
+  "   · Örnek biçim: EJDERHA Sen KIZLARI ETKİLEDİN !! 😍\n" +
+  "2) HASHTAG — 3-5 tane, #shorts MUTLAKA olsun, oyun adı olsun (#minecraft/#roblox), " +
+  "   kalanı içerikle ilgili. Küçük harf, Türkçe karakter YOK.\n" +
+  "3) ETIKETLER — YouTube \"tags\" alanı için 12-18 arama terimi. Virgülle ayrılacak, " +
+  "   küçük harf. Karışım: oyun adı, içerik türü, karakter adları, arama kalıpları " +
+  "   (\"minecraft komik anlar\" gibi). Hashtag işareti KOYMA.\n\n" +
+  "Metinde geçen karakter adlarını kullan. Uydurma olay ekleme.";
+
+var SEMA_BASLIK = {
+  type: "object", additionalProperties: false,
+  required: ["baslik", "hashtagler", "etiketler"],
+  properties: {
+    baslik: { type: "string" },
+    hashtagler: { type: "array", items: { type: "string" } },
+    etiketler: { type: "array", items: { type: "string" } }
+  }
+};
+
+/* Tek bir Shorts için başlık paketi üretir. Ağ hatasında Shorts DÜŞMEZ — başlık boş kalır. */
+async function baslikUret(VUR, anahtar, metin, opts) {
+  opts = opts || {};
+  var icerik = "Bu Shorts'un konuşma metni:\n\n" + String(metin || "").slice(0, 2500);
+  var cevap;
+  try {
+    cevap = await VUR.istekGonder(anahtar, _govde(SISTEM_BASLIK, icerik, opts, SEMA_BASLIK),
+                                  opts, opts.damga, opts.onLog || function () {});
+  } catch (e) { return { hata: (e && e.message) || String(e) }; }
+  var j = null;
+  try { j = JSON.parse(String(cevap)); }
+  catch (e2) {
+    var m = String(cevap).match(/\{[\s\S]*\}/);
+    if (m) { try { j = JSON.parse(m[0]); } catch (e3) { j = null; } }
+  }
+  if (!j || !j.baslik) return { hata: "Başlık çözülemedi" };
+  var ht = (j.hashtagler || []).map(function (h) {
+    h = String(h).replace(/^#+/, "").trim().toLowerCase();
+    return h ? ("#" + h) : "";
+  }).filter(Boolean);
+  /* ⚠ #shorts GARANTİ — kullanıcının verdiği biçimde var ve YouTube'da Shorts olarak
+     sınıflanması için gerekiyor. Model unutursa panel ekler. */
+  if (ht.indexOf("#shorts") === -1) ht.unshift("#shorts");
+  var et = (j.etiketler || []).map(function (t) {
+    return String(t).replace(/^#+/, "").trim().toLowerCase();
+  }).filter(Boolean);
+  return {
+    baslik: String(j.baslik).trim(),
+    hashtagler: ht,
+    etiketler: et,
+    /* Kopyala-yapıştır satırı: başlık + hashtagler (kullanıcının örnek biçimi). */
+    tamBaslik: String(j.baslik).trim() + " " + ht.join(" ")
+  };
+}
+
 module.exports = {
   MODEL: MODEL, VARSAYILAN: VARSAYILAN, SEMA: SEMA,
-  shortsSec: shortsSec,
+  shortsSec: shortsSec, coklukSec: coklukSec, baslikUret: baslikUret,
+  _bolumCoz: _bolumCoz,
   // test edilebilirlik için iç parçalar
   cumleleriTopla: cumleleriTopla, _cevapCoz: _cevapCoz, _butceUygula: _butceUygula,
   _dilimMetni: _dilimMetni
