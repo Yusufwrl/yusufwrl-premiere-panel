@@ -3419,8 +3419,12 @@
       var gorunur = hm.cues.filter(function (c) { return !c.gizliKesit; });
       var cl = null;
       try { cl = VUR.cumleleriCikar(gorunur); } catch (eC) { cl = null; }
+      /* ⚠ SHORTS'TA KELİME EŞİĞİ DÜŞÜK (2, yatayda 5). Kullanıcı: "Shorts boyunca FULL emoji
+         olacak, hep emoji". Yatayda 5 kelime eşiği "3 kelimelik cümlede emoji göz kırpması
+         gibi duruyor" diye konmuştu; Shorts'ta emoji zaten bir sonrakine kadar SÜRÜYOR
+         (aşağıdaki köprü), yani kısa cümlenin emojisi de ekranda kalıyor. */
       (cl || []).forEach(function (c) {
-        if (!c.metin || emojiKelimeSay(c.metin) < EMOJI_MIN_KELIME) return;
+        if (!c.metin || emojiKelimeSay(c.metin) < 2) return;
         cumleler.push({ bas: c.bas, bit: c.bit, metin: c.metin, kar: kar,
                         a1: (gi === 0), ad: gruplar[gi].ad });
       });
@@ -3430,8 +3434,10 @@
     for (var q = 0; q < cumleler.length; q++) cumleler[q].sira = q + 1;
 
     if (yaz) yaz("emoji duyguları seçiliyor… (" + cumleler.length + " cümle)");
+    /* ⚠ hedefOran 1.0 — HER cümleye duygu istenir (yatayda 0.90). Kullanıcı Shorts'ta
+       kesintisiz emoji istiyor; işaretlenmeyen cümle emojisiz bir boşluk demek. */
     var sec = await EMJ.duygulariSec(VUR, anahtar, cumleler, tarama.duygular,
-      { hedefOran: emojiOran(), karakterDuygu: tarama.karakterDuygu }, VUR.iptalDamgasi(), logLine);
+      { hedefOran: 1.0, karakterDuygu: tarama.karakterDuygu }, VUR.iptalDamgasi(), logLine);
     if (sec.hata) return "emoji: " + sec.hata;
     var indeks = {}; cumleler.forEach(function (c) { indeks[c.sira] = c; });
 
@@ -3461,7 +3467,18 @@
        emojikonum.js'in `oran` parametresi DURUYOR (testleri var, ileride gerekebilir);
        burada gecilmiyor, yani varsayilan 0.574 kullaniliyor. */
     var konOrta = emojiKonum(hs.w, hs.h, true, true, true);
-    var plan = [], sonBitis = -999;
+
+    /* ══ SHORTS BOYUNCA KESİNTİSİZ EMOJİ ══
+       Kullanıcı isteği (11 Ağustos 2026): "shorts boyunca full emoji olacak, yukarıda olmalı
+       hep, emoji kim konuşursa onunla ve o cümlesiyle alakalı".
+       ⚠ YATAY VİDEODAN TAMAMEN FARKLI BİR KURAL — oradaki `EMOJI_GAP` freni ve "cümle boyunca
+       kal" süresi burada UYGULANMAZ: ikisi de emojiler arasında BOŞLUK bırakır ve kullanıcı
+       Shorts'ta boşluk istemiyor.
+       KURAL: her emoji BİR SONRAKİNİN BAŞLANGICINA kadar sürer; ilki Shorts'un 0'ından
+       başlar, sonuncusu Shorts'un sonuna kadar gider. Böylece ekranda her an bir emoji var
+       ve o an konuşanın yüzü görünüyor.
+       ⚠ Yatay yol (emojiEkle) bu değişiklikten ETKİLENMEZ — ayrı fonksiyon, ayrı kurallar. */
+    var adaylarE = [];
     sec.secimler.forEach(function (s) {
       var c = indeks[s.sira];
       if (!c) return;
@@ -3469,16 +3486,34 @@
       if (!vl || !vl.length) return;
       var png = vl[0];
       if (!png.h) return;
-      if (c.bas < sonBitis + EMOJI_GAP) return;
-      var sure = Math.max(EMOJI_MIN_SURE, Math.min(EMOJI_MAX_SURE, c.bit - c.bas));
-      if (c.bas + sure > hs.sure) sure = hs.sure - c.bas;   // Shorts dışına taşmasın
-      if (sure < EMOJI_MIN_SURE) return;
-      plan.push([png.yol, kanal, c.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
+      adaylarE.push({ bas: c.bas, png: png });
+    });
+    adaylarE.sort(function (a, b) { return a.bas - b.bas; });
+    /* Aynı anda başlayan iki cümle olursa (iki kanal birden) ikincisi düşer — aynı
+       kanalda üst üste klip host tarafından sessizce atılırdı. */
+    var temizE = [];
+    for (var ax = 0; ax < adaylarE.length; ax++) {
+      if (temizE.length && (adaylarE[ax].bas - temizE[temizE.length - 1].bas) < 0.4) continue;
+      temizE.push(adaylarE[ax]);
+    }
+    adaylarE = temizE;
+    if (adaylarE.length) adaylarE[0].bas = 0;            // Shorts'un ilk karesinden itibaren
+    for (var ay = 0; ay < adaylarE.length; ay++) {
+      var sonrakiBas = (ay + 1 < adaylarE.length) ? adaylarE[ay + 1].bas : hs.sure;
+      adaylarE[ay].sure = sonrakiBas - adaylarE[ay].bas;
+    }
+
+    var plan = [];
+    adaylarE.forEach(function (a) {
+      var png = a.png, sure = a.sure;
+      if (sure <= 0.1) return;
+      plan.push([png.yol, kanal, a.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
                  EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
                  png.duygu + " " + png.karakter].join("|"));
-      sonBitis = c.bas + sure;
     });
     if (!plan.length) return "emoji: plana giren yok";
+    logLine("Shorts emoji: " + plan.length + " emoji · kesintisiz (her biri bir sonrakine kadar) · " +
+            "toplam " + hs.sure.toFixed(1) + " sn kapsanıyor.");
 
     /* Resimleri önce projeye al (ParsMazi'de kilitlenmenin sebebi parça başına import'tu). */
     var uniq = {}, uListe = [];

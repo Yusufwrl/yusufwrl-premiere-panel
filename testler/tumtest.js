@@ -1658,6 +1658,48 @@ function bitir() {
     dogru("global indeks (100) metne SIZMIYOR", mt.indexOf("100 [") === -1);
   })();
 
+/* ================= 24. HAZIR TRACK STYLE PAKETİ (varsayilan/stiller) =================
+   ⚠ NEDEN VAR: stiller ParsMazi'ye YALNIZ bu paketle gidiyor ve dosya adları pakette ASCII
+   (stilNN.prtextstyle) — gerçek adlar stiller.json'da. İkisi ayrışırsa stil sessizce
+   kurulmuyor: panel "kuruldu" der, kullanıcının Track Style listesinde hiçbir şey çıkmaz.
+   Kullanıcı Shorts için 6 yeni stil ekledi (11 Ağustos 2026) ve bunlar da gitmeli. */
+  baslik("Hazır Track Style paketi");
+  (function () {
+    var kls = path.join(KOK, "varsayilan", "stiller");
+    var jsn = path.join(KOK, "varsayilan", "stiller.json");
+    var dosyalar = [], kayit = null;
+    try { dosyalar = fs.readdirSync(kls).filter(function (f) { return /\.prtextstyle$/i.test(f); }); }
+    catch (e) { hata("varsayilan/stiller klasörü okunamadı", e.message); return; }
+    try { kayit = JSON.parse(fs.readFileSync(jsn, "utf8")); }
+    catch (e2) { hata("stiller.json okunamadı", e2.message); return; }
+
+    dogru("pakette stil var (" + dosyalar.length + ")", dosyalar.length > 0);
+    esit("stiller.json kaydı = paketteki dosya sayısı", kayit.length, dosyalar.length);
+
+    var eksik = [], adsiz = [];
+    kayit.forEach(function (k) {
+      if (dosyalar.indexOf(k.dosya) === -1) eksik.push(k.dosya);
+      if (!k.ad || !/\.prtextstyle$/i.test(k.ad)) adsiz.push(k.dosya);
+    });
+    esit("stiller.json'daki her dosya pakette VAR", eksik, []);
+    esit("her kaydın gerçek adı var", adsiz, []);
+
+    /* ⚠ PAKET ADLARI ASCII OLMAK ZORUNDA — zip zincirinde Türkçe karakterli ad bozulursa
+       stil sessizce kaybolur (CLAUDE.md'deki karar). */
+    var asciiDisi = dosyalar.filter(function (f) { return /[^\x20-\x7E]/.test(f); });
+    esit("paket dosya adları ASCII", asciiDisi, []);
+
+    /* Shorts stilleri gerçekten pakete girdi mi — kullanıcının açık isteği. */
+    var shortsSay = kayit.filter(function (k) { return /^Shorts /i.test(String(k.ad)); }).length;
+    dogru("Shorts Track Style'ları pakette (" + shortsSay + ")", shortsSay >= 6,
+          "adlar: " + kayit.map(function (k) { return k.ad; }).join(", "));
+    /* Boyut nöbetçisi: 0 baytlık bir stil dosyası Premiere'de sessizce hiçbir şey yapmaz. */
+    var bosDosya = dosyalar.filter(function (f) {
+      try { return fs.statSync(path.join(kls, f)).size < 1000; } catch (e3) { return true; }
+    });
+    esit("hiçbir stil dosyası boş/bozuk değil", bosDosya, []);
+  })();
+
 /* ================= 20. MOJIBAKE (UTF-8 dosyanin ANSI okunup yeniden yazilmasi) =================
    ⚠ GERCEKTEN OLDU (11 Agustos 2026, surum bump'i sirasinda). PowerShell'de
        (Get-Content dosya -Raw) -replace '...' | Out-File dosya -Encoding utf8

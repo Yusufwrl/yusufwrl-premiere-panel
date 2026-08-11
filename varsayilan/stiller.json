@@ -1,26 +1,50 @@
-﻿[
+[
     {
-        "dosya":  "stil01.prtextstyle",
-        "ad":  "Kırmızı Text.prtextstyle"
+        "dosya": "stil01.prtextstyle",
+        "ad": "Kırmızı Text.prtextstyle"
     },
     {
-        "dosya":  "stil02.prtextstyle",
-        "ad":  "Mavi Text.prtextstyle"
+        "dosya": "stil02.prtextstyle",
+        "ad": "Mavi Text.prtextstyle"
     },
     {
-        "dosya":  "stil03.prtextstyle",
-        "ad":  "Mor Text.prtextstyle"
+        "dosya": "stil03.prtextstyle",
+        "ad": "Mor Text.prtextstyle"
     },
     {
-        "dosya":  "stil04.prtextstyle",
-        "ad":  "Pembe Text.prtextstyle"
+        "dosya": "stil04.prtextstyle",
+        "ad": "Pembe Text.prtextstyle"
     },
     {
-        "dosya":  "stil05.prtextstyle",
-        "ad":  "Siyah Text.prtextstyle"
+        "dosya": "stil05.prtextstyle",
+        "ad": "Shorts Beyaz Text.prtextstyle"
     },
     {
-        "dosya":  "stil06.prtextstyle",
-        "ad":  "Yeşil Text.prtextstyle"
+        "dosya": "stil06.prtextstyle",
+        "ad": "Shorts Kırmızı Text.prtextstyle"
+    },
+    {
+        "dosya": "stil07.prtextstyle",
+        "ad": "Shorts Mavi Text.prtextstyle"
+    },
+    {
+        "dosya": "stil08.prtextstyle",
+        "ad": "Shorts Mor Text.prtextstyle"
+    },
+    {
+        "dosya": "stil09.prtextstyle",
+        "ad": "Shorts Pink Text.prtextstyle"
+    },
+    {
+        "dosya": "stil10.prtextstyle",
+        "ad": "Shorts Yeşil Text.prtextstyle"
+    },
+    {
+        "dosya": "stil11.prtextstyle",
+        "ad": "Siyah Text.prtextstyle"
+    },
+    {
+        "dosya": "stil12.prtextstyle",
+        "ad": "Yeşil Text.prtextstyle"
     }
 ]

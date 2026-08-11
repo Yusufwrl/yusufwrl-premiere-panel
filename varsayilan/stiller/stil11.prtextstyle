@@ -2,7 +2,7 @@
 <PremiereData Version="3">
 	<Project ObjectRef="1"/>
 	<Project ObjectID="1" ClassID="62ad66dd-0dcd-42da-a660-6d8fbde94876" Version="45">
-		<RootProjectItem ObjectURef="9277feeb-3dae-4ea2-a55e-68c355185630"/>
+		<RootProjectItem ObjectURef="aca53803-e9bc-4424-9ae4-f8dce0ff9cb2"/>
 		<ProjectSettings ObjectRef="2"/>
 		<MovieCompileSettings ObjectRef="3"/>
 		<StillCompileSettings ObjectRef="4"/>
@@ -14,13 +14,13 @@
 		<ProjectWorkspace ObjectRef="10"/>
 		<NextID>1000000</NextID>
 	</Project>
-	<RootProjectItem ObjectUID="9277feeb-3dae-4ea2-a55e-68c355185630" ClassID="1c307a89-9318-47d7-a583-bf2553736543" Version="1">
+	<RootProjectItem ObjectUID="aca53803-e9bc-4424-9ae4-f8dce0ff9cb2" ClassID="1c307a89-9318-47d7-a583-bf2553736543" Version="1">
 		<ProjectItem Version="1">
 			<Name>Root Bin</Name>
 		</ProjectItem>
 		<ProjectItemContainer Version="1">
 			<Items Version="1">
-				<Item Index="0" ObjectURef="8705af69-28f8-4d7f-9e0e-9cb369a081a8"/>
+				<Item Index="0" ObjectURef="353a512f-5d92-49ea-bcb6-67eff7019451"/>
 			</Items>
 		</ProjectItemContainer>
 	</RootProjectItem>
@@ -106,14 +106,14 @@
 		<EmbedProjectLink>false</EmbedProjectLink>
 	</CompileSettings>
 	<ScratchDiskSettings ObjectID="8" ClassID="4c6ed82b-a81c-4df1-8bd0-750504c4b560" Version="4">
+		<CapturedVideoLocation0>SameAsProject</CapturedVideoLocation0>
+		<AutoSaveLocation0>SameAsProject</AutoSaveLocation0>
+		<CCLibrariesLocation0>SameAsProject</CCLibrariesLocation0>
+		<CapsuleMediaLocation0>SameAsProject</CapsuleMediaLocation0>
+		<DVDEncodingLocation0>SameAsProject</DVDEncodingLocation0>
+		<TransferMediaLocation0>SameAsProject</TransferMediaLocation0>
 		<AudioPreviewLocation0>SameAsProject</AudioPreviewLocation0>
 		<VideoPreviewLocation0>SameAsProject</VideoPreviewLocation0>
-		<TransferMediaLocation0>SameAsProject</TransferMediaLocation0>
-		<DVDEncodingLocation0>SameAsProject</DVDEncodingLocation0>
-		<CCLibrariesLocation0>SameAsProject</CCLibrariesLocation0>
-		<AutoSaveLocation0>SameAsProject</AutoSaveLocation0>
-		<CapturedVideoLocation0>SameAsProject</CapturedVideoLocation0>
-		<CapsuleMediaLocation0>SameAsProject</CapsuleMediaLocation0>
 	</ScratchDiskSettings>
 	<IngestSettings ObjectID="9" ClassID="2db8f76b-2c37-48ee-925d-9a4f7278152d" Version="2">
 		<Action>copy</Action>
@@ -121,14 +121,14 @@
 	</IngestSettings>
 	<WorkspaceSettings ObjectID="10" ClassID="c4372273-e1aa-4683-98aa-a2ceadf3066c" Version="1">
 	</WorkspaceSettings>
-	<StyleProjectItem ObjectUID="8705af69-28f8-4d7f-9e0e-9cb369a081a8" ClassID="31673410-6b9a-420b-990a-fdfe31ef94f3" Version="1">
+	<StyleProjectItem ObjectUID="353a512f-5d92-49ea-bcb6-67eff7019451" ClassID="31673410-6b9a-420b-990a-fdfe31ef94f3" Version="1">
 		<ProjectItem Version="1">
 			<Node Version="1">
 				<Properties Version="1">
-					<project.icon.view.grid.order>26</project.icon.view.grid.order>
+					<project.icon.view.grid.order>5</project.icon.view.grid.order>
 				</Properties>
 			</Node>
-			<Name>Shorts Kırmızı Text</Name>
+			<Name>Beyaz Text</Name>
 		</ProjectItem>
 		<Component ObjectRef="27"/>
 	</StyleProjectItem>
@@ -393,7 +393,7 @@
 		<ParameterControlType>9</ParameterControlType>
 		<ParameterID>1</ParameterID>
 		<StartKeyframePosition>-91445760000000000</StartKeyframePosition>
-		<StartKeyframeValue Encoding="base64" BinaryHash="7e3cce3f-fb47-e065-d903-c54a00000340">KAMAAAAAAABEMyIRDAAAAAAABgAKAAQABgAAAGQAAAAAAF4AVAAYABQAAAAAAFAATAAAAAAAAAAAAEgARwBAADwAOAA0ADAALAAAACgAJAAAAAAAAAAAAAAAIgAAAAAAAAAAAAAAHAAQAAAAAAAAAAwAAAAAAAgAAAAAACMABwBeAAAAAAAAAQgBAABIAAAAnAEAANwBAAD4AQAAmAEAAAAAAQBli15BWEQHQrQBAAAAAAAAmpnZQJqZyUCPVQFDAADIQgAAAAGgAQAAAgAAAAIAAAABAAAAHAAAAAAAFgAcAAgABwAMAAAAAAAQABQAAAAYABYAAAAAAAABFAAAAAAAyELNzAxBAAAEQgwAAAD2/f//AAAAAJL///8IAAAAJAAAAAIAAAAUAAAABAAAAIb///8AAIA/AAAAPxr///8AAAA/AgAAACgAAAAEAAAAev///wwAAAAAAIA/AAAAP1D+//8AAAoADAAEAAAACAAKAAAACAAAAAAAAD9u////AAAAPz8/CgAMAAAACAAEAAoAAAAIAAAAMAAAAAIAAAAgAAAAEAAAAAAACgAMAAAABAAIAAoAAAAAAIA/AAAAP57///8AAAA/AgAAADQAAAAQAAAAAAAKABAABAAIAAwACgAAAAwAAAAAAIA/AAAAP+D+//8AAAoADgAEAAAACAAKAAAAFAAAAAAAAD8AAAoACgAHAAgACQAKAAAAAAAAAAAACgAIAAAAAAAEAAoAAACrqiq+AQAAAAwAAAAAAAYACAAEAAYAAAAEAAAADQAAAEFuaW1hdGlvblR5cGUAAABG////AAAAAE7///8AVAACAQAAAAQAAAAQAAAAQ29taWNTYW5zTVMtQm9sZAAAAAABAAAADAAAAAgADAAEAAgACAAAAAgAAABEAAAAAgAAAEFhAAAAADYAIAAAABwAAAAAABgAFwAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAACAAEADYAAAACAAAAGAAAABwAAAAAABBBAAAAASAAAAAAANxC4P///wQABgAEAAAAAAAKAAgABQAGAAcACgAAAAC7AAQEAAQABAAAAA==
+		<StartKeyframeValue Encoding="base64" BinaryHash="54325550-6c6a-0f32-1bc6-7b0000000340">KAMAAAAAAABEMyIRDAAAAAAABgAKAAQABgAAAGQAAAAAAF4AVAAYABQAAAAAAFAATAAAAAAAAAAAAEgARwBAADwAOAA0ADAALAAAACgAJAAAAAAAAAAAAAAAIgAAAAAAAAAAAAAAHAAQAAAAAAAAAAwAAAAAAAgAAAAAACMABwBeAAAAAAAAAQgBAABIAAAAnAEAANwBAAD4AQAAmAEAAAAAAQBli15BWEQHQrQBAAAAAAAAmpnZQJqZyUCPVQFDAADIQgAAAAGgAQAAAgAAAAIAAAABAAAAHAAAAAAAFgAcAAgABwAMAAAAAAAQABQAAAAYABYAAAAAAAABFAAAAAAAyELNzAxBAAAEQgwAAAD2/f//AAAAAJL///8IAAAAJAAAAAIAAAAUAAAABAAAAIb///8AAIA/AAAAPxr///8AAAA/AgAAACgAAAAEAAAAev///wwAAAAAAIA/AAAAP1D+//8AAAoADAAEAAAACAAKAAAACAAAAAAAAD9u////AAAAPz8/CgAMAAAACAAEAAoAAAAIAAAAMAAAAAIAAAAgAAAAEAAAAAAACgAMAAAABAAIAAoAAAAAAIA/AAAAP57///8AAAA/AgAAADQAAAAQAAAAAAAKABAABAAIAAwACgAAAAwAAAAAAIA/AAAAP+D+//8AAAoADgAEAAAACAAKAAAAFAAAAAAAAD8AAAoACgAHAAgACQAKAAAAAAAAAAAACgAIAAAAAAAEAAoAAACHv02+AQAAAAwAAAAAAAYACAAEAAYAAAAEAAAADQAAAEFuaW1hdGlvblR5cGUAAABG////AAAAAE7///8AKSkpAQAAAAQAAAAQAAAAQ29taWNTYW5zTVMtQm9sZAAAAAABAAAADAAAAAgADAAEAAgACAAAAAgAAABEAAAAAgAAAEFhAAAAADYAIAAAABwAAAAAABgAFwAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAACAAEADYAAAACAAAAGAAAABwAAAAAABBBAAAAASAAAADxF7FC4P///wQABgAEAAAAAAAKAAgABQAGAAcACgAAAAAAAAAEAAQABAAAAA==
 		</StartKeyframeValue>
 	</ArbVideoComponentParam>
 	<VideoComponentParam ObjectID="41" ClassID="cc12343e-f113-4d3b-ae05-b287db77d461" Version="10">
