@@ -1468,6 +1468,33 @@ function bitir() {
     esit("emoji zamanı ofsetlendi", [er.araliklar[0].bas, er.araliklar[0].bit], [1, 4]);
     esit("emoji GİRDİSİ değişmedi", JSON.stringify(em), emOnce);
 
+    /* --- sonaKirp: KARE YUVARLAMASI PAYI ---
+       ⚠ GERÇEK HATA (11 Ağustos 2026): host `sure`yi son klibin geri okunan bitişinden alıyor,
+       panel cue'ları kaynak kesit sınırlarından hesaplıyor; 0.058 sn'lik fark "geçersiz zaman"
+       sayılıp BÜTÜN altyazı yazımını durdurmuştu (5 karakterden yalnız 1'i yazıldı). */
+    var kirpTest = [
+      { start: 10, end: 20, text: "normal" },
+      { start: 30, end: 33.06, text: "kare payi kadar tasan" },   // 0.06 sn — kırpılmalı
+      { start: 32.9, end: 33.02, text: "kirpilinca cok kisalan" },// kırpınca 0.1 sn kalır
+      { start: 5, end: 40, text: "COK tasan" }                    // 7 sn — kırpılMAmalı
+    ];
+    var kOnce = JSON.stringify(kirpTest);
+    var kr = SZM.sonaKirp(kirpTest, 33);
+    esit("kare payı kadar taşan KIRPILDI", kr.sayac.kirpilan, 2);
+    esit("çok taşan KIRPILMADI (gerçek hata, dogrula yakalasın)", kr.sayac.buyukTasma, 1);
+    var kn = kr.cues.filter(function (c) { return c.text === "kare payi kadar tasan"; })[0];
+    esit("kırpılan cue tam Shorts sonunda bitiyor", kn.end, 33);
+    dogru("çok taşan cue listede DURUYOR (silinmedi)",
+          kr.cues.some(function (c) { return c.text === "COK tasan" && c.end === 40; }));
+    esit("sonaKirp GİRDİYİ değiştirmedi", JSON.stringify(kirpTest), kOnce);
+    /* Kırpınca 0.05 sn altına düşen cue düşürülür (göz kırpması bırakmaz). */
+    var kr2 = SZM.sonaKirp([{ start: 32.98, end: 33.4 }], 33);
+    esit("kırpınca çok kısalan düştü", kr2.sayac.dusen, 1);
+    esit("düşen listede yok", kr2.cues.length, 0);
+    /* ⚠ Kırpma SONRASI dogrula temiz dönmeli — akıştaki sıra bu. */
+    var akis = SZM.sonaKirp([{ start: 10, end: 33.04 }], 33);
+    esit("kırpma sonrası doğrulama temiz", SZM.dogrula(akis.cues, 33), []);
+
     /* --- dogrula: SRT yazılmadan önceki son nöbetçi --- */
     esit("temiz liste hatasız", SZM.dogrula(r.cues, r.sure), []);
     var bozuk = [{ start: -1, end: 2 }, { start: 5, end: 4 }, { start: 30, end: 99 }];

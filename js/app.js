@@ -3291,7 +3291,7 @@
       var kaynakKesit = (hs.kesitler && hs.kesitler.length && hs.kesitler[0].kaynakBas !== undefined)
         ? hs.kesitler.map(function (k) { return { bas: k.kaynakBas, bit: k.kaynakBit }; })
         : sec.kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
-      var altOk = 0, altHata = "", gizli = 0, disarida = 0;
+      var altOk = 0, altHata = "", gizli = 0, disarida = 0, sonaKirpilan = 0;
       if ($("shortsAltyazi") && $("shortsAltyazi").checked) {
         yaz("altyazı yazılıyor…");
         var capDir = path.join(cfg.workDir, "captions");
@@ -3301,13 +3301,26 @@
           var yazilacak = hm.cues.filter(function (c) { return !c.gizliKesit && String(c.text || "").trim(); });
           gizli += hm.sayac.gizlenen; disarida += hm.sayac.disarida;
           if (!yazilacak.length) continue;
-          /* ⚠ SON NÖBETÇİ: fmtTime negatif zamanı SESSİZCE 0 yapıyor, yani ters bir ofset
-             bütün altyazıyı 00:00:00'a yığar ve panel "ok" derdi. Tek ihlalde hiçbir şey yazma. */
+          /* ⚠ ÖNCE KIRP, SONRA DOĞRULA — İKİSİ AYRI ŞEY.
+             Host `hs.sure`yi son klibin GERİ OKUNAN bitişinden alıyor, panel cue'ları kaynak
+             kesit sınırlarından hesaplıyor; Premiere kareye yuvarladığı için arada ~0.06 sn
+             fark kalabiliyor. Eskiden bu "geçersiz zaman" sayılıp BÜTÜN altyazı yazımını
+             durduruyordu (5 karakterden yalnız 1'i yazıldı — kullanıcı bildirdi).
+             Artık yuvarlama payı (0.5 sn) sessizce kırpılıyor; onun ÜSTÜ hâlâ hata. */
+          var kirp = SZAMAN.sonaKirp(yazilacak, hs.sure);
+          yazilacak = kirp.cues;
+          sonaKirpilan += kirp.sayac.kirpilan;
+          /* ⚠ SON NÖBETÇİ DURUYOR: fmtTime negatif zamanı SESSİZCE 0 yapıyor, yani ters bir
+             ofset bütün altyazıyı 00:00:00'a yığar ve panel "ok" derdi. */
           var ihlal = SZAMAN.dogrula(yazilacak, hs.sure);
           if (ihlal.length) {
-            altHata = ihlal.length + " altyazı zamanı geçersiz (" + ihlal[0] + ")";
-            logLine("Shorts altyazı DURDU: " + ihlal.slice(0, 3).join(" · "));
-            break;
+            /* ⚠ `break` DEĞİL `continue`: gruplar BAĞIMSIZ. Bir karakterin cue'ları bozuksa
+               ötekilerin altyazısı yine yazılmalı — eskiden ilk hata kalan HERKESİ
+               susturuyordu ve sebebi sonuç mesajında tek satırdı. */
+            altHata = (altHata ? altHata + " ; " : "") + gruplar[gi].ad + ": " +
+                      ihlal.length + " zaman geçersiz (" + ihlal[0] + ")";
+            logLine("Shorts altyazı ATLANDI (" + gruplar[gi].ad + "): " + ihlal.slice(0, 3).join(" · "));
+            continue;
           }
           var srtFile = path.join(capDir, "shorts_" + Date.now() + "_" + gi + ".srt");
           fs.writeFileSync(srtFile, pipeline.cuesToSrt(yazilacak), "utf8");
@@ -3334,6 +3347,8 @@
                 hs.sure.toFixed(1) + " sn · " + hs.w + "x" + hs.h;
       if (altOk) msg += " · " + altOk + " altyazı kanalı";
       if (gizli || disarida) msg += " (" + disarida + " cümle kesit dışı, " + gizli + " sınırda gizlendi)";
+      /* Yuvarlama kırpması SESSİZ KALMAZ ama HATA da değil — sonuç yeşil kalabilir. */
+      if (sonaKirpilan) msg += " · " + sonaKirpilan + " altyazı Shorts sonuna kırpıldı (kare payı)";
       if (altHata) msg += " · ⚠ altyazı: " + altHata;
       if (hs.olcekHata) msg += " · ⚠ ölçek: " + hs.olcekHata;
       /* ⚠ SES UYARISI — ÖLÇÜLMEDİ, o yüzden SORULUYOR. createSubClip yalnız o project

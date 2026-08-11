@@ -142,6 +142,39 @@ function araliklariHarita(kesitler, araliklar) {
  * Aralık dışı emoji de host tarafından sessizce yutulur. Tek bir ihlalde bile HİÇBİR ŞEY
  * yazılmamalı: sessiz kırpma/kelepçeleme yasak.
  */
+/*
+ * SHORTS SONUNA KIRP — kare yuvarlaması payı.
+ * ⚠ GERÇEK HATA (11 Ağustos 2026): host `sure`yi son klibin GERİ OKUNAN bitişinden alıyor,
+ * panel cue'ları kaynak kesit sınırlarından hesaplıyor; Premiere kareye yuvarladığı için
+ * arada ~0.06 sn fark kalabiliyor. `dogrula` bunu mantık hatası sanıp bütün altyazı
+ * yazımını durduruyordu (5 karakterden yalnız 1'inin altyazısı yazıldı).
+ * POLİTİKA ALTYAZIDAKİYLE AYNI: KIRP → (çok kısaldıysa) DÜŞÜR → İTME ASLA.
+ * ⚠ `pay` KÜÇÜK TUTULUR (0.5 sn): bunun üstü yuvarlama değil, gerçek bir hesap hatasıdır
+ * ve `dogrula`nın yakalaması GEREKİR — sessizce kırpmak o hatayı gizlerdi.
+ */
+function sonaKirp(cues, sure, opts) {
+  opts = opts || {};
+  var pay = (typeof opts.pay === "number") ? opts.pay : 0.5;
+  var enAz = (typeof opts.enAz === "number") ? opts.enAz : 0.05;
+  var cikti = [], sayac = { kirpilan: 0, dusen: 0, buyukTasma: 0 };
+  for (var i = 0; i < (cues || []).length; i++) {
+    var c = cues[i];
+    if (c.end > sure) {
+      /* Pay dışındaki taşma KIRPILMAZ — olduğu gibi bırakılır ki dogrula yakalasın. */
+      if (c.end - sure > pay) { sayac.buyukTasma++; cikti.push(c); continue; }
+      var yeni = {};
+      for (var alan in c) { if (Object.prototype.hasOwnProperty.call(c, alan)) yeni[alan] = c[alan]; }
+      yeni.end = sure;
+      sayac.kirpilan++;
+      if (yeni.end - yeni.start < enAz) { sayac.dusen++; continue; }
+      cikti.push(yeni);
+      continue;
+    }
+    cikti.push(c);
+  }
+  return { cues: cikti, sayac: sayac };
+}
+
 function dogrula(cues, sure, opts) {
   opts = opts || {};
   var tol = (typeof opts.tolerans === "number") ? opts.tolerans : 0.05;
@@ -160,5 +193,6 @@ function dogrula(cues, sure, opts) {
 module.exports = {
   MIN_GORUNUR: MIN_GORUNUR,
   zamanCevir: zamanCevir, toplamSure: toplamSure,
-  cueHarita: cueHarita, araliklariHarita: araliklariHarita, dogrula: dogrula
+  cueHarita: cueHarita, araliklariHarita: araliklariHarita,
+  sonaKirp: sonaKirp, dogrula: dogrula
 };
