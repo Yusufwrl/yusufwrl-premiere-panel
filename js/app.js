@@ -3278,7 +3278,14 @@
          Zaten kesitler birleşince zamanlar kayıyor, yeniden yazmak doğrusu.
          ⚠ Cue'lar host'un GERİ OKUDUĞU kesit listesinden haritalanır, panelin varsaydığı
          aritmetikten DEĞİL — Premiere klip sınırlarını kareye yuvarlıyor. */
-      var kaynakKesit = sec.kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
+      /* ⚠ PANELİN İSTEDİĞİ DEĞİL HOST'UN GERÇEKTEN KULLANDIĞI ARALIK.
+         Kesit klip sınırına kırpılmış olabilir (AutoCut'lı timeline'da bir kesit birden çok
+         klibe yayılıyor ve parçalanıyor). Panel kendi aritmetiğini kullanırsa cue'lar yanlış
+         yere düşer — kullanıcının ilk denemesinde altyazının yarısı eksik geldi, sebebi buydu.
+         Host `kaynakBas/kaynakBit` döndürmüyorsa (eski host) panelin isteğine düşülür. */
+      var kaynakKesit = (hs.kesitler && hs.kesitler.length && hs.kesitler[0].kaynakBas !== undefined)
+        ? hs.kesitler.map(function (k) { return { bas: k.kaynakBas, bit: k.kaynakBit }; })
+        : sec.kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
       var altOk = 0, altHata = "", gizli = 0, disarida = 0;
       if ($("shortsAltyazi") && $("shortsAltyazi").checked) {
         yaz("altyazı yazılıyor…");
@@ -3306,8 +3313,18 @@
         }
       }
 
+      /* --- 5.5) EMOJİ --- */
+      var emojiSonuc = "";
+      if ($("shortsEmoji") && $("shortsEmoji").checked) {
+        yaz("emoji seçiliyor…");
+        try { emojiSonuc = await shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz); }
+        catch (eEm) { emojiSonuc = "emoji hatası: " + (eEm.message || eEm); }
+        logLine("Shorts emoji: " + emojiSonuc);
+      }
+
       /* --- 6) SONUÇ — DÜRÜST --- */
-      var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) || !!sec.uyari;
+      var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) || !!sec.uyari ||
+                  (emojiSonuc && emojiSonuc.indexOf("✓") !== 0);
       var msg = "“" + hs.ad + "” oluşturuldu · " + hs.kesitler.length + " kesit · " +
                 hs.sure.toFixed(1) + " sn · " + hs.w + "x" + hs.h;
       if (altOk) msg += " · " + altOk + " altyazı kanalı";
@@ -3324,7 +3341,8 @@
         kismi = true;
       }
       if (sec.uyari) msg += " · ⚠ " + sec.uyari;
-      msg += " · emoji için Emoji ekranına geç (Shorts sekansı açık kalıyor)";
+      if (emojiSonuc) msg += " · " + emojiSonuc;
+      msg += " · Shorts sekansı açık bırakıldı";
       yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : "var(--good)");
 
       /* ⚠ SHORTS SEKANSI AÇIK BIRAKILIYOR — bilerek. Kullanıcı sonucu hemen görmeli ve
@@ -3346,6 +3364,115 @@
       var bi = $("btnShortsIptal"); if (bi) { bi.hidden = true; bi.disabled = false; }
       _shortsIptal = false;
     }
+  }
+
+  /* ── SHORTS'A EMOJİ ──
+     ⚠ NEDEN AYRI FONKSİYON, emojiEkle YENİDEN KULLANILMIYOR: emojiEkle state'i DOĞRUDAN
+     okuyor (state.a1Cues / aktifKanallar()) ve zamanları UZUN VİDEO ekseninde. Ona bir
+     "Shorts kaynağı" alanı eklemek, kullanıcı Shorts ürettikten sonra uzun videoda Emoji'ye
+     bastığında 300 PNG'yi ilk 35 saniyeye yığardı ve panel YEŞİL derdi — bu projede
+     "global durum bir sonraki işe sızıyor" sınıfı zaten üç kez yaşandı (emoji.esle.a1).
+     Burada kaynak PARAMETRE, state'e hiç dokunulmuyor.
+     ⚠ KONUM DİKEY + ÜST: kullanıcı "emojiler ekranın üstünde" dedi. emojikonum.js'in `ust`
+     dalı bunun için var; dikeyde sağ 0.708 · sol 0.292 (ölçüldü, kareye sığıyor). */
+  async function shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz) {
+    if (!EMJ || !VUR || !KONUM || !SZAMAN) return "emoji modülü yok";
+    var kok = String(($("emojiKlasor") || {}).value || "").trim() || emojiKlasorVarsayilan();
+    var tarama = EMJ.tara(kok);
+    if (tarama.hata) return "emoji: " + tarama.hata;
+    var anahtar = "";
+    try { anahtar = VUR.anahtarOku(extRoot); } catch (e) { return "emoji: anahtar yok"; }
+
+    /* Cümleleri Shorts eksenine taşınmış cue'lardan çıkar; karakteri GRUP ADINDAN eşleştir. */
+    var cumleler = [], gi;
+    for (gi = 0; gi < gruplar.length; gi++) {
+      var kar = emojiKarakterAra(tarama, EMJ.asciiAnahtar(gruplar[gi].ad));
+      if (!kar) continue;                                  // resmi olmayan karakter sessizce atlanır
+      var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
+      var gorunur = hm.cues.filter(function (c) { return !c.gizliKesit; });
+      var cl = null;
+      try { cl = VUR.cumleleriCikar(gorunur); } catch (eC) { cl = null; }
+      (cl || []).forEach(function (c) {
+        if (!c.metin || emojiKelimeSay(c.metin) < EMOJI_MIN_KELIME) return;
+        cumleler.push({ bas: c.bas, bit: c.bit, metin: c.metin, kar: kar,
+                        a1: (gi === 0), ad: gruplar[gi].ad });
+      });
+    }
+    if (!cumleler.length) return "emoji: uygun cümle yok";
+    cumleler.sort(function (a, b) { return a.bas - b.bas; });
+    for (var q = 0; q < cumleler.length; q++) cumleler[q].sira = q + 1;
+
+    if (yaz) yaz("emoji duyguları seçiliyor… (" + cumleler.length + " cümle)");
+    var sec = await EMJ.duygulariSec(VUR, anahtar, cumleler, tarama.duygular,
+      { hedefOran: emojiOran(), karakterDuygu: tarama.karakterDuygu }, VUR.iptalDamgasi(), logLine);
+    if (sec.hata) return "emoji: " + sec.hata;
+    var indeks = {}; cumleler.forEach(function (c) { indeks[c.sira] = c; });
+
+    /* Hedef kanal: Shorts sekansında V1 dolu, üstü boş. */
+    var ek = null;
+    try { ek = JSON.parse(String(await evalES("emojiKanallariJSON()"))); } catch (eK) { return "emoji: kanal okunamadı"; }
+    if (!ek || ek.error || !ek.tracks) return "emoji: kanal okunamadı";
+    var enUstDolu = -1, kanal = -1, t;
+    for (var i2 = 0; i2 < ek.tracks.length; i2++) if (ek.tracks[i2].klip > 0) enUstDolu = ek.tracks[i2].idx;
+    for (var i3 = 0; i3 < ek.tracks.length; i3++) {
+      t = ek.tracks[i3];
+      if (t.idx > enUstDolu && t.klip === 0 && !t.kilit) { kanal = t.idx; break; }
+    }
+    if (kanal < 0) return "emoji: boş video kanalı yok (kanal başlığına sağ tık → Add Track)";
+
+    var konSag = emojiKonum(hs.w, hs.h, true, true);       // ÜST + dikey taban
+    var konSol = emojiKonum(hs.w, hs.h, false, true);
+    var plan = [], sonBitis = -999, aynaBellek = {};
+    sec.secimler.forEach(function (s) {
+      var c = indeks[s.sira];
+      if (!c) return;
+      var vl = tarama.matris[s.duygu + "|" + c.kar.key];
+      if (!vl || !vl.length) return;
+      var png = vl[0];
+      if (!png.h) return;
+      if (c.bas < sonBitis + EMOJI_GAP) return;
+      var sure = Math.max(EMOJI_MIN_SURE, Math.min(EMOJI_MAX_SURE, c.bit - c.bas));
+      if (c.bas + sure > hs.sure) sure = hs.sure - c.bas;   // Shorts dışına taşmasın
+      if (sure < EMOJI_MIN_SURE) return;
+      var sagMi = emojiSagMi(c.kar.key, c.a1);
+      var kon = sagMi ? konSag : konSol;
+      var yol = png.yol;
+      if (!sagMi && AYNA) {
+        if (aynaBellek[png.yol] === undefined) {
+          try { var r = AYNA.aynaYolu(kok, png.yol); aynaBellek[png.yol] = (r && r.yol) || ""; }
+          catch (eA) { aynaBellek[png.yol] = ""; }
+        }
+        if (aynaBellek[png.yol]) yol = aynaBellek[png.yol];
+      }
+      plan.push([yol, kanal, c.bas.toFixed(3), sure.toFixed(3), kon.x, kon.y,
+                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
+                 png.duygu + " " + png.karakter].join("|"));
+      sonBitis = c.bas + sure;
+    });
+    if (!plan.length) return "emoji: plana giren yok";
+
+    /* Resimleri önce projeye al (ParsMazi'de kilitlenmenin sebebi parça başına import'tu). */
+    var uniq = {}, uListe = [];
+    plan.forEach(function (s2) { var y = String(s2).split("|")[0]; if (y && !uniq[y]) { uniq[y] = 1; uListe.push(y); } });
+    var impYol = path.join(extRoot, "emoji_import.txt");
+    try {
+      fs.writeFileSync(impYol, uListe.join("\n"), "utf8");
+      await evalES('emojiResimYukle("' + esPath(impYol) + '")');
+      try { fs.unlinkSync(impYol); } catch (e5) {}
+    } catch (eI) {}
+
+    var yol2 = path.join(extRoot, "emoji_plan.txt"), kondu = 0, p2;
+    for (p2 = 0; p2 < plan.length; p2 += EMOJI_PARCA) {
+      var dilim = plan.slice(p2, p2 + EMOJI_PARCA);
+      fs.writeFileSync(yol2, dilim.join("\n"), "utf8");
+      if (yaz) yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length);
+      var r2 = String(await evalES('emojiYerlestir("' + esPath(yol2) + '","' + (p2 ? "1" : "0") + '")',
+        function (sn) { if (yaz) yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length + " (" + sn + " sn)"); }));
+      if (r2.indexOf("ok:") !== 0) { try { fs.unlinkSync(yol2); } catch (e6) {} return "emoji DURDU: " + r2.replace(/^err:/, "").slice(0, 80); }
+      var m2 = r2.match(/^ok:(\d+)\//); if (m2) kondu += parseInt(m2[1], 10);
+    }
+    try { fs.unlinkSync(yol2); } catch (e7) {}
+    return (kondu === plan.length ? "✓ " : "⚠ ") + kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")";
   }
 
   function _shortsSaat(sn) {

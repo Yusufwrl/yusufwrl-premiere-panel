@@ -4213,43 +4213,80 @@ function shortsSekansKur(planYol) {
     try {
         bin = _binBulYarat(proj.rootItem, "Yusufwrl Shorts");
     } catch (eB) { bin = null; }
+    /* ⚠⚠ BIR KESIT TEK BIR KLIBE SIGMAK ZORUNDA DEGIL — GERCEK HATA (11 Agustos 2026).
+       Ilk surum kesitin yalnizca BASLADIGI klibi buluyor ve o klibin sinirlarini dayatiyordu;
+       kullanicinin AutoCut'tan gecmis timeline'inda V1 yuzlerce klip ve 12 saniyelik bir kesit
+       3-4 klibe yayiliyor. Belirti: "Kesit 1 klip sinirlarinin disina dusuyor
+       (kaynak 0.00-7.35, klip 0.00-7.33)" — 0.02 saniyelik tasma yuzunden ozellik hic calismadi.
+       ⚠ COZUM TOLERANSI BUYUTMEK DEGIL: kesit, ortustugu HER klip icin ayri bir alt klibe
+       bolunur ve parcalar arka arkaya dizilir. AutoCut aradaki sessizligi zaten kesmis
+       oldugu icin sonuc kesintisiz akar.
+       ⚠ PANEL, ISTEDIGI DEGIL GERCEKLESEN araligi kullanmak zorunda: kesit klip sinirinda
+       kirpilirsa altyazi kaydirmasi da o kirpilmis araliktan hesaplanmali, yoksa cue'lar
+       yanlis yere duser (kullanicinin ilk denemesinde altyazinin yarisi eksik geldi). */
+    var parcaSay = 0;
     for (i = 0; i < istenen.length; i++) {
         var kes = istenen[i];
-        var klip = _shortsKlipBul(kaynakSeq, kes.bas);
-        if (!klip) return jsonHata("Kesit " + (i + 1) + " (" + kes.bas.toFixed(1) +
-                                   " sn) hicbir klibe denk gelmiyor — kesit zamanlari bayat olabilir, " +
-                                   "AutoCut'tan sonra altyaziyi yeniden uret");
-        var srcBas = _shortsMedyaZamani(klip, kes.bas);
-        var srcBit = _shortsMedyaZamani(klip, kes.bit);
-        /* ⚠ AYIRT EDICI KONTROL: hesaplanan zaman klibin KAYNAK araliginda mi. Geri okuma
-           tek basina totoloji (ayni yanlis tabanla yazip ayni yanlis tabanla okumak). */
-        var klipIn = _zamanSn(klip.inPoint), klipSure = _zamanSn(klip.duration);
-        if (srcBas < klipIn - 0.001 || srcBit > klipIn + klipSure + 0.001) {
-            return jsonHata("Kesit " + (i + 1) + " klip sinirlarinin disina dusuyor " +
-                            "(kaynak " + srcBas.toFixed(2) + "-" + srcBit.toFixed(2) +
-                            ", klip " + klipIn.toFixed(2) + "-" + (klipIn + klipSure).toFixed(2) + ")");
+        /* Kesitle ortusen TUM klipler, zaman sirasiyla. */
+        var kesParca = [], vtx, cix, cc, ortakBas, ortakBit;
+        for (vtx = 0; vtx < kaynakSeq.videoTracks.numTracks; vtx++) {
+            for (cix = 0; cix < kaynakSeq.videoTracks[vtx].clips.numItems; cix++) {
+                cc = kaynakSeq.videoTracks[vtx].clips[cix];
+                ortakBas = Math.max(kes.bas, _zamanSn(cc.start));
+                ortakBit = Math.min(kes.bit, _zamanSn(cc.end));
+                if (ortakBit - ortakBas > 0.05) {          // 0.05 sn altindaki kirinti alinmaz
+                    kesParca.push({ klip: cc, bas: ortakBas, bit: ortakBit });
+                }
+            }
+            if (kesParca.length) break;                   // ilk dolu video kanali yeter
         }
-        var pi = null;
-        try { pi = klip.projectItem; } catch (eP) {}
-        if (!pi) return jsonHata("Kesit " + (i + 1) + ": klibin proje ogesi okunamadi");
-        var alt = null;
-        try { alt = pi.createSubClip("YW_S" + (i + 1), srcBas, srcBit, 1, 1, 1); }
-        catch (eS2) { return jsonHata("Kesit " + (i + 1) + " olusturulamadi: " + eS2.toString()); }
-        if (!alt) return jsonHata("Kesit " + (i + 1) + " olusturulamadi (bos dondu)");
-        /* GERI OKU: istenen sure gercekten olustu mu (bir kare tolerans). */
-        var gercekSure = -1;
-        try {
-            var ip = alt.getInPoint(), op = alt.getOutPoint();
-            gercekSure = _zamanSn(op) - _zamanSn(ip);
-        } catch (eR) { gercekSure = -1; }
-        var istenenSure = srcBit - srcBas;
-        if (gercekSure >= 0 && Math.abs(gercekSure - istenenSure) > 0.1) {
-            return jsonHata("Kesit " + (i + 1) + " suresi tutmadi (istenen " +
-                            istenenSure.toFixed(2) + " sn, olusan " + gercekSure.toFixed(2) + " sn)");
+        if (!kesParca.length) {
+            return jsonHata("Kesit " + (i + 1) + " (" + kes.bas.toFixed(1) +
+                            " sn) hicbir klibe denk gelmiyor — kesit zamanlari bayat olabilir, " +
+                            "AutoCut'tan sonra altyaziyi yeniden uret");
         }
-        try { if (bin) alt.moveBin(bin); } catch (eM) {}
-        altlar.push({ oge: alt, sure: (gercekSure > 0 ? gercekSure : istenenSure) });
+        kesParca.sort(function (a, b) { return a.bas - b.bas; });
+        /* GERCEKLESEN kaynak araligi: ilk parcanin basi, son parcanin bitisi. */
+        var gercekBas = kesParca[0].bas, gercekBit = kesParca[kesParca.length - 1].bit;
+        var pj;
+        for (pj = 0; pj < kesParca.length; pj++) {
+            var pr = kesParca[pj];
+            var srcBas = _shortsMedyaZamani(pr.klip, pr.bas);
+            var srcBit = _shortsMedyaZamani(pr.klip, pr.bit);
+            /* ⚠ AYIRT EDICI KONTROL DURUYOR ama artik KIRPARAK: parca zaten klip icinden
+               turetildigi icin tasma ancak kare yuvarlamasindan gelir. Geri okuma tek basina
+               totoloji oldugu icin bu kontrol kalmak zorunda. */
+            var klipIn = _zamanSn(pr.klip.inPoint), klipSure = _zamanSn(pr.klip.duration);
+            if (srcBas < klipIn) srcBas = klipIn;
+            if (srcBit > klipIn + klipSure) srcBit = klipIn + klipSure;
+            if (srcBit - srcBas < 0.05) continue;         // yuvarlama sonrasi eridi
+            var pi = null;
+            try { pi = pr.klip.projectItem; } catch (eP) {}
+            if (!pi) return jsonHata("Kesit " + (i + 1) + ": klibin proje ogesi okunamadi");
+            var alt = null;
+            parcaSay++;
+            try { alt = pi.createSubClip("YW_S" + parcaSay, srcBas, srcBit, 1, 1, 1); }
+            catch (eS2) { return jsonHata("Kesit " + (i + 1) + " olusturulamadi: " + eS2.toString()); }
+            if (!alt) return jsonHata("Kesit " + (i + 1) + " olusturulamadi (bos dondu)");
+            var gercekSure = -1;
+            try {
+                var ip = alt.getInPoint(), op = alt.getOutPoint();
+                gercekSure = _zamanSn(op) - _zamanSn(ip);
+            } catch (eR) { gercekSure = -1; }
+            var istenenSure = srcBit - srcBas;
+            if (gercekSure >= 0 && Math.abs(gercekSure - istenenSure) > 0.15) {
+                return jsonHata("Kesit " + (i + 1) + " suresi tutmadi (istenen " +
+                                istenenSure.toFixed(2) + " sn, olusan " + gercekSure.toFixed(2) + " sn)");
+            }
+            try { if (bin) alt.moveBin(bin); } catch (eM) {}
+            /* kesitNo: bu alt klip HANGI kesite ait — Shorts eksenindeki kesit sinirlarini
+               parcalardan geri kurmak icin sart. */
+            altlar.push({ oge: alt, sure: (gercekSure > 0 ? gercekSure : istenenSure), kesitNo: i });
+        }
+        istenen[i].gercekBas = gercekBas;
+        istenen[i].gercekBit = gercekBit;
     }
+    if (!altlar.length) return jsonHata("Hicbir kesit olusturulamadi");
 
     /* --- YENI SEKANS (TUZAK 1: FromClips, preset istemiyor) --- */
     var ad = "Shorts " + _shortsSayac(proj);
@@ -4284,27 +4321,45 @@ function shortsSekansKur(planYol) {
     var vt0 = null;
     try { vt0 = yeni.videoTracks[0]; } catch (eV) {}
     if (!vt0) return jsonHata("Yeni sekansin video kanali okunamadi");
-    var imlec = 0, gercekKesitler = [];
+    var imlec = 0, parcaSinir = [];
     try { imlec = _zamanSn(vt0.clips[0].end); } catch (eE) { imlec = altlar[0].sure; }
-    gercekKesitler.push({ bas: 0, bit: imlec });
+    parcaSinir.push({ bas: 0, bit: imlec, kesitNo: altlar[0].kesitNo });
     for (i = 1; i < altlar.length; i++) {
         try { vt0.overwriteClip(altlar[i].oge, imlec); }
-        catch (eW) { return jsonHata("Kesit " + (i + 1) + " yerlestirilemedi: " + eW.toString()); }
+        catch (eW) { return jsonHata("Parca " + (i + 1) + " yerlestirilemedi: " + eW.toString()); }
         var yeniSon = -1;
         try {
             var sonKlip = vt0.clips[vt0.clips.numItems - 1];
             yeniSon = _zamanSn(sonKlip.end);
         } catch (eRd) { yeniSon = -1; }
         if (yeniSon <= imlec) {
-            return jsonHata("Kesit " + (i + 1) + " kondu ama timeline uzamadi (" +
+            return jsonHata("Parca " + (i + 1) + " kondu ama timeline uzamadi (" +
                             imlec.toFixed(2) + " -> " + yeniSon.toFixed(2) + ")");
         }
-        gercekKesitler.push({ bas: imlec, bit: yeniSon });
+        parcaSinir.push({ bas: imlec, bit: yeniSon, kesitNo: altlar[i].kesitNo });
         imlec = yeniSon;                       // ⚠ ISTENEN degil GERI OKUNAN degerden
     }
     if (vt0.clips.numItems !== altlar.length) {
-        return jsonHata("Beklenen " + altlar.length + " kesit, timeline'da " +
+        return jsonHata("Beklenen " + altlar.length + " parca, timeline'da " +
                         vt0.clips.numItems + " klip var");
+    }
+    /* Parcalari KESITE gore birlestir: panel altyaziyi kesit bazinda haritaliyor.
+       Her kesit icin Shorts eksenindeki [bas,bit] ve KAYNAK eksenindeki gerceklesen
+       [kaynakBas,kaynakBit] birlikte doner — panel kendi varsayimini DEGIL bunu kullanir. */
+    var gercekKesitler = [], kn;
+    for (kn = 0; kn < istenen.length; kn++) {
+        var ilk = -1, son = -1, pz;
+        for (pz = 0; pz < parcaSinir.length; pz++) {
+            if (parcaSinir[pz].kesitNo !== kn) continue;
+            if (ilk < 0) ilk = parcaSinir[pz].bas;
+            son = parcaSinir[pz].bit;
+        }
+        if (ilk < 0) continue;                 // bu kesitten hic parca konmadi
+        gercekKesitler.push({
+            bas: ilk, bit: son,
+            kaynakBas: (istenen[kn].gercekBas !== undefined ? istenen[kn].gercekBas : istenen[kn].bas),
+            kaynakBit: (istenen[kn].gercekBit !== undefined ? istenen[kn].gercekBit : istenen[kn].bit)
+        });
     }
 
     /* --- TAM EKRAN OLCEGI (kullanici karari: %68 kirpma kabul edildi) --- */
@@ -4341,7 +4396,9 @@ function shortsSekansKur(planYol) {
     var kes2 = [], q;
     for (q = 0; q < gercekKesitler.length; q++) {
         kes2.push('{"bas":' + gercekKesitler[q].bas.toFixed(3) +
-                  ',"bit":' + gercekKesitler[q].bit.toFixed(3) + '}');
+                  ',"bit":' + gercekKesitler[q].bit.toFixed(3) +
+                  ',"kaynakBas":' + gercekKesitler[q].kaynakBas.toFixed(3) +
+                  ',"kaynakBit":' + gercekKesitler[q].kaynakBit.toFixed(3) + '}');
     }
     return '{"ok":true,"seqId":"' + _jsonEsc(yeniID) + '","ad":"' + _jsonEsc(ad) +
            '","kaynakId":"' + _jsonEsc(kaynakID) + '","w":' + olcu2.w + ',"h":' + olcu2.h +
