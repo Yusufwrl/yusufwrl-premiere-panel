@@ -2489,16 +2489,9 @@
       }).join(" · ");
       logLine("Emoji: önceki katmanlar bulundu → " + tDokum);
       var temizOnay = await uiConfirm(
-        "Projede önceki emoji katman(lar)ı var:
-
-  " + tDokum + "
-
-" +
-        "Bunlar SİLİNECEK ve emojiler baştan konacak.
-" +
-        "(Silinmezse emojiler üst üste biner ve timeline karışır.)
-
-Devam edeyim mi?", "Emoji");
+        "Projede önceki emoji katman(lar)ı var:\n\n  " + tDokum + "\n\n" +
+        "Bunlar SİLİNECEK ve emojiler baştan konacak.\n" +
+        "(Silinmezse emojiler üst üste biner ve timeline karışır.)\n\nDevam edeyim mi?", "Emoji");
       if (!temizOnay) {
         yaz("İptal edildi — eski katmanları kendin silmek istersen “Emojileri Sil” düğmesini kullan.",
             "var(--warn)");

@@ -1835,6 +1835,52 @@ function bitir() {
     esit("hiçbir stil dosyası boş/bozuk değil", bosDosya, []);
   })();
 
+/* ================= 25. SÖZDİZİMİ (panel JS dosyaları AYRIŞTIRILABİLİYOR MU) =================
+   ⚠⚠ GERÇEKTEN OLDU VE YAYINLANDI (v1.10.5, 11 Ağustos 2026). Bir dizgenin içine gerçek
+   satır sonu kaçtı (`"...var:` + newline + `..."`) ve app.js AYRIŞTIRILAMAZ hâle geldi.
+   BELİRTİSİ ÖLDÜRÜCÜ AMA SESSİZ: panel AÇILIYOR, bütün kartlar görünüyor, ama HİÇBİR
+   düğme çalışmıyor — çünkü dosya parse edilemeyince tek bir event listener bile bağlanmıyor.
+   ParsMazi'nin bildirimi: "giremiyorum hiçbirine şuan".
+   ⚠ Bu paketteki 300+ kontrolün HİÇBİRİ bunu yakalamıyordu: hepsi dosyaları METİN olarak
+   tarıyor (id eşleşmesi, var sırası, mojibake) — hiçbiri "bu dosya geçerli JavaScript mi"
+   diye sormuyordu. En ucuz ve en kritik kontrol buymuş.
+   `vm.Script` yalnız AYRIŞTIRIR, çalıştırmaz — CEP'e özgü require/CSInterface çağrıları
+   tetiklenmez, yani panel kodunu güvenle sınayabiliyoruz. */
+  baslik("Sözdizimi (panel JS ayrıştırılabiliyor mu)");
+  (function () {
+    var vm;
+    try { vm = require("vm"); } catch (e) { hata("vm modülü yok", e.message); return; }
+    var jsKls = path.join(KOK, "js");
+    var dosyalar = [];
+    try { dosyalar = fs.readdirSync(jsKls).filter(function (f) { return /\.js$/i.test(f); }); }
+    catch (e2) { hata("js klasörü okunamadı", e2.message); return; }
+    dogru("panel JS dosyaları bulundu (" + dosyalar.length + ")", dosyalar.length >= 10);
+
+    var kirik = [];
+    dosyalar.forEach(function (f) {
+      var kaynak;
+      try { kaynak = fs.readFileSync(path.join(jsKls, f), "utf8"); }
+      catch (e3) { kirik.push(f + " (okunamadı)"); return; }
+      try { new vm.Script(kaynak, { filename: f }); }
+      catch (e4) { kirik.push(f + ": " + String(e4.message).split("\n")[0]); }
+    });
+    esit("her panel JS dosyası geçerli JavaScript", kirik, []);
+
+    /* host.jsx ES3 olduğu için vm ile sınanamaz (ES5+ ayrıştırıcı bazı ES3 kalıplarını
+       kabul etse de tersi geçerli değil) — onun kendi ES3 taraması 7. bölümde. */
+
+    /* Nöbetçinin kendisi çalışıyor mu — kasıtlı bozma (gerçekte olan hatanın aynısı). */
+    var bozuk = 'var x = "satir bir\nsatir iki";';   // dizge içinde gerçek satır sonu
+    var yakalandi = false;
+    try { new vm.Script(bozuk, { filename: "sahte.js" }); } catch (e5) { yakalandi = true; }
+    dogru("nöbetçi kasıtlı bozmayı yakalıyor", yakalandi);
+    /* Ve geçerli kodu yanlışlıkla kırık saymıyor. */
+    var temizKod = 'var y = "satir bir\\nsatir iki"; function f(){ return y; }';
+    var temizOk = true;
+    try { new vm.Script(temizKod, { filename: "sahte2.js" }); } catch (e6) { temizOk = false; }
+    dogru("geçerli kodu kırık saymıyor", temizOk);
+  })();
+
 /* ================= 20. MOJIBAKE (UTF-8 dosyanin ANSI okunup yeniden yazilmasi) =================
    ⚠ GERCEKTEN OLDU (11 Agustos 2026, surum bump'i sirasinda). PowerShell'de
        (Get-Content dosya -Raw) -replace '...' | Out-File dosya -Encoding utf8
