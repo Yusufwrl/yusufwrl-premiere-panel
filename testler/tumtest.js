@@ -371,9 +371,71 @@ function bitir() {
     esit("zincirlenmiş ek + büyük harf", SZ.fixToken("Toffy'ye", harita), "Tofi'ye");
     /* MASUM TÜRKÇE KELİMELER BOZULMAMALI — havuz birleştirmenin bedeli ölçülür. */
     var masum = ["ışık", "ilik", "ılık", "sınır", "sinir", "minik", "mimik", "monitör",
-                 "halk", "tor", "kısa", "ilişki", "imkân", "ithal", "iyi", "ısı", "için"];
+                 "halk", "tor", "kısa", "ilişki", "imkân", "ithal", "iyi", "ısı", "için",
+                 /* "tobi" varyantı eklendikten sonra (11 Ağustos 2026) bu üçü nöbetçi:
+                    tobra bir merhem markası, tobik/otobüs gerçek kelimeler. */
+                 "tobra", "tobik", "otobüs", "otobüsü"];
     var bozulan = masum.filter(function (k) { return SZ.fixToken(k, harita) !== null; });
     esit("masum Türkçe kelimeler bozulmuyor", bozulan, []);
+
+    /* ── "TOBİ" → "TOFİ" (ParsMazi, 11 Ağustos 2026: "10'da 9'a Tofi değil TOBİ yazıyor") ──
+       Motor Türkçe dinlerken f/b'yi karıştırıyor. Varyant listeye eklendi; buradaki test
+       varyantın hem düz hem çekimli biçimde tuttuğunu sabitliyor. */
+    esit("tobi → Tofi", SZ.fixToken("tobi", harita), "Tofi");
+    esit("Tobi'ye → Tofi'ye", SZ.fixToken("Tobi'ye", harita), "Tofi'ye");
+    esit("tobilerden → Tofilerden", SZ.fixToken("tobilerden", harita), "Tofilerden");
+    esit("cümle içinde", SZ.fixText("Ya Tobi ne yaptın", harita), "Ya Tofi ne yaptın");
+
+    /* ── PAKETTEKİ YENİ VARYANT MEVCUT KULLANICIYA ULAŞIYOR MU ──
+       ⚠ Bu testin sebebi: VARSAYILAN'a varyant eklemek TEK BAŞINA yetmiyor. load() kullanıcının
+       sozluk.json'ı varsa varsayılana hiç bakmıyor, yani "tobi" düzeltmesi sözlüğü bir kez
+       kaydetmiş HİÇ KİMSEYE ulaşmazdı. Aynı soru bu projede üç kez çıktı (emoji PNG tazeleme,
+       preset.secili birleştirmesi, şimdi sözlük): "yeni hazır içerik MEVCUT kullanıcıya nasıl
+       ulaşacak?" — cevabı olmayan her ekleme sessizce ölü doğuyor. */
+    (function () {
+      var os = require("os");
+      var tmp = path.join(os.tmpdir(), "yw-sozluk-test-" + process.pid);
+      try { fs.mkdirSync(tmp, { recursive: true }); } catch (e) {}
+      var dosya = path.join(tmp, SZ.DOSYA);
+      function yaz(o) { fs.writeFileSync(dosya, JSON.stringify(o), "utf8"); }
+      function oku() { return JSON.parse(fs.readFileSync(dosya, "utf8")); }
+
+      try { fs.unlinkSync(dosya); } catch (e) {}
+      esit("dosya yoksa dokunmaz (load zaten varsayılanı verir)",
+           SZ.paketBirlestir(tmp).durum, "dosya-yok");
+
+      /* Damgasız ESKİ kullanıcı dosyası: kendi ismi + eksik varyantlar */
+      yaz({ entries: [{ ad: "Tofi", varyant: ["toffy"] },
+                      { ad: "ParsMazi", varyant: ["pars mazi"] }] });
+      var r = SZ.paketBirlestir(tmp), son = oku();
+      esit("eski dosya birleştirildi", r.durum, "birlestirildi");
+      var tofiE = son.entries.filter(function (e) { return e.ad === "Tofi"; })[0];
+      dogru("paketteki 'tobi' kullanıcının dosyasına eklendi", tofiE.varyant.indexOf("tobi") !== -1,
+            "varyantlar: " + tofiE.varyant.join(", "));
+      dogru("KULLANICININ kendi ismi korundu",
+            son.entries.some(function (e) { return e.ad === "ParsMazi"; }));
+      dogru("kullanıcının kendi varyantı korundu",
+            son.entries.filter(function (e) { return e.ad === "ParsMazi"; })[0].varyant.join(",") === "pars mazi");
+      esit("damga yazıldı", son.pkgSurum, SZ.PAKET_SURUM);
+      esit("ikinci çağrı hiçbir şey yapmıyor", SZ.paketBirlestir(tmp).durum, "guncel");
+
+      /* ⚠ KULLANICI BİLEREK BOŞALTTIYSA DOKUNULMAZ — load()'daki aynı kural. */
+      yaz({ entries: [] });
+      esit("bilerek boşaltılmış sözlüğe dokunulmuyor", SZ.paketBirlestir(tmp).durum, "bos-birakilmis");
+      esit("gerçekten boş kaldı", oku().entries.length, 0);
+
+      /* ⚠ DAMGALI dosyada kullanıcının SİLDİĞİ varyant geri GELMEMELİ — damganın varlık sebebi. */
+      yaz({ pkgSurum: SZ.PAKET_SURUM, entries: [{ ad: "Tofi", varyant: ["toffy"] }] });
+      SZ.paketBirlestir(tmp);
+      esit("kullanıcının sildiği varyant geri gelmiyor", oku().entries[0].varyant, ["toffy"]);
+
+      /* save() damgayı YAZMAK ZORUNDA: yazmazsa her kayıttan sonra birleştirme yeniden
+         çalışır ve yukarıdaki "geri gelmiyor" güvencesi çöker. */
+      SZ.save(tmp, [{ ad: "Tofi", varyant: ["toffy"] }]);
+      esit("save() damgayı koruyor", oku().pkgSurum, SZ.PAKET_SURUM);
+
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    })();
 
     /* ── EK ÜNLÜ UYUMU ──
        GERÇEK HATA: yapışık ek dalı kökü doğru adla değiştiriyor ama eki motorun YANLIŞ
@@ -1185,6 +1247,68 @@ function bitir() {
       "}"
     ].join("\n");
     esit("parametre gölgeleme ve regex bayrağı yanlış pozitif vermiyor", taraKaynak(temiz), []);
+  })();
+
+/* ================= 20. MOJIBAKE (UTF-8 dosyanin ANSI okunup yeniden yazilmasi) =================
+   ⚠ GERCEKTEN OLDU (11 Agustos 2026, surum bump'i sirasinda). PowerShell'de
+       (Get-Content dosya -Raw) -replace '...' | Out-File dosya -Encoding utf8
+   zinciri UTF-8 dosyayi cp1254 olarak OKUYUP UTF-8 yaziyor. CSXS/manifest.xml ve
+   installer/installer.iss tek komutta bozuldu.
+   NEDEN TEHLIKELI: bozulma SESSIZ. Dosya hala gecerli XML/Pascal, testler gecer, panel
+   acilir — yalniz yorumlar ve kullaniciya gorunen Turkce metinler cop olur. Bir surum
+   yayinlanana kadar kimse fark etmez.
+   KURAL: bu repoda metin dosyalarini PowerShell'in Get-Content/Out-File ciftiyle
+   DEGISTIRME — Edit aracini ya da -Encoding utf8BOM kullan.
+   IMZA MANTIGI: UTF-8'de Turkce harfler C3/C4/C5 bayti ile, uzun tire ve akilli tirnaklar
+   E2 80 ile baslar. Bu baytlar latin1/cp1254 okununca ortaya cikan karakterler Turkce
+   metinde ASLA gecmez, imza bu yuzden kesin.
+   ⚠ IMZALAR \uXXXX KACISIYLA KURULUR, DUZ YAZILMAZ: duz yazilirsa tarayici KENDI kaynak
+   dosyasini bozuk sanip her kosuda kirmizi verir (bir kez oldu, bu yorum o yuzden var). */
+  baslik("Mojibake (bozuk kodlama) taramasi");
+  (function () {
+    var UZANTI = /\.(js|json|xml|html|css|md|iss|txt)$/i;
+    var ATLA = /(^|[\\/])(node_modules|\.git|staging|varsayilan[\\/]emoji)([\\/]|$)/i;
+    var IMZA = [
+      { re: new RegExp("\u00C3[\u0080-\u00FF]"), ad: "C3+ (u-umlaut / o-umlaut / c-cedilla bozulmus)" },
+      { re: new RegExp("\u00C4[\u0080-\u00FF]"), ad: "C4+ (noktasiz i / yumusak g bozulmus)" },
+      { re: new RegExp("\u00C5[\u0080-\u00FF]"), ad: "C5+ (s-cedilla bozulmus)" },
+      { re: new RegExp("\u00E2\u20AC"),          ad: "E2 80 (uzun tire / akilli tirnak bozulmus)" },
+      { re: new RegExp("\u00E2\u0161"),          ad: "E2 9A (uyari isareti bozulmus)" }
+    ];
+    var bulgular = [], bakilan = 0;
+    (function gez(dizin, derinlik) {
+      if (derinlik > 6) return;
+      var girdiler;
+      try { girdiler = fs.readdirSync(dizin, { withFileTypes: true }); } catch (e) { return; }
+      girdiler.forEach(function (g) {
+        var tam = path.join(dizin, g.name);
+        if (ATLA.test(tam)) return;
+        if (g.isDirectory()) { gez(tam, derinlik + 1); return; }
+        if (!UZANTI.test(g.name)) return;
+        var metin;
+        try { metin = fs.readFileSync(tam, "utf8"); } catch (e) { return; }
+        bakilan++;
+        IMZA.forEach(function (im) {
+          var m = im.re.exec(metin);
+          if (!m) return;
+          var satir = metin.slice(0, m.index).split("\n").length;
+          bulgular.push(path.relative(KOK, tam) + ":" + satir + " → " + im.ad);
+        });
+      });
+    })(KOK, 0);
+    dogru("metin dosyaları tarandı (" + bakilan + ")", bakilan >= 20);
+    esit("hiçbir dosyada bozuk kodlama yok", bulgular, []);
+
+    /* Nöbetçinin kendisi çalışıyor mu — kasıtlı bozma (gerçekte olan iki dizge). */
+    var sahte = "Sürüm aralığı".split("").map(function (c) {
+      var b = Buffer.from(c, "utf8"), s = "";
+      for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);   // UTF-8 baytlarını latin1 oku
+      return s;
+    }).join("");
+    var yakalandi = IMZA.some(function (im) { return im.re.test(sahte); });
+    dogru("nöbetçi kasıtlı bozmayı yakalıyor", yakalandi, "bozuk örnek: " + sahte);
+    dogru("temiz Türkçe metni yanlışlıkla işaretlemiyor",
+          !IMZA.some(function (im) { return im.re.test("Sürüm aralığı geniş — ığşçöü ⚠ “tırnak”"); }));
   })();
 
   /* ---- ÖZET ---- */

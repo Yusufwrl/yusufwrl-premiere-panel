@@ -21,8 +21,19 @@ var DOSYA = "sozluk.json";
    böylece "tofi" -> "Tofi" (büyük harf düzeltmesi) de yapılır.
    DİKKAT: gerçek Türkçe kelimelere benzeyen varyant EKLEME — masum kelimeler bozulur
    (ör. "mini" -> Mimi, "mani" -> Moni gibi eşleşmeler bilerek listeye alınmadı). */
+/* ⚠ PAKET SÜRÜMÜ — VARSAYILAN/BILINEN listesine her EKLEME yaptığında ARTIR.
+   Kullanıcının kendi sozluk.json'ı varsa load() varsayılana HİÇ bakmıyor; yani bu listeye
+   eklenen bir varyant, sözlüğü bir kez kaydetmiş kullanıcıya ASLA ulaşmaz. Bu tuzağa bu
+   projede iki kez düşüldü (emoji PNG'lerinin üzerine yazma kuralı, preset.secili birleştirmesi).
+   `paketBirlestir` bu sayıya bakıp eksik varyantları bir kez ekliyor — bkz. aşağısı. */
+var PAKET_SURUM = 2;
+
 var VARSAYILAN = [
-  { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi"] },
+  /* ⚠ "tobi" ParsMazi'nin gerçek kaydından geldi (11 Ağustos 2026): "10'da 9'a Tofi değil
+     TOBİ yazıyor". Motor Türkçe dinlerken f/b'yi karıştırıyor ve bu kullanıcıya özel değil —
+     ölçüm yerine tahminle uzatmıyoruz, gerçek transkriptte GÖRÜLEN yazımlar ekleniyor. */
+  { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi",
+                          "tobi", "tobby", "toby", "tobe", "to bi"] },
   { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni"] },
   { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra"] },
   { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi"] },
@@ -409,12 +420,69 @@ function load(extRoot) {
   return defaults();
 }
 function save(extRoot, entries) {
-  fs.writeFileSync(path.join(extRoot, DOSYA), JSON.stringify({ entries: entries || [] }, null, 2), "utf8");
+  /* ⚠ pkgSurum DA YAZILIR. Yazılmazsa kullanıcı sözlüğü her kaydettiğinde damga siliniyor,
+     sonraki açılışta paketBirlestir yeniden çalışıyor ve kullanıcının BİLEREK SİLDİĞİ varyant
+     geri geliyordu — "bir kez ekle" sözü ancak damga kalıcıysa tutuluyor. */
+  fs.writeFileSync(path.join(extRoot, DOSYA),
+                   JSON.stringify({ pkgSurum: PAKET_SURUM, entries: entries || [] }, null, 2), "utf8");
   return path.join(extRoot, DOSYA);
 }
 
+/* ── PAKETTEKİ YENİ VARYANTLARI KULLANICININ DOSYASINA BİR KEZ EKLE ──
+   NEDEN VAR (ParsMazi, 11 Ağustos 2026): panel "Tofi" yerine "Tobi" yazıyordu. Varyantı
+   VARSAYILAN'a eklemek tek başına YETMEZ — `load()` kullanıcının sozluk.json'ı varsa
+   varsayılana hiç bakmıyor, yani düzeltme sözlüğü bir kez kaydetmiş HİÇ KİMSEYE ulaşmıyor.
+   Bu, bu projede üçüncü kez çıkan aynı soru: "yeni hazır içerik MEVCUT kullanıcıya nasıl
+   ulaşacak?" (emoji PNG tazeleme ve presetSeciliTazele aynı dersten doğdu).
+
+   KURALLAR — üçü de bilinçli:
+   · YALNIZ EKLER, hiçbir şey silmez veya değiştirmez. Kullanıcının kendi isimleri ve
+     kendi yazdığı varyantlar olduğu gibi kalır.
+   · PAKET_SURUM damgasıyla BİR KEZ çalışır. Damgasız bir birleştirme, kullanıcının bilerek
+     sildiği varyantı her açılışta geri getirirdi.
+   · Kullanıcı sözlüğü BİLEREK boşalttıysa (entries: []) dokunulmaz — `load()`'daki
+     "boşalttıysa varsayılana DÖNME" kuralının aynısı, aksi hâlde o karar delinirdi. */
+function paketBirlestir(extRoot) {
+  var p = path.join(extRoot, DOSYA), raw, j;
+  try {
+    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [] };   // load() zaten varsayılanı verir
+    raw = fs.readFileSync(p, "utf8");
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+    j = JSON.parse(raw);
+  } catch (e) { return { durum: "okunamadi", eklenen: [], hata: String((e && e.message) || e) }; }
+  if (!j || !j.entries || Object.prototype.toString.call(j.entries) !== "[object Array]")
+    return { durum: "bicim", eklenen: [] };
+  if (!j.entries.length) return { durum: "bos-birakilmis", eklenen: [] };
+  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
+
+  var eklenen = [], indeks = {}, i;
+  for (i = 0; i < j.entries.length; i++) {
+    if (j.entries[i] && j.entries[i].ad) indeks[String(j.entries[i].ad).toLowerCase()] = i;
+  }
+  VARSAYILAN.forEach(function (v) {
+    var k = String(v.ad).toLowerCase();
+    if (indeks[k] === undefined) {
+      j.entries.push({ ad: v.ad, varyant: (v.varyant || []).slice() });
+      eklenen.push(v.ad + " (yeni isim)");
+      return;
+    }
+    var mevcut = j.entries[indeks[k]];
+    if (!mevcut.varyant) mevcut.varyant = [];
+    var gorulen = {}, q;
+    for (q = 0; q < mevcut.varyant.length; q++) gorulen[String(mevcut.varyant[q]).toLowerCase()] = 1;
+    (v.varyant || []).forEach(function (x) {
+      if (!gorulen[String(x).toLowerCase()]) { mevcut.varyant.push(x); eklenen.push(v.ad + ": " + x); }
+    });
+  });
+  j.pkgSurum = PAKET_SURUM;
+  try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, hata: String((e2 && e2.message) || e2) }; }
+  return { durum: "birlestirildi", eklenen: eklenen };
+}
+
 module.exports = {
-  load: load, save: save, defaults: defaults,
+  load: load, save: save, defaults: defaults, paketBirlestir: paketBirlestir,
+  PAKET_SURUM: PAKET_SURUM,
   parseText: parseText, toText: toText,
   buildMap: buildMap, fixWords: fixWords, fixToken: fixToken, fixText: fixText,
   hotwords: hotwords, DOSYA: DOSYA,

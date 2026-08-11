@@ -1893,6 +1893,19 @@
        "Önce altyazı oluştur" diyordu — ekranda 800 altyazı dururken 25 dakikalık GPU işini
        tekrar etmeye yolluyordu. */
     var liste = [], elle = [], kisaAtilan = 0, yokSay = 0;
+    /* ── KANAL BAŞINA DÖKÜM ──
+       NEDEN VAR (ParsMazi, 11 Ağustos 2026: "moniyi yine az koymuş"): panel toplam sayıları
+       söylüyordu ("448 cümlenin 180'ini işaretledi · 12 kısa cümle elendi") ama KİMİN kaç
+       cümlesinin elendiğini hiçbir yerde yazmıyordu. Bir karakter az emoji aldığında sebebi
+       üç yerden biri olabiliyor — az konuşmuş · cümleleri 5 kelimeden kısa · yapay zekâ
+       işaretlememiş — ve kullanıcı bunları ayırt edemediği için hep yanlış kolu arıyordu
+       (ağırlık kuralı ölçüldü: bu şikâyette payı yalnız %4).
+       Ölçemediğimiz şeyi ayarlamak yerine ÖLÇÜMÜ kullanıcıya veriyoruz. */
+    var kanalDokum = {}, dokumSira = [];
+    function dokum(ad) {
+      if (!kanalDokum[ad]) { kanalDokum[ad] = { ad: ad, ham: 0, kisa: 0, aday: 0 }; dokumSira.push(ad); }
+      return kanalDokum[ad];
+    }
 
     /* a1 = bu kanal SENİN mikrofonun mu. Çağıran taraf biliyor; emojiEkle bunu "bu videoyu
        gerçekten X mi çekti" onayını YALNIZ A1 için sormak üzere kullanıyor. Adı karşılaştırıp
@@ -1944,6 +1957,8 @@
           var oncekiSayEl = kayitlar.length;
           kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
           kisaAtilan += (oncekiSayEl - kayitlar.length);
+          var dEl = dokum(ad);
+          dEl.ham += oncekiSayEl; dEl.kisa += (oncekiSayEl - kayitlar.length); dEl.aday += kayitlar.length;
           if (!kayitlar.length) return;
           kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; liste.push(k); });
           return;
@@ -1989,6 +2004,8 @@
       var oncekiSay = kayitlar.length;
       kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
       kisaAtilan += (oncekiSay - kayitlar.length);
+      var dN = dokum(ad);
+      dN.ham += oncekiSay; dN.kisa += (oncekiSay - kayitlar.length); dN.aday += kayitlar.length;
       if (!kayitlar.length) return;
 
       kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; liste.push(k); });
@@ -2021,7 +2038,8 @@
        2, 361…" diye zıplayan numaralar gidiyordu. Model numarayı değil SIRAYI yankılarsa
        cevap sessizce BAŞKA cümlelere denk gelir. */
     for (var i = 0; i < liste.length; i++) liste[i].sira = i + 1;
-    return { liste: liste, elle: elle, kisa: kisaAtilan, yokSay: yokSay };
+    return { liste: liste, elle: elle, kisa: kisaAtilan, yokSay: yokSay,
+             dokum: dokumSira.map(function (a) { return kanalDokum[a]; }) };
   }
 
   /* EŞLEŞMEYEN AD SATIRLARI — yalnız gerektiğinde. Hepsi tutuyorsa kutu gizli kalır:
@@ -2613,19 +2631,42 @@
            başka bir kanalda görünürse onu "sahip" tarafına düşürüp emojiFren ile tutarlı kalır. */
         a1Kar[kk] = a1Kar[kk] || !!x.c.a1;
       });
+      /* ── HANGİ SINIF HANGİ HEDEFİ ALIR ──
+         ⚠ SARKAÇ ÜÇÜNCÜ KEZ DÖNDÜ, TARİHÇEYİ OKUMADAN DEĞİŞTİRME:
+         (1) hedef yoktu → konuklar (Dora/Mimi/Sage) videoda neredeyse hiç görünmüyordu;
+         (2) konuklara hedef verildi ama A1 rolü hesaba katılmadığı için A1 "konuk" sayıldı ve
+             emojilerin ÇOĞUNU yedi (ParsMazi) → A1 sahip sınıfına alındı, hedefi sıfırlandı;
+         (3) bu kez A1 ÇOK AZ aldı — ParsMazi 11 Ağustos 2026: "moniyi yine az koymuş, video
+             çekeni seçince onu daha ağırlıklı koyabilir". Artık üç sınıf var ve hiçbiri sıfır
+             değil, yani sarkaç iki uca da gitmiyor.
+         KANAL SAHİBİNE DE HEDEF VERİLDİ (yalnız A1'e değil) — bu bilerek: Tofi ve Moni AYNI
+         tarafı (sağ) paylaşıyor, yani tek bir emoji kanalını bölüşüyorlar. Yalnız A1'e hedef
+         verilseydi öteki sahip hedefsiz kalır ve Yusuf'un kadrosunda (A1=Tofi) bu kez MONİ
+         azalırdı — düzeltilen hatanın aynadaki eşi. */
+      var EMOJI_CEKEN_HEDEF = 0.30;    // videoyu çeken (A1): her ~3 aday cümleden 1'i
+      var EMOJI_SAHIP_HEDEF = 0.22;    // kanal sahibi ama çeken değil (öteki Tofi/Moni)
+      function emojiHedefOran(karKey) {
+        /* ⚠ SIRA ÖNEMLİ: önce A1 rolü, sonra sahiplik listesi. emojiSagMi'ye burada `false`
+           geçilmesi ESKİ HATANIN TEKRARI DEĞİL — A1 durumu bir üstteki satırda zaten
+           ayrıldı, yani rol hesaba KATILMIŞ oluyor. (Eski kodda tek bir çağrı vardı ve
+           `false` geçilince A1 sessizce "konuk" sınıfına düşüyordu; buradaki `false` ise
+           "A1 olmadığı kesin" anlamına geliyor.) */
+        if (a1Kar[karKey]) return EMOJI_CEKEN_HEDEF;
+        if (emojiSagMi(karKey, false)) return EMOJI_SAHIP_HEDEF;
+        return EMOJI_KONUK_HEDEF;
+      }
       function emojiAcik(karKey) {
-        /* ⚠ A1 ROLÜ HESABA KATILMAK ZORUNDA. emojiSagMi iki kuraldan oluşuyor: (a) sahiplik
-           listesi (Tofi/Moni), (b) A1 rolü. Burada ikinci argüman sabit `false` geçiliyordu,
-           yani YALNIZ liste kuralı çalışıyordu — oysa emojiFren aynı soruyu `c.a1` ile
-           soruyor. Sonuç: A1'in karakteri listede değilse AYNI karakter fren tarafında
-           "kanal sahibi", kota tarafında "konuk" sayılıyordu. Konuk kotası aday cümle
-           sayısıyla çarpıldığı için en çok konuşan A1 en büyük "açık" değerini alıyor ve
-           grup sıralamasında sürekli öne geçiyordu — özelliğin engellemek için yazıldığı
-           şeyin tam tersi. Kadrosunda ne Tofi ne Moni olan ikinci kullanıcıda (ParsMazi)
-           "kızlarda da görünsün" diye eklenen denge, emojilerin çoğunu A1'e yiyordu. */
-        if (emojiSagMi(karKey, a1Kar[karKey])) return 0;
-        var hedef = (karCumleSay[karKey] || 0) * EMOJI_KONUK_HEDEF;
-        var acik = hedef - (karSay[karKey] || 0);
+        /* ⚠ AÇIK ORANSAL, MUTLAK DEĞİL — bu satır olmadan hedef vermek işe yaramıyor.
+           Eski hâli `hedef - konan` idi ve hedef aday cümle sayısıyla çarpıldığı için
+           EN ÇOK KONUŞAN her zaman en büyük açığı alıyordu: 200 cümlelik A1'in açığı (100)
+           38 cümlelik Dora'nınkinden (19) yapısal olarak büyük, yani A1'e küçücük bir hedef
+           vermek bile onu grup sıralamasında sürekli öne geçirirdi (2. maddede yaşanan hata
+           tam olarak buydu). Hedefin ne kadarının DOLDUĞUNA bakınca 200 cümlelik konuşmacı
+           ile 38 cümlelik konuşmacı aynı ölçekte yarışıyor ve herkes kendi hedefine ulaşınca
+           sıfırlanıp sıradan çıkıyor. */
+        var hedef = (karCumleSay[karKey] || 0) * emojiHedefOran(karKey);
+        if (hedef <= 0) return 0;
+        var acik = (hedef - (karSay[karKey] || 0)) / hedef;
         return acik > 0 ? acik : 0;
       }
 
@@ -2734,6 +2775,31 @@
               atlanan.tarafDolu + " o pencerede kendi tarafı zaten doluydu, " +
               atlanan.dosyaYok + " dosya yok, " + atlanan.boyutYok + " boyut okunamadı." +
               (kisaltilan ? (" " + kisaltilan + " uzun cümle " + EMOJI_MAX_SURE + " sn'ye kırpıldı.") : ""));
+      /* ── KİM KAÇ EMOJİ ALDI, VE ALAMADIYSA NEDEN ──
+         (ParsMazi, 11 Ağustos 2026: "moniyi yine az koymuş".) Bir karakterin az görünmesinin
+         ÜÇ ayrı sebebi var ve panel bunları hiç ayırmıyordu: (a) az konuşmuş, (b) cümleleri
+         5 kelimeden kısa olduğu için yapay zekâya hiç gitmemiş, (c) gitmiş ama işaretlenmemiş
+         ya da çeşitlilik/çakışma frenine takılmış. Üçünün çaresi bambaşka — sırasıyla hiçbir
+         şey, EMOJI_MIN_KELIME, ve o karaktere yeni resim. Ayırmadan söylemek kullanıcıyı
+         yanlış kolu çevirmeye yolluyordu (ağırlık kuralı ölçüldü: payı yalnız %4). */
+      var kdAd = {}, kdSira = [];
+      cumleler.forEach(function (c) {
+        if (c.kar && !kdAd[c.kar.key]) { kdAd[c.kar.key] = c.kar.ad; kdSira.push(c.kar.key); }
+      });
+      var karOzet = kdSira.map(function (k) {
+        return kdAd[k] + " " + (karSay[k] || 0);
+      }).join(" · ");
+      logLine("Emoji karakter dökümü: " + kdSira.map(function (k) {
+        var havuz = (tarama.karakterDuygu && tarama.karakterDuygu[k]) || [];
+        return kdAd[k] + " → " + (karSay[k] || 0) + " emoji / " + (karCumleSay[k] || 0) +
+               " aday cümle · havuzunda " + havuz.length + " duygu";
+      }).join(" · "));
+      if (top.dokum && top.dokum.length) {
+        logLine("Emoji kanal dökümü (yapay zekâya GİDEN cümleler): " + top.dokum.map(function (d) {
+          return d.ad + " " + d.aday + "/" + d.ham +
+                 (d.kisa ? " (" + d.kisa + " tanesi " + EMOJI_MIN_KELIME + " kelimeden kısaydı)" : "");
+        }).join(" · "));
+      }
       logLine("Emoji çeşitlilik: " + cesit.atlandi + " atlandı (aynı resim çok yakındı), " +
               cesit.ikinci + " tanesinde yapay zekânın 2. duygusu kullanıldı · kural: araya " +
               cesGerekBaska + " başka karakter + " + CES_AYNI + " aynı karakterin farklı emojisi" +
@@ -2969,6 +3035,10 @@
       /* ÇEŞİT DURUM SATIRINDA: "projede 24 öğe var ama 45 emojim var" sorusu bir daha
          proje penceresine bakılarak tahmin edilmesin. Payda bu KADRODA kullanılabilir olan. */
       msg += " · " + kullanilanSay + "/" + uygunDosya + " farklı resim kullanıldı";
+      /* ⚠ KİM KAÇ EMOJİ ALDI — DURUM SATIRINDA, log'da değil. "X'i az koymuş" bu panelin en
+         sık gelen geri bildirimi ve kullanıcı sayıyı göremediği için hep tahmin yürütüyordu
+         (üstelik ölçüldüğünde tahmin genelde yanlış çıkıyor). */
+      if (karOzet) msg += " · dağılım: " + karOzet;
       msg += " · yapay zekâ " + cumleler.length + " cümlenin " + isaret + "'ini işaretledi";
       /* KISA CÜMLE ELEMESİ DURUM SATIRINDA: "eskisi kadar emoji çıkmadı" hissinin sebebi bu
          ve ayarlanabilir kol Sıklık DEĞİL — kullanıcı bunu bilmeli. */
@@ -5857,6 +5927,18 @@
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
+    /* ⚠ PAKETTEKİ YENİ VARYANTLAR ÖNCE BİRLEŞTİRİLİR, load()'DAN ÖNCE.
+       load() kullanıcının sozluk.json'ı varsa VARSAYILAN'a hiç bakmıyor; yani pakete eklenen
+       bir düzeltme ("Tobi" → "Tofi", ParsMazi 11 Ağustos 2026) sözlüğü bir kez kaydetmiş
+       kullanıcıya asla ulaşmıyordu. paketBirlestir yalnız EKLER, PAKET_SURUM damgasıyla bir
+       kez çalışır ve kullanıcı sözlüğü bilerek boşalttıysa dokunmaz. */
+    try {
+      var _szB = SZ.paketBirlestir(extRoot);
+      if (_szB.eklenen && _szB.eklenen.length)
+        logLine("Sözlük güncellendi (pakete eklenen " + _szB.eklenen.length + " yeni yazım): " +
+                _szB.eklenen.join(" · "));
+      else if (_szB.hata) logLine("Sözlük paket birleştirmesi yapılamadı: " + _szB.hata);
+    } catch (eSzB) { logLine("Sözlük paket birleştirmesi atlandı: " + (eSzB.message || eSzB)); }
     state.dict = SZ.load(extRoot);
     // Senkron kartı modülleri (Craig kayıtlarını hizalama ve yerleştirme)
     try {
