@@ -79,7 +79,40 @@ function httpsGetJson(url, depth) {
   });
 }
 
-function download(url, dest) {
+/* ⚠⚠ İNDİRME YENİDEN DENENİR — TEK SEFERLİK DEĞİL (ParsMazi, 12 Ağustos 2026:
+   "Güncelleme başarısız: socket hang up").
+   `socket hang up`, `ECONNRESET`, `ETIMEDOUT` GEÇİCİ ağ hatalarıdır: sunucu ya da aradaki
+   CDN bağlantıyı kapatır, bir sonraki denemede sorunsuz iner. Panel paketi 22 MB ve
+   GitHub'ın CDN'inden geliyor; tek bir kopmada bütün güncelleme iptal oluyordu ve kullanıcı
+   eski sürümde kalıyordu — üstelik hiçbir şey bozulmadığı hâlde "hata" görüyordu.
+   ⚠ YALNIZ AĞ HATALARI YENİDEN DENENİR. HTTP 404/403 gibi kalıcı cevaplar tekrar denenmez:
+   dosya yoksa üç kez beklemek yalnızca kullanıcıyı oyalar.
+   ⚠ Her deneme dosyayı SIFIRDAN indirir (yarım zip `hata()` içinde zaten siliniyor).
+   22 MB için kısmi devam (Range) karmaşıklığı gereksiz. */
+var INDIRME_DENEME = 3;
+var _AG_HATASI = /socket hang up|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|zaman aşımı|ECONNREFUSED|EPIPE/i;
+
+function download(url, dest, onLog) {
+  var deneme = 0;
+  function birKez() {
+    deneme++;
+    return _downloadBir(url, dest)["catch"](function (e) {
+      var m = String((e && e.message) || e);
+      if (deneme < INDIRME_DENEME && _AG_HATASI.test(m)) {
+        if (onLog) onLog("İndirme koptu (" + m + ") — " + deneme + ". deneme başarısız, tekrar deneniyor…");
+        /* Kısa bekleme: anlık ağ dalgalanması geçsin. Artan bekleme (1.5 sn, 4 sn). */
+        return new Promise(function (r) { setTimeout(r, deneme === 1 ? 1500 : 4000); }).then(birKez);
+      }
+      /* Son deneme de düştüyse kaç kez denendiğini SÖYLE — "bir kez denedi ve pes etti"
+         izlenimi kullanıcıyı ağ sorununu araştırmaktan alıkoyuyordu. */
+      if (deneme > 1) e = new Error(m + " (" + deneme + " deneme yapıldı)");
+      throw e;
+    });
+  }
+  return birKez();
+}
+
+function _downloadBir(url, dest) {
   return new Promise(function (resolve, reject) {
     var file = fs.createWriteStream(dest);
     var bitti = false;                       // tek sonuc: hem hata hem basari icin
@@ -272,7 +305,12 @@ async function checkForUpdate(extRoot, ui) {
   try {
     if (ui.setStatus) ui.setStatus("Güncelleme indiriliyor v" + clean + "…");
     log("İndiriliyor: " + asset.browser_download_url);
-    await download(asset.browser_download_url, tmp);
+    /* Yeniden deneme bilgisi hem log'a hem DURUM SATIRINA gitsin: 22 MB'lık indirme
+       koptuğunda kullanıcı panelin donduğunu değil, tekrar denediğini görmeli. */
+    await download(asset.browser_download_url, tmp, function (m) {
+      log(m);
+      if (ui.setStatus) ui.setStatus("Güncelleme indiriliyor v" + clean + " — bağlantı koptu, tekrar deneniyor…");
+    });
     rmrf(stage); fs.mkdirSync(stage, { recursive: true });
     await unzip(tmp, stage);
     var kok = paketKoku(stage);                       // paket gercekten panel mi?

@@ -2603,6 +2603,36 @@ function bitir() {
           "bu iki sayı kullanıcı tarafından DONDURULDU");
   })();
 
+  /* ================================================================
+     25. OTO-GÜNCELLEME İNDİRMESİ — GEÇİCİ AĞ HATASINDA TEKRAR DENE
+     GERÇEK HATA (ParsMazi, 12 Ağustos 2026): "Güncelleme başarısız: socket hang up".
+     Panel paketi 22 MB ve GitHub CDN'inden geliyor; tek bir bağlantı kopması bütün
+     güncellemeyi iptal ediyor ve kullanıcı eski sürümde kalıyordu.
+     ================================================================ */
+  baslik("Oto-güncelleme indirmesi (kopan bağlantı)");
+  (function () {
+    var up = fs.readFileSync(path.join(KOK, "js", "updater.js"), "utf8");
+    dogru("indirme yeniden deneniyor", /INDIRME_DENEME\s*=\s*[2-9]/.test(up),
+          "tek deneme, geçici bir kopmada güncellemeyi tümden iptal ediyor");
+    dogru("yalnız AĞ hataları tekrar deneniyor", /_AG_HATASI\s*=\s*\//.test(up));
+    /* ⚠ KALICI CEVAPLAR TEKRAR DENENMEZ: 404/403'te üç kez beklemek kullanıcıyı oyalar. */
+    var m = up.match(/_AG_HATASI\s*=\s*\/([^/]+)\//);
+    if (m) {
+      var re = new RegExp(m[1], "i");
+      dogru("'socket hang up' tekrar denenir", re.test("socket hang up"));
+      dogru("'ECONNRESET' tekrar denenir", re.test("read ECONNRESET"));
+      dogru("'zaman aşımı' tekrar denenir", re.test("indirme zaman aşımı"));
+      dogru("HTTP 404 tekrar DENENMEZ", !re.test("HTTP 404"));
+      dogru("HTTP 403 tekrar DENENMEZ", !re.test("HTTP 403"));
+      dogru("bozuk paket tekrar DENENMEZ", !re.test("indirilen paket çok küçük (10 bayt)"));
+    } else { hata("_AG_HATASI deseni okunamadı"); }
+    dogru("denemeler arasında BEKLENİYOR (anlık dalgalanma geçsin)", /setTimeout\(r,\s*deneme/.test(up));
+    dogru("kaç deneme yapıldığı hata mesajında", /deneme yapıldı/.test(up));
+    dogru("kullanıcıya tekrar denendiği SÖYLENİYOR", /tekrar deneniyor/.test(up));
+    /* Yarım inen zip diskte kalmamalı — sonraki deneme temiz başlasın. */
+    dogru("yarım paket siliniyor", /fs\.unlinkSync\(dest\)/.test(up));
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");
