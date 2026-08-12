@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.15.0"
+#define AppVersion "1.9.21"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}
@@ -43,6 +43,40 @@ Name: "{code:GetEngineDir}"
 ; Eski surumlerde pakete giren .debug: son kullanicida gereksiz DevTools portu (localhost:8088)
 ; aciyor. Kurucu yalnizca ekler/uzerine yazar, silmez -> bunu acikca kaldirmak gerekiyor.
 Type: files; Name: "{app}\.debug"
+
+; ============================================================
+;  DAHA YENI SURUMDEN (v1.11-v1.14) KALAN DOSYALARI TEMIZLE
+;
+;  NEDEN GEREKLI: Inno yalnizca EKLER ve UZERINE YAZAR; artik var olmayan dosyalari
+;  SILMEZ. Bu kurulum v1.9.21'e GERI DONUS oldugu icin, daha yeni bir surumu kurmus olan
+;  bir makinede o surume ait dosyalar oldugu gibi kalir. index.html (v1.9.21) onlari
+;  yuklemedigi ve app.js require etmedigi icin zararsizdirlar -- ama:
+;    · klasorde "bu ne?" diye duran olu dosyalar birakmak teshisi zorlastiriyor,
+;    · bir sonraki surumde ayni ad yeniden kullanilirsa BAYAT dosya sessizce devreye girer,
+;    · kullanicinin acik istegi: "onceki bir seyleri silmedi ama silmesi gerekiyorsa
+;      sen otomatik sil".
+;
+;  ⚠ YALNIZ PANELIN KENDI KOD DOSYALARI SILINIYOR. Kullanici dosyalarina
+;  (lisans.json · presetler.json · sozluk.json · kisiler.json · anthropic-key.txt ·
+;  engine-root.txt · config.json) HIC DOKUNULMUYOR -- onlar zaten [Files] bolumunde de
+;  Excludes ile korunuyor. Emoji resimleri motor klasorunde, burada degil.
+; ============================================================
+Type: files; Name: "{app}\js\shorts.js"
+Type: files; Name: "{app}\js\shortszaman.js"
+Type: files; Name: "{app}\js\ilerleme.js"
+Type: files; Name: "{app}\js\emojikonum.js"
+; config.pkg.json: v1.13'te eklenen TEK KULLANIMLIK ayar dosyasi. v1.9.21'de onu okuyup
+; silen kod YOK, yani birakilirsa klasorde sonsuza kadar kalir.
+Type: files; Name: "{app}\config.pkg.json"
+; v1.11+ ile gelen ek Track Style dosyalari. v1.9.21'in stiller.json'i yalniz ilk 6'yi
+; listeliyor, fazlalari zaten okunmuyor.
+Type: files; Name: "{app}\varsayilan\stiller\stil07.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil08.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil09.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil10.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil11.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil12.prtextstyle"
+Type: files; Name: "{app}\varsayilan\stiller\stil13.prtextstyle"
 
 [Files]
 ; --- Panel dosyalari -> CEP extensions klasoru ({app}) ---
