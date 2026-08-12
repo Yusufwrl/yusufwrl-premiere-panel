@@ -63,18 +63,30 @@ kodunu** güncelleyebiliyor (motoru tekrar indirmez).
 
 Kod değiştirdin, arkadaşında da güncellensin istiyorsun:
 
-1. **Sürümü yükselt** — iki dosyada aynı numara:
+1. **Sürümü yükselt — ÜÇ dosyada aynı numara.** (Bu bölüm eskiden "iki dosya" diyordu;
+   üçüncüsü unutulunca `publish-github.ps1` denetimi koşturup zip'i ürettikten *sonra*
+   "Surum uyusmuyor" diye ölüyordu.)
    - `version.json` → `"version": "1.2.0"`
    - `CSXS/manifest.xml` → `ExtensionBundleVersion="1.2.0"`
-2. **panel.zip üret:**
+   - `installer/installer.iss` → `#define AppVersion "1.2.0"`
+   ⚠ Bu üç dosyayı **Edit ile** değiştir. PowerShell'de `Get-Content -Raw` + `Out-File
+   -Encoding utf8` çifti Türkçe karakterleri sessizce bozuyor (gerçekten oldu).
+2. **Denetimden geçir** — her sürümden önce:
    ```bash
-   powershell -ExecutionPolicy Bypass -File installer\pack-panel.ps1 -Zip installer\panel.zip
+   node testler\tumtest.js
    ```
-3. **GitHub Release oluştur:** repo > Releases > "Draft a new release"
-   - Tag: `v1.2.0` (version.json ile aynı)
-   - "Attach binaries" ile **`panel.zip`**'i yükle → Publish.
+3. **Yayınla — TEK KOMUT.** Commit + push + zip + release + staging tazeleme, hepsi bunda:
+   ```bash
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\publish-github.ps1
+   ```
 4. Arkadaşın Premiere'i bir dahaki açışında panel "Yeni sürüm v1.2.0 var, güncellensin
    mi?" diye soracak → Evet → indirir, "Premiere'i yeniden başlat" der.
+
+> ⚠ **ELLE zip üretip elle Release açma.** O yol betikteki korumaların hepsini atlıyor:
+> sürüm üç dosyada tutuyor mu · tag zaten yayında mı (aynı tag'in altına yazılan yeni zip'i
+> kimse ALMAZ, çünkü istemci "uzak ≤ yerel" görür) · zip GERÇEKTEN bu sürüm mü · paketleme
+> çöktüyse diskte kalan ESKİ zip yüklenmiş mi · `installer\staging\panel` güncel mi.
+> Bunların her biri gerçekten yaşanmış bir hatadan doğdu.
 
 > Motor/font değişmediği sürece güncelleme sadece panel kodunu çeker (birkaç yüz KB).
 > Motor değişirse yeni `YusufwrlKur.exe` gönderirsin (nadir olur).

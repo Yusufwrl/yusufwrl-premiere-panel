@@ -112,6 +112,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "pa
 # uzun tire zararsiz. Kontrol: [Parser]::ParseFile ile (testler\tumtest.js'te var).
 if ($LASTEXITCODE -ne 0) { throw "pack-panel.ps1 basarisiz (cikis kodu $LASTEXITCODE) - panel.zip uretilmedi." }
 if (-not (Test-Path $zip)) { throw "panel.zip uretilemedi" }
+
+# 2.1) staging\panel'i de TAZELE - exe'ye giren gercek panel burasi.
+# ⚠ GERCEKTEN OLDU (12 Agustos 2026 denetiminde yakalandi): staging\panel v1.11.1'de
+# DONMUSTU ama version.json + manifest.xml + installer.iss ucu de 1.13.8 diyordu, yani
+# yukaridaki surum kapisi YESIL geciyordu. installer.iss exe'yi bu uc dosyanin hicbirinden
+# degil, ELLE doldurulan staging\panel klasorunden derliyor: derlenen exe sihirbazda
+# "1.13.8" yazip IKI SURUM ESKI paneli kuruyordu (cift wireShorts -> tek tikta iki paralel
+# Shorts uretimi ve iki ayri yapay zeka istegi; ilerleme gostergesi hic yok).
+# Bedeli asimetrikti: ikinci kullaniciya "bozuk surumdeysen exe gonderelim" denip verilen
+# exe, tam da duzeltmeye calistigi hatayi GERI KURUYORDU.
+# Burada tazelemek staleness'i YAPISAL olarak imkansiz kiliyor: yayin akisindan gecen her
+# surumde staging kendiliginden guncelleniyor, kimsenin bir adimi hatirlamasi gerekmiyor.
+# Ikinci ve ucuncu kapi ayrica duruyor: installer.iss basindaki ISPP #error (derlemeyi
+# durdurur, ISCC ile iki yonde kanitlandi) ve testler\tumtest.js 1. bolum.
+# Staging YOKSA olusturulur; zip yolu bu klasoru hic kullanmadigi icin zararsiz.
+$stg = Join-Path $PSScriptRoot "staging\panel"
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "pack-panel.ps1") -Stage $stg
+if ($LASTEXITCODE -ne 0) { throw "pack-panel.ps1 -Stage basarisiz (cikis kodu $LASTEXITCODE) - staging tazelenmedi, exe ESKI panel kurar." }
+$stgVer = ""
+try { $stgVer = (Get-Content (Join-Path $stg "version.json") -Raw | ConvertFrom-Json).version } catch {}
+if ($stgVer -ne $ver) { throw "staging\panel surumu ($stgVer) version.json ($ver) ile ayni degil - exe yanlis panel kurar." }
+Write-Host "staging\panel tazelendi: v$stgVer (exe bu panelden derlenir)" -ForegroundColor Green
 # Paket GERCEKTEN bu surum mu? Yanlis etiketli paket bagimsiz bir hata, ayni sonucu verir.
 # Okuma basarisiz olursa YAYIN DURMAZ (bu bir ek kapi, ana kapi degil) — yalnizca not dusulur.
 $zipVer = $null

@@ -31,11 +31,40 @@
           Geri Al
         </button>
         <span class="pill" id="pillHost"><i class="dot"></i>Premiere</span>
-        <span class="pill" id="pillGpu"><i class="dot"></i>GPU</span>
+        <!-- ⚠ ETİKET "GPU" DEĞİL "Motor". Rozet `fs.existsSync(cfg.engineExe)` ölçüyor, yani
+             GPU'yu DEĞİL motorun kurulu olup olmadığını. NVIDIA kartı olmayan bir makinede
+             "GPU ✓" yeşil yanıyor, config `device: "cuda"` diyor ve her transkripsiyon CUDA
+             hatasıyla çöküyordu — kullanıcı yeşil bir GPU rozetine bakarken sebebi hiç
+             bulamıyordu. Gerçek cihaz artık ipucu metninde (title) ve panel günlüğünde yazıyor;
+             CUDA çalışmazsa pipeline.js kendiliğinden CPU'ya düşüyor ve bunu söylüyor.
+             id DEĞİŞMEDİ (pillGpu): app.js ve id-nöbetçisi ona bağlı. -->
+        <span class="pill" id="pillGpu"><i class="dot"></i>Motor</span>
       </div>
     </header>
 
     <main class="content">
+
+      <!-- ⚠ YAKALANMAMIŞ HATA BANDI — HER GÖRÜNÜMÜN ÜSTÜNDE, HER ZAMAN GÖRÜNÜR.
+           NEDEN VAR: panelde global bir hata yakalayıcı YOKTU ve açılış hataları yalnızca
+           #log'a yazılıyordu — o da display:none bir kutunun içinde, yani hiç okunamıyordu.
+           Sonuç: ikinci kullanıcı "sürekli bir hata veriyor" diyor ama HANGİ hata olduğunu
+           söyleyemiyordu; geliştirici de kör kalıyordu. Bant, sebebi ekrana taşıyor ve
+           "Kopyala" ile tek tıkta paylaşılabilir hâle getiriyor.
+           Bu bir üst-düzey görünüm öğesi: views `hidden` ile değişiyor, bant onların DIŞINDA
+           duruyor ki hangi ekranda olursa olsun görünsün. -->
+      <div class="hata-bandi" id="hataBandi" hidden>
+        <div class="hata-bandi-ic">
+          <span class="hata-bandi-ikon">⚠</span>
+          <div class="hata-bandi-metin">
+            <b id="hataBandiBaslik">Panelde bir hata oluştu</b>
+            <span id="hataBandiDetay"></span>
+          </div>
+        </div>
+        <div class="hata-bandi-dugmeler">
+          <button class="btn-ghost" id="hataBandiKopyala" type="button">Kopyala</button>
+          <button class="btn-ghost" id="hataBandiKapat" type="button" title="Bandı gizle">✕</button>
+        </div>
+      </div>
 
       <!-- ================= ANA MENÜ (KARTLAR) ================= -->
       <div class="view active" id="viewHome">
@@ -383,6 +412,13 @@
           <div class="card-title" style="font-size:12px;margin-top:4px">Bu videoda kim hangi kanalda?</div>
           <div id="emojiKanalKar"></div>
           <span class="dict-status" id="emojiKanalDurum" style="display:block;margin-top:8px"></span>
+          <!-- ⚠ AYRI SATIR — #emojiKanalDurum'a YAZILAMAZ, orası kanal→karakter özetini
+               taşıyor (A1→Tofi · A2→Moni) ve ikisi birbirini ezerdi.
+               Burada emoji KLASÖRÜNÜN durumu var: eksik resim uyarısı ve karakter başına
+               duygu kapsamı. İkisi de eskiden yalnızca AYARLAR ekranına yazılıyordu, oysa
+               "Yenile" düğmesi bu ekranda: kullanıcı basıyor, hiçbir şey değişmiyor ve
+               "5 resim eksik" uyarısını hiç görmüyordu. -->
+          <span class="dict-status" id="emojiKapsamDurum" style="display:block;margin-top:6px"></span>
 
           <div class="dict-actions" style="margin-top:12px">
             <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar. Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
@@ -617,6 +653,30 @@
           <textarea id="emojiTestCikti" class="dict-text" rows="10" spellcheck="false" readonly
                     style="margin-top:8px;display:none;font-family:monospace;font-size:11px"></textarea>
         </div>
+
+        <!-- ⚠ PANEL GÜNLÜĞÜ / TANILAMA — "HATA VERİYOR AMA HANGİSİ?" SORUSUNUN CEVABI.
+             GERÇEK SORUN (ParsMazi): panel bir şey ters gittiğinde sebebi logLine ile
+             yazıyordu, ama #log `display:none !important` olan #progressBox'ın içindeydi ve
+             onu açan #logToggle da aynı kutunun içinde — yani TIKLANAMIYORDU. Açılışta
+             yazılan bütün tanılamalar (modül yüklenemedi, config bozuk, sözlük birleşmedi,
+             stil klasörü okunamadı, Init hatası…) hiçbir yere ulaşmıyordu. Panelin kendi
+             kodu birden çok yerde "Ayrıntılar log'una bak" diyor — kullanıcı basıyor, kutu
+             BOŞ açılıyordu.
+             Artık logLine her satırı bir halka tampona da yazıyor (görünürlükten bağımsız)
+             ve burası o tamponu gösteriyor. "Kopyala" panoya alıyor: ikinci kullanıcı tek
+             yapıştırmayla tam tabloyu gönderebiliyor. -->
+        <div class="card">
+          <div class="card-title">Panel Günlüğü <small style="color:var(--faint);text-transform:none;letter-spacing:0">— bir sorun olduğunda burayı gönder</small></div>
+          <p class="note" style="margin:0 0 10px">Panel ne yaptığını buraya yazar. Bir şey ters giderse <b>Kopyala</b>'ya basıp metni gönder — sorunun sebebi neredeyse her zaman burada yazılı.</p>
+          <div class="dict-actions">
+            <button class="btn-ghost" id="tanilamaYenile" type="button">Yenile</button>
+            <button class="btn-ghost" id="tanilamaKopyala" type="button">Kopyala</button>
+            <button class="btn-ghost" id="tanilamaTemizle" type="button">Temizle</button>
+            <span class="dict-status" id="tanilamaDurum"></span>
+          </div>
+          <textarea id="tanilamaCikti" class="dict-text" rows="16" spellcheck="false" readonly
+                    style="margin-top:8px;font-family:monospace;font-size:11px"></textarea>
+        </div>
       </div>
 
       <!-- ================= AUTOCUT ================= -->
@@ -711,13 +771,19 @@
 
         <div class="card" id="snkCekenCard" hidden>
           <div class="card-title">2 · Videoyu kim çekiyor?</div>
+          <!-- ⚠ BU DÜĞMELER JS TARAFINDAN KADRODAN YENİDEN ÜRETİLİYOR (app.js snkCekenDoldur).
+               Buradaki Tofi/Moni yalnızca GÜVENLİ TABAN: kişi listesi boş/bozuksa ya da
+               tarayıcı önizlemesinde çalışıyorsa bunlar kalır.
+               Eskiden SABİTTİ ve tek seçenek bu ikisiydi; kadrosunda Tofi de Moni de olmayan
+               bir kullanıcı KENDİNİ seçemiyor, panel A1'i "Tofi" sanıyor ve kullanıcının kendi
+               Craig kaydını A2+'ya yerleştiriyordu → ses videoda ÇİFT/yankılı çıkıyordu. -->
           <div class="seg" id="snkCeken">
             <button class="seg-btn active" data-ceken="Tofi" type="button">Tofi</button>
             <button class="seg-btn" data-ceken="Moni" type="button">Moni</button>
           </div>
           <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
                yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
-          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · A2 = Tofi/Moni'den diğeri · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz.</p>
+          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz. Seçenekler “Kişiler” listenden gelir — kendini göremiyorsan oraya ekle.</p>
           <!-- "Oyun sesi şu an hangi kanalda?" seçici KALDIRILDI. Panel oyun sesini artık
                taşımıyor (Premiere'de klip taşıma API'si yok; overwriteClip çoklu-akışlı OBS
                kaydında yanlış ses akışını yerleştiriyordu). Yerleşim tablosu oyun sesi için

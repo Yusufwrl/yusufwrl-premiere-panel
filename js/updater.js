@@ -157,7 +157,17 @@ function _osIndir(url, dest, onLog) {
       if (onLog) onLog("Windows indiricisi başardı: " + Math.round(n / 1048576) + " MB");
       resolve();
     }
+    /* ⚠ TEK SEFERLİK. spawn başarısız olduğunda Node HEM "error" HEM "close" olayı üretir
+       (ENOENT'te close kodu -4058). curl.exe olmayan/engellenen bir makinede ikisi de
+       tetikleniyor ve psIle() İKİ KEZ çağrılıyordu: aynı hedefe İKİ PowerShell indirmesi
+       paralel başlıyor, ikisi de aynı dosyaya yazıyor (bozuk/yarım zip) ve hangisi önce
+       biterse `dogrula()` ondan sonuç veriyordu — Promise ikinci kez resolve/reject
+       edilemediği için hata sessizce yutuluyordu. 23 MB'lık paket iki kez indiriliyordu.
+       Belirti: "güncelleme bazen bozuk paket diyor". */
+    var psBasladi = false;
     function psIle() {
+      if (psBasladi) return;
+      psBasladi = true;
       var ps = "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '" +
                String(url).replace(/'/g, "''") + "' -OutFile '" +
                String(dest).replace(/'/g, "''") + "' -UseBasicParsing";

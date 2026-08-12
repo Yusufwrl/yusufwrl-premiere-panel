@@ -22,7 +22,7 @@ function _jsonEsc(s) {
    Bu, projenin en sık tekrar eden kafa karışıklığı: "düzeltmeyi kurdum ama hâlâ aynı" —
    çünkü düzeltme host tarafındaysa hiç yüklenmemiş oluyor. Artık ölçülebilir.
    ⚠ HOST.JSX'İ HER DEĞİŞTİRDİĞİNDE BU SAYIYI DA ARTIR (version.json ile aynı tut). */
-var HOST_SURUM = "1.13.8";
+var HOST_SURUM = "1.14.0";
 
 /* Panelin host sürümünü okuması için. app.js emoji/preset işlerinden önce çağırıp
    panelinkiyle karşılaştırıyor ve tutmuyorsa kullanıcıyı uyarıyor. */
@@ -1581,6 +1581,12 @@ function presetTani() {
 
 /* ComponentParam'da matchName YOK (olculdu) — yalniz displayName ile aranabiliyor. */
 function _paramAra(bilesen, adlar) {
+    /* ⚠ NULL KORUMASI: _bilesenAra bulamayınca null dönüyor ve çağıranlardan biri
+       (shortsSekansKur) sonucu doğrudan buraya veriyordu. Korumasız hâli
+       "TypeError: null is not an object" fırlatıp, hemen altındaki anlamlı
+       "Motion/Scale bulunamadi" dalını ERİŞİLEMEZ kılıyordu — kullanıcı ölçeğin neden
+       tutmadığını anlatan mesaj yerine ham bir tip hatası görüyordu. */
+    if (!bilesen || !bilesen.properties) return null;
     var p = bilesen.properties, i, j, dn;
     for (i = 0; i < p.numItems; i++) {
         dn = "";
@@ -3963,13 +3969,20 @@ function autoCut(intervalsFilePath) {
         // Tek Ctrl+Z ile geri alınabilsin (destekleniyorsa)
         try { app.beginUndoGroup("Yusufwrl AutoCut"); _ug = true; } catch (eug) {}
 
-        // A1 (audio track 0) sürekli kayıt referansıdır; bir aralığı tam kaplamıyorsa
-        // (kayıtta gerçek boşluk) o kesimi atla — desenkron üretme (H2/H3).
-        var refTrack = (seq.audioTracks.numTracks > 0) ? seq.audioTracks[0] : null;
-
+        /* A1 (audio track 0) sürekli kayıt referansıdır; bir aralığı tam kaplamıyorsa
+           (kayıtta gerçek boşluk) o kesimi atla — desenkron üretme (H2/H3).
+           ⚠ A1 BOŞSA REFERANS OLARAK KULLANILAMAZ. Eskiden yalnız `numTracks > 0` bakılıyordu:
+           A1'de hiç klip olmayan bir sekansta (OBS kaydı A2'den başlıyor ya da kullanıcı
+           A1'deki klibi silmiş) _trackCovers HER aralık için false dönüyor, bütün kesimler
+           "kayıt boşluğu" diye atlanıyor ve panel 1137 boşluk bulup SIFIRINI kesiyordu —
+           üstelik aşağıda "ok:" ile YEŞİL dönüyordu. Panel kanal listesini klip İÇEREN
+           kanallardan kurduğu için analiz doğru, kesim tamamen ölüydü.
+           Klip yoksa kapı tümden devre dışı: referans yoksa "referans kapsamıyor" diyemeyiz. */
         /* DOLU kanalları bir kez tespit et. Boş kanalı razorlamak da taramak da no-op;
            tipik sekansta razor çağrılarının önemli bir kısmı buradan gidiyordu.
-           QE track nesneleri de döngü ÖNCESİNDE alınır (her kesimde getTrackAt çağırmak yerine). */
+           QE track nesneleri de döngü ÖNCESİNDE alınır (her kesimde getTrackAt çağırmak yerine).
+           ⚠ SIRA: bu blok refTrack'ten ÖNCE olmak ZORUNDA — referans kanal seçimi doluA'ya
+           dayanıyor (aşağıya bak). */
         var doluV = [], doluA = [], qeV = [], qeA = [], di;
         for (di = 0; di < seq.videoTracks.numTracks; di++) {
             try { if (seq.videoTracks[di].clips.numItems > 0) { doluV.push(di); qeV.push(qeSeq.getVideoTrackAt(di)); } } catch (edv) {}
@@ -3978,6 +3991,30 @@ function autoCut(intervalsFilePath) {
             try { if (seq.audioTracks[di].clips.numItems > 0) { doluA.push(di); qeA.push(qeSeq.getAudioTrackAt(di)); } } catch (eda) {}
         }
         pr("Dolu kanal: " + doluV.length + " video + " + doluA.length + " ses (boş kanallar atlanıyor)");
+
+        /* REFERANS KANAL = İLK DOLU SES KANALI (A1 doluysa o, değilse ilk dolu olan).
+           ⚠ A1 DOLUYSA DAVRANIŞ BİREBİR ESKİSİ GİBİ: doluA[0] === 0 olur, yani
+           seq.audioTracks[0] seçilir. Regresyon riski yok.
+           ⚠ Neden yedek gerekiyor: A1'de hiç klip olmayan bir sekansta (OBS kaydı A2'den
+           başlıyor ya da kullanıcı A1'deki klibi silmiş) _trackCovers HER aralık için false
+           dönüyordu; bütün kesimler "kayıt boşluğu" diye atlanıyor, panel 1137 boşluk bulup
+           SIFIRINI kesiyordu. İlk düzeltmede kapı tümden devre dışı bırakılmıştı — o da
+           desenkron korumasını kaldırıyordu: kayıtta GERÇEK boşluk olan bir aralık kesilirse
+           ses/görüntü kayar. Yedek referans ikisini de çözüyor: koruma çalışmaya devam
+           ediyor, yalnız başka bir kanaldan ölçülüyor. */
+        var refTrack = null;
+        try {
+            if (doluA.length > 0) {
+                refTrack = seq.audioTracks[doluA[0]];
+                if (doluA[0] !== 0) pr("NOT: A1 boş — desenkron referansı A" + (doluA[0] + 1) + " kanalından alınıyor.");
+            } else {
+                pr("UYARI: hiçbir ses kanalında klip yok — 'kayıt boşluğu' kapısı devre dışı.");
+            }
+        } catch (eRef) {
+            refTrack = null;
+            pr("UYARI: referans ses kanalı okunamadı (" + eRef.toString() +
+               ") — 'kayıt boşluğu' kapısı devre dışı, kesimler kontrolsüz yapılacak.");
+        }
 
         var t0 = 0; try { t0 = $.hiresTimer; } catch (et) {}
         var tRazor = 0, tRip = 0;
@@ -4007,6 +4044,21 @@ function autoCut(intervalsFilePath) {
            " sn | ripple-delete " + (tRip / 1000000).toFixed(1) + " sn");
         pr("Sekans süresi SONRA: " + durAfter.toFixed(2) + " sn | done=" + done + " noop=" + noop + " skipCover=" + skippedCover + " failed=" + failed + (firstErr ? " err=" + firstErr : ""));
         try { var dir = new File(intervalsFilePath).parent; _writeFileUTF8(dir.fsName + "/autocut_diag.txt", diag.join("\n")); } catch (ed) {}
+        /* ⚠ HİÇ KESİM OLMADIYSA BU BİR BAŞARISIZLIKTIR — "ok:" DÖNME.
+           Eskiden done=0 iken de "ok:" dönüyordu ve panel yeşil "✓ Bitti — 0 boşluk kesildi"
+           yazıp analizi siliyor, üstüne altyazıları "bayat" işaretliyordu (kesim timeline'ı
+           kısalttığı varsayımıyla). Yani hiçbir şey yapılmamışken kullanıcıya iş yapılmış
+           gibi görünüyor, elindeki geçerli altyazılar da şüpheli hâle geliyordu.
+           Sebep ayrımı metinde zaten var (noop / skipCover / failed), o yüzden mesaj aynı
+           kalıyor; yalnız önek değişiyor. ivs.length===0 ise gerçekten kesecek bir şey
+           yoktur — o durumda "ok:" doğru cevap. */
+        if (done === 0 && ivs.length > 0) {
+            return "err:Hiçbir boşluk kesilemedi (" + ivs.length + " aday vardı)"
+                + (noop ? (", " + noop + " boş geçti") : "")
+                + (skippedCover ? (", " + skippedCover + " atlandı (kayıt boşluğu)") : "")
+                + (failed ? (", " + failed + " hata" + (firstErr ? ": " + firstErr : "")) : "")
+                + ". Kanallar kilitli olabilir ya da A1 boş olabilir — Ayrıntılar log'una bak.";
+        }
         return "ok:" + done + " boşluk kesildi (" + seqDur.toFixed(1) + " → " + durAfter.toFixed(1) + " sn)"
             + (noop ? (", " + noop + " boş geçti") : "")
             + (skippedCover ? (", " + skippedCover + " atlandı (kayıt boşluğu)") : "")

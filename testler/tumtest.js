@@ -52,6 +52,80 @@ baslik("Sürüm senkronu (üç dosya birlikte artmalı)");
   var p = v.split(".").map(Number);
   dogru("sürüm sayısal karşılaştırmaya uygun", p.length === 3 && p.every(function (x) { return !isNaN(x); }),
         "semver bekleniyor: " + v);
+
+  /* ---- DÖRDÜNCÜ DOSYA: installer\staging\panel — EXE'YE GİREN GERÇEK PANEL ----
+     ⚠ GERÇEKTEN OLDU (12 Ağustos 2026 denetiminde yakalandı). Yukarıdaki üç dosya
+     senkrondu ve bu test YEŞİL geçiyordu — ama `installer.iss` exe'yi üç dosyanın
+     hiçbirinden değil, ELLE doldurulan `staging\panel\` klasöründen derliyor ve o klasör
+     v1.11.1'de DONMUŞTU. Yani derlenen exe kurulum sihirbazında "1.13.8" yazıp İKİ SÜRÜM
+     ESKİ paneli kuruyordu:
+       · `function wireShorts()` İKİ KEZ tanımlı → tek tıkta İKİ paralel Shorts üretimi,
+         İKİ ayrı yapay zekâ isteği (çift ücret), birbirinin aktif sekansını çeken iki akış
+       · `js/ilerleme.js` YOK → ilerleme/kalan süre göstergesi hiç çalışmıyor
+       · v1.12.0'ın tanımsız CSS sınıfı ve emoji "_" parametre düzeltmeleri YOK
+     Bedeli asimetrikti: ikinci kullanıcıya (ParsMazi) "bozuk sürümdeysen exe gönderelim"
+     denip verilen exe, tam da düzeltmeye çalıştığı hatayı GERİ KURUYORDU — ve sürüm
+     numarası doğru göründüğü için kimse fark etmiyordu.
+     Aynı kapı `installer.iss`'in başında ISPP `#error` olarak da duruyor (derlemeyi
+     durdurur, iki yönde ISCC ile kanıtlandı). Buradaki kopya daha erken uyarır: sürüm
+     çıkarmadan ÖNCE, ISCC hiç çalıştırılmadan.
+     Çözüm: pack-panel.ps1 -Stage .\installer\staging\panel */
+  var stgYol = path.join(KOK, "installer", "staging", "panel", "version.json");
+  if (!fs.existsSync(stgYol)) {
+    not("staging\\panel yok — exe derlenmeyecekse normal (zip yolu bunu kullanmaz)");
+  } else {
+    var sv = oku("installer/staging/panel/version.json", /"version"\s*:\s*"([^"]+)"/);
+    var sm = oku("installer/staging/panel/CSXS/manifest.xml", /ExtensionBundleVersion="([^"]+)"/);
+    esit("staging\\panel aynı sürüm (exe'ye giren panel)", sv, v);
+    esit("staging\\panel manifest aynı sürüm", sm, v);
+    /* ⚠⚠ SÜRÜM DİZGİSİ YETMEZ — İÇERİK KARŞILAŞTIRILIR.
+       İlk yazımda yalnız version.json/manifest sürümüne bakılıyordu ve bu YANLIŞ GÜVEN
+       veriyordu: sürüm bump'ı yapılmadan koda dokunulduğu her an (yani geliştirmenin
+       TAMAMI boyunca) staging içerik olarak bayat kalıyor ama test YEŞİL geçiyordu.
+       Tam da bu oturumda gerçekleşti: staging tazelendi, sonra 13 dosya daha değişti,
+       sürüm aynı kaldı → sürüm testi geçiyor, staging'de ESKİ kod duruyordu.
+       Artık panel dosyalarının İÇERİĞİ bayt bayt karşılaştırılıyor. */
+    var stgKok = path.join(KOK, "installer", "staging", "panel");
+    var stgFark = [], stgEksik = [];
+    (function () {
+      /* Karşılaştırılacak ağaç: installer/panel-files.ps1 $PanelInclude ile aynı olmalı.
+         Elle liste tutmak yerine staging'in KENDİ içeriğini geziyoruz — pakete yeni bir
+         klasör eklenirse kendiliğinden kapsama giriyor. */
+      function gez(bagil) {
+        var s = path.join(stgKok, bagil), r = path.join(KOK, bagil), st;
+        try { st = fs.statSync(s); } catch (e) { return; }
+        if (st.isDirectory()) {
+          var ic = [];
+          try { ic = fs.readdirSync(s); } catch (e) { return; }
+          ic.forEach(function (ad) { gez(path.join(bagil, ad)); });
+          return;
+        }
+        if (!fs.existsSync(r)) { stgEksik.push(bagil); return; }   // repoda yok = pakete elle konmuş
+        try {
+          if (!fs.readFileSync(s).equals(fs.readFileSync(r))) stgFark.push(bagil);
+        } catch (e) { stgFark.push(bagil + " (okunamadı)"); }
+      }
+      try { fs.readdirSync(stgKok).forEach(function (ad) { gez(ad); }); } catch (e) {}
+    })();
+    dogru("staging\\panel İÇERİĞİ repoyla aynı (exe'ye giren gerçek kod)",
+          stgFark.length === 0,
+          stgFark.length + " dosya farklı: " + stgFark.slice(0, 6).join(", ") +
+          "\n        Düzelt: powershell -File .\\installer\\pack-panel.ps1 -Stage .\\installer\\staging\\panel");
+    if (stgEksik.length) not("staging'de olup repoda olmayan " + stgEksik.length + " dosya: " + stgEksik.slice(0, 4).join(", "));
+
+    /* En pahalı iki regresyonun DOĞRUDAN ölçümü — içerik karşılaştırması bunları zaten
+       yakalar ama hata mesajı "N dosya farklı" der; bunlar sebebi ADIYLA söylüyor. */
+    var stgApp = path.join(stgKok, "js", "app.js");
+    if (fs.existsSync(stgApp)) {
+      var sHam = String(fs.readFileSync(stgApp, "utf8"));
+      var kacTane = (sHam.match(/function\s+wireShorts\s*\(\s*\)/g) || []).length;
+      dogru("staging\\panel'de wireShorts TEK tanımlı (çift üretim hatası yok)", kacTane === 1,
+            "bulunan tanım sayısı: " + kacTane + " — staging bayat, pack-panel.ps1 -Stage çalıştır");
+    }
+    dogru("staging\\panel'de js/ilerleme.js var",
+          fs.existsSync(path.join(stgKok, "js", "ilerleme.js")),
+          "ilerleme göstergesi exe'ye girmiyor — staging bayat");
+  }
 })();
 
 /* ================= 2. EMOJİ PAKETİ ================= */
@@ -542,6 +616,344 @@ function bitir() {
     dogru("gerçek renk değeri okunuyor", b.length === 1 && b[0].renk > 0, "renk: " + (b[0] && b[0].renk));
     var c = KS.parseText("Dora: kiz [3]");
     esit("sayısal renk hâlâ ayrışıyor", c.length === 1 ? [c[0].adlar, c[0].renk] : null, [["kiz"], 3]);
+  })();
+
+  /* ---- 12b. "VİDEOYU KİM ÇEKİYOR?" SEÇİCİSİ KADRODAN ÜRETİLMELİ ----
+     GERÇEK HATA (ParsMazi, 12 Ağustos 2026): #snkCeken düğmeleri index.html'de
+     data-ceken="Tofi" / "Moni" diye SABİTTİ. Kadrosunda bu iki ad olmayan kullanıcı KENDİNİ
+     seçemiyordu: panel A1'i "Tofi" adına kilitliyor, kullanıcının KENDİ Craig kaydını hiçbir
+     karaktere eşleyemeyip A2+'ya yerleştiriyordu → sesi hem OBS mikrofonundan (A1) hem Craig
+     kaydından çıkıp videoda ÇİFT/yankılı oluyordu. Hata SESSİZDİ: uyarı kapısı yalnız
+     "çekenin dosyası bulunamadı VE bilinmeyen dosya var" iken açılıyor, kayıt başka bir
+     karaktere eşleştiğinde hiç tetiklenmiyordu. */
+  baslik("Senkron: çeken seçicisi kadrodan geliyor mu");
+  (function () {
+    var KS, ham;
+    try { KS = require(path.join(KOK, "js", "kisiler.js")); } catch (e) { hata("kisiler.js", e.message); return; }
+    try { ham = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); }
+    catch (e) { hata("app.js okunamadı", e.message); return; }
+
+    dogru("snkCekenDoldur() tanımlı", /function\s+snkCekenDoldur\s*\(/.test(ham),
+          "seçici kadrodan üretilmiyor — ikinci kullanıcı kendini seçemez");
+    dogru("kişi listesi değişince seçici tazeleniyor",
+          /function\s+snkKisiDoldur[\s\S]{0,600}?snkCekenDoldur\s*\(/.test(ham),
+          "snkKisiDoldur snkCekenDoldur'u çağırmıyor — kullanıcı kendini ekler, seçicide göremez");
+    /* ⚠ OLAY DELEGASYONU ŞART: düğmeler yeniden çiziliyor. Tek tek bağlanan dinleyiciler
+       eski düğme nesneleriyle çöpe gider → seçici görünür ama TIKLANMAZ (ölü düğme). */
+    dogru("#snkCeken tıklaması delegasyonla bağlı (yeniden çizim dinleyiciyi öldürmesin)",
+          /\$\("snkCeken"\)\.addEventListener\s*\(\s*"click"/.test(ham),
+          "düğmelere tek tek bağlanmış — yeniden çizilince tıklama ölür");
+    dogru("çeken seçicisi artık querySelectorAll ile tek tek bağlanmıyor",
+          !/querySelectorAll\("#snkCeken \.seg-btn"\)/.test(ham),
+          "eski tek-tek bağlama kodu duruyor");
+
+    /* ---- KURAL DENKLİĞİ (senin kadronda sonuç DEĞİŞMEMELİ) ----
+       ⚠ DÜRÜSTLÜK NOTU: aşağıdaki kontroller app.js'teki `karsi` seçimini ÇAĞIRMIYOR —
+       o mantık bir IIFE'nin içinde ve dışarıdan erişilemiyor. Burada KURALIN KENDİSİ
+       (kisiler.js varsayılan sırasına uygulanmış hâli) sınanıyor: eski sabit kuralla yeni
+       "listedeki ilk çeken-olmayan" kuralı aynı cevabı veriyor mu.
+       Yani bu bir DENKLİK kanıtı, uygulamanın kanıtı değil. Gerçek uygulama testi için
+       `karsi` seçiminin js/kisiler.js gibi test edilebilir bir modüle çıkarılması gerekir —
+       bugün yapılmadı, çünkü snkEslestir'in geri kalanı DOM'a bağlı.
+       Eski kural: karsi = (ceken === "Tofi") ? "Moni" : "Tofi"  — SABİT.
+       Yeni kural: karsi = kişi listesindeki, çeken OLMAYAN İLK karakter. */
+    var vars = KS.defaults().map(function (k) { return k.karakter; });
+    function ilkDigeri(ceken) {
+      for (var i = 0; i < vars.length; i++) {
+        if (String(vars[i]).toLowerCase() !== String(ceken).toLowerCase()) return vars[i];
+      }
+      return "";
+    }
+    esit("çeken Tofi iken A2 = Moni (eski sabitle aynı)", ilkDigeri("Tofi"), "Moni");
+    esit("çeken Moni iken A2 = Tofi (eski sabitle aynı)", ilkDigeri("Moni"), "Tofi");
+    /* İkinci kullanıcı senaryosu: kadroda ne Tofi ne Moni var. Eski kural burada HER ZAMAN
+       "Tofi" döndürüyordu (kadroda yok → A2 boş geçiliyor + yanıltıcı log). */
+    var parsKadro = ["ParsMazi", "Kanka", "Ucuncu"];
+    function ilkDigeriListe(liste, ceken) {
+      for (var i = 0; i < liste.length; i++) {
+        if (String(liste[i]).toLowerCase() !== String(ceken).toLowerCase()) return liste[i];
+      }
+      return "";
+    }
+    esit("Tofi/Moni'siz kadroda A2 gerçek bir karakter (eski kural 'Tofi' derdi)",
+         ilkDigeriListe(parsKadro, "ParsMazi"), "Kanka");
+    dogru("index.html'deki sabit düğmeler yalnızca taban (JS üretimi var)",
+          /snkCekenDoldur/.test(ham), "JS üretimi yok — HTML sabiti tek kaynak");
+  })();
+
+  /* ---- 12c. TEŞHİS KATMANI: HATA GÖRÜNÜR VE İLETİLEBİLİR OLMALI ----
+     GERÇEK SORUN (ParsMazi): "sürekli bir hata veriyor" ama HANGİ hata olduğunu
+     söyleyemiyordu. Sebebi ölçüldü:
+       · panelde HİÇBİR global hata yakalayıcı yoktu (window.onerror / unhandledrejection),
+         yani bir dinleyicide ya da Promise zincirinde fırlayan hata hiçbir yere yazılmıyordu;
+       · logLine yalnız #log görünürken yazıyordu, #log ise `display:none !important` olan
+         #progressBox'ın içindeydi ve onu açan #logToggle da aynı kutuda → TIKLANAMIYOR.
+         Açılıştaki bütün tanılamalar (modül yüklenemedi, config bozuk, "Init hatası") yok
+         oluyordu. Panelin kendi kodu birkaç yerde "Ayrıntılar log'una bak" diyordu; kutu
+         BOŞ açılıyordu.
+     Bu testler o üç yolun da açık kalmasını kilitliyor. */
+  baslik("Teşhis katmanı (hata görünür ve iletilebilir mi)");
+  (function () {
+    var ham, htm;
+    try { ham = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); }
+    catch (e) { hata("app.js okunamadı", e.message); return; }
+    try { htm = String(fs.readFileSync(path.join(KOK, "index.html"), "utf8")); }
+    catch (e) { hata("index.html okunamadı", e.message); return; }
+
+    dogru("global hata yakalayıcı kurulu (window error)",
+          /addEventListener\s*\(\s*"error"/.test(ham),
+          "yakalanmamış hata hiçbir yere yazılmaz — kullanıcı sebebi söyleyemez");
+    dogru("yakalanmamış promise hatası da yakalanıyor",
+          /addEventListener\s*\(\s*"unhandledrejection"/.test(ham),
+          "async akışlardaki hata sessiz kalır");
+    dogru("logLine görünürlükten BAĞIMSIZ tampona yazıyor",
+          /function\s+logLine[\s\S]{0,400}?_logBufYaz\s*\(/.test(ham),
+          "log yalnız görünürken yazılıyor — açılış tanılamaları kaybolur");
+    dogru("günlük tamponunun TAVANI var (bellek sızmasın)",
+          /_LOG_TAVAN\s*=\s*\d+/.test(ham), "tavan yok — uzun oturumda dizi sınırsız büyür");
+
+    /* ⚠ `var` HOISTING NÖBETÇİSİ (v1.9.20 dersi): _logBuf, logLine'ın ÜSTÜNDE tanımlanmak
+       ZORUNDA. Altında olsaydı bildirim hoist edilir ama DEĞER edilmez → ilk logLine
+       çağrısında `undefined.push` ile panel açılışta ölürdü. */
+    var ixBuf = ham.indexOf("var _logBuf");
+    var ixLog = ham.indexOf("function logLine");
+    dogru("_logBuf, logLine'dan ÖNCE tanımlı (var hoisting tuzağı)",
+          ixBuf > -1 && ixLog > -1 && ixBuf < ixLog,
+          "_logBuf: " + ixBuf + " · logLine: " + ixLog + " — sıra ters, ilk log çağrısı patlar");
+
+    dogru("hata bandı HTML'de var", /id="hataBandi"/.test(htm), "hata ekranda görünmez");
+    dogru("tanılama kartı HTML'de var", /id="tanilamaCikti"/.test(htm),
+          "kullanıcı günlüğü göremez/gönderemez");
+    dogru("tanılama kartı bağlanıyor (ölü düğme değil)",
+          /_wire\([^)]*wireTanilama\)|_wire\("tanılama[^"]*",\s*wireTanilama\)/.test(ham),
+          "wireTanilama wirePersistence'tan çağrılmıyor — düğmeler ölü");
+    dogru("tanılama dökümü motor device'ını yazıyor (cuda/cpu teşhisi)",
+          /device \(cuda\/cpu\)/.test(ham),
+          "en sık hata kaynağı dökümde görünmüyor");
+
+    /* setPill hata YOLUNDAN çağrılıyor ("Init hatası" yakalayıcısının ilk satırı).
+       Korumasız hâli, tam da hata anında ikinci bir hata fırlatıp paneli tümden susturur. */
+    dogru("setPill null korumalı (hata yolunda ikinci hata fırlatmasın)",
+          /function\s+setPill[\s\S]{0,200}?if\s*\(!el\)\s*return/.test(ham),
+          "setPill korumasız — init hatası yakalayıcısı kendisi patlar");
+  })();
+
+  /* ---- 12d. CUDA YOKSA CPU'YA GERİ DÜŞ ----
+     GERÇEK SORUN: config.json `"device": "cuda"` ile geliyor ve kod tabanında GPU tespiti
+     de CPU'ya geri düşüş de HİÇ YOKTU. NVIDIA kartı olmayan makinede motor HER çalıştırmada
+     çöküyor, panel "faster-whisper-xxl.exe çıkış kodu 1" diyordu ve kullanıcı hiçbir şey
+     üretemiyordu. Üstelik başlıktaki rozet "GPU" yazıp YEŞİL yanıyordu (aslında motor
+     dosyası var mı diye bakıyor), yani sebep doğru yerde aranamıyordu.
+     ⚠ AYRIM PAHALI, İKİ YÖN DE KİLİTLİ: kalıp fazla genişse bozuk WAV / dolu disk gibi
+     hatalarda da CPU'ya düşülür ve kullanıcı 5-15 kat yavaş bir koşunun sonunda AYNI hataya
+     çarpar; fazla darsa geri düşüş hiç tetiklenmez. */
+  baslik("CUDA yoksa CPU'ya geri düşüş");
+  (function () {
+    var PL, ham;
+    try { PL = require(path.join(KOK, "js", "pipeline.js")); }
+    catch (e) { hata("pipeline.js", e.message); return; }
+    try { ham = String(fs.readFileSync(path.join(KOK, "js", "pipeline.js"), "utf8")); }
+    catch (e) { hata("pipeline.js okunamadı", e.message); return; }
+    if (typeof PL._gpuHatasi !== "function") { hata("_gpuHatasi dışa açık değil"); return; }
+    var G = PL._gpuHatasi;
+
+    /* ⚠⚠ HER ÖRNEK GERÇEK MOTOR BANNER'IYLA BİRLİKTE VERİLİR.
+       Motorun çıktısının 2. satırı HER ZAMAN şu (gerçek engine_last.log'dan alındı):
+         "Standalone Faster-Whisper-XXL r245.4 running on: CUDA"
+       İlk yazımda testler banner'SIZ, yalıtılmış dizgilerle yapılmıştı ve GERÇEK BİR HATAYI
+       KAÇIRDI: _gpuHatasi iki koşulu tüm metinde BAĞIMSIZ arıyordu, banner yüzünden birinci
+       koşul her koşuda true oluyor ve fonksiyon HER başarısızlıkta "GPU hatası" diyordu —
+       bozuk WAV'da bile CPU'ya düşülüp kullanıcı 5-15 kat yavaş bir koşunun sonunda aynı
+       hataya çarpardı. Test verisi gerçeğe benzemezse test hiçbir şey kanıtlamaz. */
+    var BANNER = "Standalone Faster-Whisper-XXL r245.4 running on: CUDA\n" +
+                 "Transcribing: audio.wav\n";
+    function ciktiYap(govde) { return BANNER + govde + "\n"; }
+
+    /* GERÇEK motor çıktılarından (CTranslate2 / cuDNN / PyTorch) — HEPSİ yakalanmalı. */
+    [["kart yok", "RuntimeError: CUDA failed with error no CUDA-capable device is detected"],
+     ["sürücü eski", "CUDA driver version is insufficient for CUDA runtime version"],
+     ["cuDNN yok", "Could not load library cudnn_ops_infer64_8.dll. Error code 126"],
+     ["cublas yok", "Library cublas64_12.dll is not found or cannot be loaded"],
+     ["mimari desteksiz", "CUDA error: no kernel image is available for execution on the device"],
+     ["GPU belleği", "CUDA failed with error out of memory"]
+    ].forEach(function (c) {
+      dogru("GPU hatası yakalandı: " + c[0], G({ cikti: ciktiYap(c[1]) }),
+            "geri düşüş tetiklenmez — NVIDIA'sız makinede panel hiçbir şey üretemez");
+    });
+
+    /* ⚠ GPU İLE İLGİSİZ hatalar — BANNER VARKEN DE CPU'ya düşülmemeli.
+       Bu blok, yukarıdaki kök hatanın nöbetçisi: banner'lı ilgisiz bir hata "GPU hatası"
+       sayılırsa fonksiyon pratikte HER hatada geri düşüyor demektir. */
+    [["bozuk ses", "Error opening input file: Invalid data found when processing input"],
+     ["disk dolu", "OSError: [Errno 28] No space left on device"],
+     ["dosya yok", "FileNotFoundError: audio.wav"],
+     ["argüman", "error: unrecognized arguments: --hotwords"],
+     ["izin", "PermissionError: [Errno 13] Permission denied: 'work\\\\A1.json'"],
+     ["bellek (RAM)", "MemoryError: unable to allocate array"],
+     ["genel çökme", "Traceback (most recent call last):\n  File \"main.py\", line 1\nRuntimeError: something failed"]
+    ].forEach(function (c) {
+      dogru("GPU hatası SAYILMADI (banner varken): " + c[0], !G({ cikti: ciktiYap(c[1]) }),
+            "gereksiz CPU koşusu — kullanıcı 5-15 kat yavaş bekleyip aynı hataya çarpar");
+    });
+    dogru("GPU hatası SAYILMADI: boş çıktı", !G({ cikti: "" }), "boş çıktıda geri düşüş anlamsız");
+    /* Banner'ın TEK BAŞINA (hatasız) geri düşüş tetiklememesi — kök hatanın en saf hâli. */
+    dogru("yalnız banner GPU hatası SAYILMAZ", !G({ cikti: BANNER }),
+          "banner tek başına tetikliyor — her koşuda CPU'ya düşülür");
+
+    /* Geri düşüş dalının kendisi: compute_type de değişmeli (float16 CPU'da desteklenmiyor),
+       zaten cpu seçiliyse tekrar denenmemeli, ve kullanıcıya SÖYLENMELİ. */
+    dogru("geri düşüşte compute_type int8'e çevriliyor",
+          /--compute_type[\s\S]{0,200}?"int8"|iC \+ 1\] = "int8"/.test(ham),
+          "float16 CPU'da desteklenmiyor — cihazı çevirip tipi bırakmak ikinci çökme üretir");
+    dogru("zaten CPU ise geri düşüş denenmiyor",
+          /_gpuHatasi\(e\)[\s\S]{0,120}?toLowerCase\(\)\s*!==\s*"cpu"/.test(ham),
+          "cpu ayarlıyken aynı koşu ikinci kez yapılır");
+    /* ⚠ CPU argümanları "ipucusuz yol denendi mi" BAYRAĞINDAN seçilmeli, `e`'den DEĞİL.
+       Bu bir REGRESYON nöbetçisi: ilk yazımda `_hotwordsTaninmadi(e)` soruluyordu ama
+       hotwords yedeği çalıştıysa `e` artık İKİNCİ hatayı tutuyor ve ikinci koşuda
+       `--hotwords` zaten yoktu → kontrol false → CPU denemesi motorun TANIMADIĞI
+       `--hotwords` ile yapılıp o da çökerdi. */
+    dogru("CPU argümanları 'ipucusuzDenendi' bayrağından seçiliyor (e'den DEĞİL)",
+          /var cpuArgs = \(ipucusuzDenendi \? argsNoHot : args\)/.test(ham),
+          "bayrak yok — CPU koşusu motorun tanımadığı --hotwords ile yapılır ve çöker");
+    dogru("ipucusuzDenendi bayrağı gerçekten kuruluyor",
+          /ipucusuzDenendi = true/.test(ham), "bayrak hiç true olmuyor");
+    dogru("CPU'ya düşüldüğü kullanıcıya söyleniyor",
+          /GPU \(CUDA\) kullanılamadı/.test(ham), "sessiz 5-15 kat yavaşlama kafa karıştırır");
+    dogru("transcribe.sonCihaz her koşuda sıfırlanıyor (bayat uyarı çıkmasın)",
+          /transcribe\.sonCihaz\s*=\s*String\(cfg\.device/.test(ham),
+          "bayat sonCihaz bir sonraki koşuda haksız uyarı gösterir");
+    /* Panel tarafı: uyarı gerçekten gösteriliyor mu (ölü fonksiyon olmasın). */
+    var appHam = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"));
+    dogru("panel cpuDusuUyar()'ı transcribe'dan SONRA çağırıyor",
+          /pipeline\.transcribe\([\s\S]{0,400}?cpuDusuUyar\(\)/.test(appHam),
+          "uyarı fonksiyonu yazılmış ama çağrılmıyor — ölü kod");
+    dogru("rozet etiketi artık 'GPU' değil (yanıltıcıydı)",
+          !/id="pillGpu"><i class="dot"><\/i>GPU</.test(String(fs.readFileSync(path.join(KOK, "index.html"), "utf8"))),
+          "rozet GPU diyor ama motor varlığını ölçüyor");
+  })();
+
+  /* ---- 12e. SHORTS EMOJİSİ UZUN VİDEOYLA AYNI KARAKTERİ SEÇMELİ ----
+     GERÇEK HATA (ParsMazi): shortsEmojiKoy karakteri YALNIZ ad eşleşmesiyle buluyordu.
+     Uzun video yolu (emojiCumleleriTopla) ise ÜÇ kaynağa bakıyor: (1) Emoji ekranındaki
+     "Bu videoda kim hangi kanalda?" seçimi, (2) dosya adı eşleşmesi, (3) kullanıcının bir
+     kez verdiği elle eşleştirme kararı. Sonuç: uzun videoda emojiler çıkıyor, aynı projeden
+     üretilen Shorts "emoji: uygun cümle yok" deyip HİÇ emoji koymuyordu — kadrosunda dosya
+     adıyla birebir tutan karakter olmadığı için. Belirti "Shorts'ta emoji çalışmıyor",
+     sebep tamamen görünmezdi.
+     ⚠ Bu test İKİ YOLUN DA aynı üç kaynağı okumasını kilitliyor: biri değişip öteki
+     kalırsa aynı sınıf hata geri gelir. */
+  baslik("Shorts emojisi: karakter çözümlemesi uzun videoyla aynı mı");
+  (function () {
+    var ham;
+    try { ham = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); }
+    catch (e) { hata("app.js okunamadı", e.message); return; }
+
+    function govde(adi) {
+      var i = ham.indexOf("function " + adi);
+      if (i < 0) return "";
+      /* Kaba ama yeterli: fonksiyon adından sonraki ~9000 karakter. İki fonksiyon da bundan
+         kısa; amaç hangi çağrıların o gövdede GEÇTİĞİNİ görmek. */
+      return ham.slice(i, i + 9000);
+    }
+    var gShorts = govde("shortsEmojiKoy");
+    var gUzun = govde("emojiCumleleriTopla");
+    dogru("shortsEmojiKoy bulundu", !!gShorts);
+    dogru("emojiCumleleriTopla bulundu", !!gUzun);
+    if (!gShorts || !gUzun) return;
+
+    [["kanal seçimi (emojiKanalKarOku)", "emojiKanalKarOku"],
+     ["ad eşleşmesi (emojiKarakterAra)", "emojiKarakterAra"],
+     ["elle karar (emojiEsleAnahtar)", "emojiEsleAnahtar"]
+    ].forEach(function (c) {
+      dogru("uzun video yolu " + c[0] + " okuyor", gUzun.indexOf(c[1]) >= 0,
+            "referans yol değişmiş — Shorts testi anlamsızlaşır");
+      dogru("SHORTS yolu da " + c[0] + " okuyor", gShorts.indexOf(c[1]) >= 0,
+            "Shorts bu kaynağı görmüyor — uzun videoda emoji çıkar, Shorts'ta çıkmaz");
+    });
+    dogru("Shorts yolu '__yok__' (bilerek emojisiz) seçimine saygı duyuyor",
+          gShorts.indexOf("__yok__") >= 0,
+          "kullanıcı 'emoji yok' dediği kanala yine emoji konur");
+    /* ⚠ Kanal kodu ("a1"/"a2") için kayıtlı karar OKUNMALI — ama SEKANSA ÖZEL anahtarla.
+       Taşınma tehlikesini `emojiEsleAnahtar`'ın kendisi çözüyor (yer tutucu adlar için
+       `emoji.esleV.<sekans>.<ad>` üretiyor). Shorts'a ayrıca bir `emojiYerTutucuAd` kapısı
+       koymak uzun yoldan SAPMAKTI: kullanıcı "A1 → Dora" kararını verip uzun videoda
+       emojileri alıyor, Shorts'ta aynı kanal çözümlenemiyordu.
+       Bu test o sapmanın geri gelmesini engelliyor. */
+    /* ⚠ ÇAĞRI KALIBI aranır, düz ad DEĞİL: bu gövde yorum da içeriyor ve yorumda adın
+       geçmesi testi haksız yere kırmızı yapıyordu (ilk yazımda tam olarak bu oldu).
+       Aranan şey `!emojiYerTutucuAd(` biçimindeki KAPI. */
+    dogru("Shorts yolu kararı ek bir yer-tutucu kapısıyla ENGELLEMİYOR",
+          !/!\s*emojiYerTutucuAd\s*\(/.test(gShorts),
+          "Shorts'ta fazladan kapı var — kanal koduna verilen karar okunmuyor, uzun yoldan sapıyor");
+    dogru("uzun video yolu da aynı anahtar üreticisini kullanıyor",
+          gUzun.indexOf("emojiEsleAnahtar") >= 0, "referans yol değişmiş");
+    dogru("gruplar kanal numarası (idx) taşıyor",
+          /shortsGruplariTopla[\s\S]{0,1400}?idx:/.test(ham),
+          "idx yok — kanal seçimi hiçbir zaman okunamaz");
+    dogru("'uygun cümle yok' mesajı sebebi söylüyor",
+          /karakter seçilmemiş/.test(gShorts),
+          "teşhis edilemeyen mesaj kullanıcıyı yanlış kola yollar");
+  })();
+
+  /* ---- 12f. SİLİNEN VARSAYILAN İSİMLER DİRİLMEMELİ ----
+     GERÇEK SENARYO (ikinci kullanıcı): ParsMazi "Karakter İsimleri"nden Tofi/Moni/Dora/
+     Mimi/Niko'yu silip kendi kadrosunu yazıyor. Sorun çıkmıyor — ta ki PAKET_SURUM bir
+     sonraki sürümde artana kadar: o anda paketBirlestir "bu isim kullanıcıda yok" deyip
+     beşini de GERİ EKLİYOR. Damga korumuyordu ("bir kez çalış" diyor, sürüm artınca
+     yeniden çalışıyor) ve pkgSurum'dan çıkarım da yapılamıyordu (save damgayı koşulsuz
+     yazıyor). Karar artık AÇIKÇA kaydediliyor: sozluk.json → silinenVarsayilanlar. */
+  baslik("Sözlük: bilerek silinen varsayılan isim geri gelmemeli");
+  (function () {
+    var SZ, os = require("os");
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); }
+    catch (e) { hata("sozluk.js", e.message); return; }
+    /* Sistem tmp + PID: repo içine YAZMA ve iki koşu birbirinin dosyasını GÖRMESİN
+       (kararsız test, olmayan testten zararlıdır — bu projede bir kez yaşandı). */
+    var kok = path.join(os.tmpdir(), "yw-sozluk-test-" + process.pid);
+    try { fs.mkdirSync(kok, { recursive: true }); } catch (e) {}
+    var dosya = path.join(kok, SZ.DOSYA);
+    function temizle() { try { fs.unlinkSync(dosya); } catch (e) {} }
+    function oku() { try { return JSON.parse(String(fs.readFileSync(dosya, "utf8")).replace(/^﻿/, "")); } catch (e) { return null; } }
+
+    try {
+      // 1) Kullanıcı kendi kadrosunu yazıyor (varsayılanların HİÇBİRİ yok).
+      temizle();
+      SZ.save(kok, [{ ad: "ParsMazi", varyant: ["parsmazi"] }, { ad: "Kanka", varyant: ["kanka"] }]);
+      var j1 = oku();
+      dogru("silme kararı dosyaya yazıldı", !!(j1 && j1.silinenVarsayilanlar && j1.silinenVarsayilanlar.length),
+            "silinenVarsayilanlar yok — bir sonraki sürümde isimler dirilir");
+
+      // 2) Yeni paket sürümü gelmiş gibi damgayı geriye çek ve birleştirmeyi çalıştır.
+      j1.pkgSurum = 0;
+      fs.writeFileSync(dosya, JSON.stringify(j1, null, 2), "utf8");
+      var r = SZ.paketBirlestir(kok);
+      var j2 = oku();
+      var adlar = (j2 && j2.entries || []).map(function (e) { return e.ad; });
+      dogru("birleştirme çalıştı", r && r.durum === "birlestirildi", "durum: " + (r && r.durum));
+      dogru("silinen varsayılanlar GERİ GELMEDİ", adlar.indexOf("Tofi") === -1 && adlar.indexOf("Moni") === -1,
+            "kalan adlar: " + adlar.join(", "));
+      esit("kullanıcının kendi isimleri duruyor", adlar, ["ParsMazi", "Kanka"]);
+
+      // 3) KARŞI TEST: silme kaydı YOKKEN varsayılanlar EKLENMELİ (koruma fazla geniş olmasın).
+      temizle();
+      fs.writeFileSync(dosya, JSON.stringify({ pkgSurum: 0, entries: [{ ad: "Kanka", varyant: ["kanka"] }] }, null, 2), "utf8");
+      SZ.paketBirlestir(kok);
+      var j3 = oku();
+      var adlar3 = (j3 && j3.entries || []).map(function (e) { return e.ad; });
+      dogru("kayıt yokken varsayılanlar hâlâ ekleniyor (eski davranış korundu)",
+            adlar3.indexOf("Tofi") !== -1,
+            "koruma fazla geniş — yeni isimler hiç ulaşmaz: " + adlar3.join(", "));
+
+      // 4) Boşaltılmış sözlük: save silme kaydı ÜRETMEMELİ (o ayrı bir karar).
+      temizle();
+      SZ.save(kok, []);
+      var j4 = oku();
+      dogru("boş listeden silme kaydı çıkarılmıyor",
+            !(j4 && j4.silinenVarsayilanlar && j4.silinenVarsayilanlar.length),
+            "boşaltma, varsayılanlara dönüşü kalıcı olarak engellememeli");
+    } catch (eT) { hata("sözlük silme testi", eT.message || String(eT)); }
+    try { temizle(); fs.rmdirSync(kok); } catch (e) {}
   })();
 
   /* ---- 13. PNG: APNG SESSİZCE BOZULMASIN ---- */

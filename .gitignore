@@ -3,6 +3,13 @@ installer/dist/
 installer/staging/
 installer/panel.zip
 installer/YusufwrlKur.exe
+# ⚠ KOKTEKI panel.zip DE ELENMELI. Eskiden yalniz installer/panel.zip yaziyordu; kokte
+# argumansiz/yanlis yollu bir pack-panel cagrisindan kalma 16,7 MB'lik bir panel.zip
+# GIT'E IZLENIYORDU ve icinde v1.9.9 vardi (62 dosya, ilerleme.js yok — dort surum eski).
+# Repo public: depoya bakan biri onu "dagitim paketi" sanip indirebilir, ya da acele bir
+# anda ikinci kullaniciya gonderilebilirdi. Bayat staging\panel ile AYNI SINIF tuzak:
+# dogru gorunen ad, yanlis icerik. Dagitilan tek zip installer\panel.zip'tir.
+/panel.zip
 
 # Makineye ozel — YALNIZ PANEL KOKUNDE (bastaki / bunu saglar).
 # Bastaki / OLMADAN kural her klasorde gecerli olur ve varsayilan\presetler.json (pakete

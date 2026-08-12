@@ -431,9 +431,53 @@ function save(extRoot, entries) {
   /* ⚠ pkgSurum DA YAZILIR. Yazılmazsa kullanıcı sözlüğü her kaydettiğinde damga siliniyor,
      sonraki açılışta paketBirlestir yeniden çalışıyor ve kullanıcının BİLEREK SİLDİĞİ varyant
      geri geliyordu — "bir kez ekle" sözü ancak damga kalıcıysa tutuluyor. */
-  fs.writeFileSync(path.join(extRoot, DOSYA),
-                   JSON.stringify({ pkgSurum: PAKET_SURUM, entries: entries || [] }, null, 2), "utf8");
-  return path.join(extRoot, DOSYA);
+  var p = path.join(extRoot, DOSYA);
+  entries = entries || [];
+
+  /* ⚠⚠ SİLİNEN VARSAYILAN İSİMLER KAYDEDİLİR — YOKSA HER SÜRÜMDE DİRİLİYORLAR.
+     GERÇEK SENARYO (ikinci kullanıcı): ParsMazi "Karakter İsimleri" kutusundan
+     Tofi/Moni/Dora/Mimi/Niko satırlarını siliyor ve kendi kadrosunu yazıyor. Sorun çıkmıyor —
+     ta ki PAKET_SURUM bir sonraki sürümde artana kadar. O anda paketBirlestir "bu isim
+     kullanıcıda YOK" deyip beşini de GERİ EKLİYOR ve sözlük her sürümde yeniden kirleniyor.
+     Damga bunu engellemiyor: damga "bir kez çalış" diyor, sürüm artınca yeniden çalışıyor.
+     ⚠ pkgSurum'dan ÇIKARIM YAPILAMAZ: save() damgayı koşulsuz yazıyor, yani "damga var =
+     birleştirmeden geçmiş" doğru değil. Karar AÇIKÇA kaydedilmek zorunda.
+     ⚠ BİRİKTİRİLİR (union): kullanıcı önce Tofi'yi, sonra Moni'yi silerse ikisi de kayıtta
+     kalmalı; yalnız son kaydın anlık görüntüsünü yazmak eskisini unuturdu. */
+  var silinen = [];
+  try {
+    var eski = null, ham = "";
+    if (fs.existsSync(p)) {
+      ham = fs.readFileSync(p, "utf8");
+      if (ham.charCodeAt(0) === 0xFEFF) ham = ham.slice(1);
+      eski = JSON.parse(ham);
+    }
+    if (eski && Object.prototype.toString.call(eski.silinenVarsayilanlar) === "[object Array]") {
+      silinen = eski.silinenVarsayilanlar.slice();
+    }
+  } catch (e) { silinen = []; }
+  try {
+    var varAd = {}, i;
+    for (i = 0; i < entries.length; i++) {
+      if (entries[i] && entries[i].ad) varAd[String(entries[i].ad).toLowerCase()] = 1;
+    }
+    var kayitli = {};
+    for (i = 0; i < silinen.length; i++) kayitli[String(silinen[i]).toLowerCase()] = 1;
+    /* ⚠ Liste TAMAMEN boşsa silme kaydı çıkarma: "boşalttım" ayrı bir karar ve
+       paketBirlestir onu zaten `bos-birakilmis` dalıyla koruyor. Boş listeden beş
+       "silindi" kaydı üretmek, kullanıcı sonra varsayılanlara dönmek isterse onu
+       kalıcı olarak engellerdi. */
+    if (entries.length) {
+      VARSAYILAN.forEach(function (v) {
+        var k = String(v.ad).toLowerCase();
+        if (!varAd[k] && !kayitli[k]) { silinen.push(v.ad); kayitli[k] = 1; }
+      });
+    }
+  } catch (e2) {}
+
+  fs.writeFileSync(p, JSON.stringify({ pkgSurum: PAKET_SURUM, silinenVarsayilanlar: silinen,
+                                       entries: entries }, null, 2), "utf8");
+  return p;
 }
 
 /* ── PAKETTEKİ YENİ VARYANTLARI KULLANICININ DOSYASINA BİR KEZ EKLE ──
@@ -467,9 +511,23 @@ function paketBirlestir(extRoot) {
   for (i = 0; i < j.entries.length; i++) {
     if (j.entries[i] && j.entries[i].ad) indeks[String(j.entries[i].ad).toLowerCase()] = i;
   }
+  /* ⚠ KULLANICININ BİLEREK SİLDİĞİ VARSAYILAN İSİMLER GERİ EKLENMEZ.
+     save() bu listeyi tutuyor (bkz. oradaki not). Bu kontrol olmadan, kendi kadrosunu yazıp
+     Tofi/Moni/Dora/Mimi/Niko'yu silmiş bir kullanıcıda beşi de HER PAKET SÜRÜMÜNDE geri
+     geliyordu — "yalnız EKLER, hiçbir şey silmez" kuralı doğruydu ama eklediği şey
+     kullanıcının kaldırdığı şeydi. */
+  var silinenSet = {};
+  try {
+    if (Object.prototype.toString.call(j.silinenVarsayilanlar) === "[object Array]") {
+      for (i = 0; i < j.silinenVarsayilanlar.length; i++) {
+        silinenSet[String(j.silinenVarsayilanlar[i]).toLowerCase()] = 1;
+      }
+    }
+  } catch (eS) {}
   VARSAYILAN.forEach(function (v) {
     var k = String(v.ad).toLowerCase();
     if (indeks[k] === undefined) {
+      if (silinenSet[k]) return;                       // bilerek silmiş — diriltme
       j.entries.push({ ad: v.ad, varyant: (v.varyant || []).slice() });
       eklenen.push(v.ad + " (yeni isim)");
       return;
