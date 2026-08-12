@@ -31,40 +31,11 @@
           Geri Al
         </button>
         <span class="pill" id="pillHost"><i class="dot"></i>Premiere</span>
-        <!-- ⚠ ETİKET "GPU" DEĞİL "Motor". Rozet `fs.existsSync(cfg.engineExe)` ölçüyor, yani
-             GPU'yu DEĞİL motorun kurulu olup olmadığını. NVIDIA kartı olmayan bir makinede
-             "GPU ✓" yeşil yanıyor, config `device: "cuda"` diyor ve her transkripsiyon CUDA
-             hatasıyla çöküyordu — kullanıcı yeşil bir GPU rozetine bakarken sebebi hiç
-             bulamıyordu. Gerçek cihaz artık ipucu metninde (title) ve panel günlüğünde yazıyor;
-             CUDA çalışmazsa pipeline.js kendiliğinden CPU'ya düşüyor ve bunu söylüyor.
-             id DEĞİŞMEDİ (pillGpu): app.js ve id-nöbetçisi ona bağlı. -->
-        <span class="pill" id="pillGpu"><i class="dot"></i>Motor</span>
+        <span class="pill" id="pillGpu"><i class="dot"></i>GPU</span>
       </div>
     </header>
 
     <main class="content">
-
-      <!-- ⚠ YAKALANMAMIŞ HATA BANDI — HER GÖRÜNÜMÜN ÜSTÜNDE, HER ZAMAN GÖRÜNÜR.
-           NEDEN VAR: panelde global bir hata yakalayıcı YOKTU ve açılış hataları yalnızca
-           #log'a yazılıyordu — o da display:none bir kutunun içinde, yani hiç okunamıyordu.
-           Sonuç: ikinci kullanıcı "sürekli bir hata veriyor" diyor ama HANGİ hata olduğunu
-           söyleyemiyordu; geliştirici de kör kalıyordu. Bant, sebebi ekrana taşıyor ve
-           "Kopyala" ile tek tıkta paylaşılabilir hâle getiriyor.
-           Bu bir üst-düzey görünüm öğesi: views `hidden` ile değişiyor, bant onların DIŞINDA
-           duruyor ki hangi ekranda olursa olsun görünsün. -->
-      <div class="hata-bandi" id="hataBandi" hidden>
-        <div class="hata-bandi-ic">
-          <span class="hata-bandi-ikon">⚠</span>
-          <div class="hata-bandi-metin">
-            <b id="hataBandiBaslik">Panelde bir hata oluştu</b>
-            <span id="hataBandiDetay"></span>
-          </div>
-        </div>
-        <div class="hata-bandi-dugmeler">
-          <button class="btn-ghost" id="hataBandiKopyala" type="button">Kopyala</button>
-          <button class="btn-ghost" id="hataBandiKapat" type="button" title="Bandı gizle">✕</button>
-        </div>
-      </div>
 
       <!-- ================= ANA MENÜ (KARTLAR) ================= -->
       <div class="view active" id="viewHome">
@@ -132,38 +103,6 @@
             <div class="tc-arrow">›</div>
           </button>
 
-          <!-- ⚠ ADI "Shorts Sekansı" — SADECE "Shorts" DEĞİL. Panelde zaten bir "Shorts"
-               kutusu var (Altyazı ekranında, yalnız kelime bölmesini değiştiriyor) ve iki
-               farklı şeyin aynı adı taşıması kullanıcıyı da ileride kodu okuyanı da yanıltır. -->
-          <button class="tool-card" data-view="shortsSekans">
-            <div class="tc-icon grad-b">
-              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
-            </div>
-            <div class="tc-body">
-              <div class="tc-title">Tekli Shorts</div>
-              <div class="tc-desc">Videonun her yerinden en iyi anlar — tek bir 27-45 sn'lik dikey özet</div>
-            </div>
-            <div class="tc-arrow">›</div>
-          </button>
-
-          <!-- ÇOKLU SHORTS — TEKLİDEN TEMELDE FARKLI (kullanıcı isteği, 11 Ağustos 2026):
-               tekli videonun HER YERİNDEN en iyi anları toplayıp TEK özet kurar; çoklu ise
-               videoyu önce anlatı bölümlerine (kaçırılma / kafes / kurtarılma) ayırır ve HER
-               BÖLÜMÜN KENDİ İÇİNDEN ayrı bir Shorts üretir. Beş bağımsız hikâye. -->
-          <button class="tool-card" data-view="cokluShorts">
-            <div class="tc-icon grad-e">
-              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="6" height="16" rx="1.5"/><rect x="10.5" y="4" width="6" height="16" rx="1.5"/><path d="M19 5v14"/><path d="M22 7v10"/></svg>
-            </div>
-            <div class="tc-body">
-              <div class="tc-title">Çoklu Shorts</div>
-              <!-- "(5 sekans)" KALDIRILDI: adet ekrandan 3-6 arası seçilebiliyor (#cokluAdet),
-                   sabit sayı yalnız varsayılanı anlatıyordu ve seçimi değiştiren kullanıcıya
-                   yanlış bilgi veriyordu. -->
-              <div class="tc-desc">Videoyu bölümlere ayırır — her bölümden ayrı bir Shorts</div>
-            </div>
-            <div class="tc-arrow">›</div>
-          </button>
-
           <!-- Ayarlar: üretim ekranından çıkarılan, nadiren dokunulan şeyler burada. -->
           <button class="tool-card" data-view="ayarlar">
             <div class="tc-icon grad-d">
@@ -220,11 +159,7 @@
 
           <!-- Stili panel ATAYAMAZ (seq.captionTracks Premiere'de yok) — kullanıcı her track'e
                kendi stilini elle verir. Bedeli bu; karşılığı karaktere göre renk. -->
-          <!-- ⚠ "hangisine hangi rengi vereceğin üretim bitince yazar" CÜMLESİ KALDIRILDI:
-               YANLIŞ SÖZDÜ. Sonuç mesajı rengi değil KANALI söylüyor ("C1 sen · C2 Dora") —
-               rengi kullanıcı kendi seçiyor. Panel caption track'e erişemediği için stil
-               atayamıyor (üç API yüzeyi ölçüldü, bkz. CLAUDE.md). -->
-          <p class="note" style="margin-top:10px">Yazı tipi, renk ve konum Premiere'de: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b>'te her karakter ayrı kanala gider, hangisinin nereye yazıldığı üretim bitince görünür.</p>
+          <p class="note" style="margin-top:10px">Yazı tipi, renk ve konumu Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> seçiliyken her karakter ayrı bir altyazı kanalına gider; hangisine hangi rengi vereceğin üretim bitince yazar.</p>
 
           <!-- STİLLERİ PROJEYE AL: Premiere'de "New caption track > Style" listesi YALNIZ
                proje öğelerini gösteriyor; bilgisayara kurulu yerel stiller (.prtextstyle)
@@ -235,8 +170,7 @@
             <button class="btn-ghost" id="btnStilProje" type="button">Stilleri projeye ekle</button>
             <span class="dict-status" id="stilProjeDurum"></span>
           </div>
-          <!-- KISALTILDI: "neden gerekli" açıklaması çıktı, "ne zaman basacaksın" kaldı. -->
-          <p class="note" style="margin-top:6px">Her yeni projede bir kez bas — yoksa hazır stiller Premiere'in <b>Style</b> listesinde çıkmaz.</p>
+          <p class="note" style="margin-top:6px">Hazır renkli stiller bilgisayarına kurulu ama Premiere'in <b>Style</b> listesinde ancak projeye eklenince görünür. Her yeni projede bir kez bas.</p>
 
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
@@ -281,18 +215,7 @@
             <span>Asla üst üste gelmesin <small>(aynı anda konuşmada birini gizle)</small></span>
             <input type="checkbox" id="chkCakisma">
           </label>
-          <!-- KISALTILDI (12 Ağustos 2026): dört cümlelik mekanizma anlatımıydı. Kullanıcının
-               karar vermek için bilmesi gereken tek şey "ne kaybediyorum" — o kaldı. Kırpma
-               ve gizleme sayıları zaten sonuç mesajında yazıyor. -->
-          <p class="note" style="margin-top:8px">Aynı anda konuşulan yerlerde alt sıradaki karakterin altyazısı gizlenir; kaç tane gizlendiği sonuçta yazar. Kapatırsan hiçbiri gizlenmez, üst üste binerler.</p>
-
-          <!-- ⚠⚠ "HIZLI MOD" KUTUSU KALDIRILDI (12 Ağustos 2026) — GERİ EKLEME.
-               v1.11.0'da deneysel olarak eklenmişti; planı "iyiyse varsayılan yapılır,
-               bozuksa kutu kaldırılır" idi. Ölçüldü ve BOZUK çıktı: `--batched` Whisper
-               segmentlerini 7 KAT seyreltiyor (dakikada 17.8 → 2.5), `cumleId` doğrudan
-               segment sırasından geldiği için "Tofi Moni video modu"nun seyreltmesi tümden
-               devre dışı kalıyor ve 7. dakikada altyazı hâlâ dolu çıkıyor.
-               Ölçümün tamamı js/app.js → wireCakisma() içindeki notta ve CLAUDE.md'de. -->
+          <p class="note" style="margin-top:8px">Önce altyazının <b>bitişi kırpılır</b> — başlangıç zamanına dokunulmaz, yani sesle bağı bozulmaz. Kırpmak yetmezse (iki kişi gerçekten aynı anda konuşuyorsa) <b>alt sıradaki karakterin</b> o altyazısı gizlenir; kaç tane ve kimden gizlendiği sonuçta yazar. Kutuyu kapatırsan hiçbir şey gizlenmez, üst üste binenler yalnızca sayılır.<br>Hiç altyazı kaybetmeden çözmek istersen: Premiere'de her altyazı kanalına <b>farklı dikey konum</b> ver (Track Style), sonra bu kutuyu kapat.</p>
         </div>
 
 
@@ -316,14 +239,6 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
           <span>Altyazı Oluştur</span>
         </button>
-
-        <!-- ⚠ ALTYAZI İLERLEMESİ ARTIK BURADA ÇİZİLİYOR (aşama listeli yeni tasarım,
-             kullanıcı isteği 12 Ağustos 2026: "altyazı paneli de emoji ekranındaki gibi olsun").
-             Aşağıdaki eski #progressBox DOM'da DURUYOR ama CSS ile gizli — silinemez, çünkü
-             içinde iki şey var: (1) #log — panelin ayrıntı günlüğü, logLine oraya yazıyor;
-             (2) #btnCancel — altyazı üretimini durduran tek düğme. İptal düğmesi açılışta bu
-             panelin eylem satırına TAŞINIYOR (kopyalanmıyor: dinleyicisi korunsun). -->
-        <div class="iler" id="altyaziIler" hidden></div>
 
         <div class="progress-box" id="progressBox" hidden>
           <div class="progress-head">
@@ -351,15 +266,29 @@
               </button>
               <button class="btn-ghost" id="btnExportSrt" title="Altyazı dosyası (.srt)">SRT</button>
               <button class="btn-ghost" id="btnExportTxt" title="Düz metin (.txt)">TXT</button>
-              <!-- ⚠ "Bölümler" DÜĞMESİ VE YANINDAKİ "30 sn'de bir / 1 dk'da bir" MENÜSÜ
-                   KALDIRILDI (kullanıcı isteği, 12 Ağustos 2026: "o butonla işimiz yok").
-                   YouTube bölüm zaman damgası üretiyordu; kullanıcı bu özelliği hiç
-                   kullanmıyor ve menü, üretim ekranındaki tek "ayarlanabilir sayı" olduğu
-                   için sürekli dikkat çekiyordu.
-                   ⚠ KOD TARAFI DURUYOR: pipeline.cuesToChapters silinmedi — çalışan ve
-                   test edilen bir fonksiyon, geri istenirse tek satır HTML ile geri gelir.
-                   Kaldırılanlar: bu blok · app.js'teki btnExportChapters dinleyicisi ·
-                   wirePersistence'taki "chapInterval" kaydı. -->
+              <!-- ⚠ EMOJİ DÜĞMELERİ BURADAN KALDIRILDI → kendi ekranı (viewEmoji).
+                   Emoji hangi sesin kime ait olduğuna bağlı; o bilgi burada görünmüyordu
+                   ve yanlış eşleşme ancak videoyu izlerken fark ediliyordu. Yeni ekranda
+                   kanal→karakter listesi açıkça duruyor. -->
+              <!-- "Bölümler" ile aralığı birlikte tut: satır dar panelde alt satıra kayarsa ikisi birlikte kaysın.
+                   <span> DEĞİL <div>: içinde blok seviyesinde bir <div class="select"> var, <span> yalnızca
+                   metin-içi içerik alabilir (geçersiz HTML). Görünüm değişmez, .chap-group zaten inline-flex. -->
+              <div class="chap-group">
+                <button class="btn-ghost" id="btnExportChapters" title="YouTube bölüm zaman damgaları">Bölümler</button>
+                <!-- Eskiden stilsiz <input type="number"> idi: koyu panelde beyaz zeminli/Arial bir kutu
+                     çıkıyor, ne olduğu sadece tooltip'te yazıyordu ve "1" yazılıp binlerce bölüm üretilebiliyordu.
+                     Menüye çevrildi: hem temaya uyuyor hem kendini anlatıyor hem de saçma değer girilemiyor. -->
+                <div class="select chap-select">
+                  <!-- Tooltip birime bağlanmıyor: ilk seçenek saniye ("30 sn'de bir"), "kaç dakikada bir"
+                       diyen eski metin onunla çelişiyordu (kullanıcı 30'u 30 dakika sanabiliyordu). -->
+                  <select id="chapInterval" title="Ne kadar aralıkla bölüm başlığı üretilsin?">
+                    <option value="30">30 sn'de bir</option>
+                    <option value="60" selected>1 dk'da bir</option>
+                    <option value="120">2 dk'da bir</option>
+                    <option value="300">5 dk'da bir</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
           <!-- ⚠ EMOJİ DÜĞMELERİ BURADAN TAŞINDI → kendi ekranına (viewEmoji, 9 Ağustos 2026).
@@ -395,15 +324,14 @@
       <div class="view" id="viewEmoji" hidden>
         <div class="card">
           <div class="card-title">Emoji</div>
-          <!-- KISALTILDI. Taraf/aynalama kuralının tamamı buradaydı (5 satır) ama panel onu
-               ZATEN otomatik yapıyor ve kullanıcıdan bir karar istemiyor — okunmazsa yanlış
-               bir şey olmuyor. Aynı açıklamanın uzun hâli Ayarlar > Duygu Emojileri'nde duruyor.
-               KALAN İKİ CÜMLE bilerek: "önce altyazı üret" olmadan kullanıcı boşuna basıyor,
-               kanal onayı ise yanlış yüzün videoya girmesini önleyen tek kapı. -->
           <p class="note" style="margin:0 0 10px">
-            Konuşanın duygusuna göre köşeye tepki resmi koyar. <b>Önce Altyazı ekranında altyazı üret</b> —
-            emoji o metinden seçiliyor. Taraf ve aynalama otomatik.
+            Konuşanın duygusuna göre köşeye tepki resmi koyar. Duyguyu <b>yapay zekâ</b> altyazı
+            metninden seçer; <b>kimin konuştuğunu</b> ise aşağıdaki liste belirler — tahmin yok.
+            <b>Tofi ve Moni sağ</b> alt köşede, diğerleri <b>sol</b> alt köşede (resimleri ekrana
+            baksın diye yatay çevrilir). <b>A1'deki kişi</b> (videoyu çeken) adı ne olursa olsun
+            her zaman sağda ve çevrilmez.
           </p>
+          <p class="note" style="margin:0 0 10px">Önce Altyazı ekranında altyazıyı üret — emoji onun metninden seçiliyor.</p>
 
           <!-- KANAL → KARAKTER: ekranın ASIL işi. Her ses kanalının karşısında kimin
                konuştuğu yazıyor; yanlışsa buradan düzeltilir. Seçim SEKANSA ÖZEL saklanır
@@ -412,13 +340,6 @@
           <div class="card-title" style="font-size:12px;margin-top:4px">Bu videoda kim hangi kanalda?</div>
           <div id="emojiKanalKar"></div>
           <span class="dict-status" id="emojiKanalDurum" style="display:block;margin-top:8px"></span>
-          <!-- ⚠ AYRI SATIR — #emojiKanalDurum'a YAZILAMAZ, orası kanal→karakter özetini
-               taşıyor (A1→Tofi · A2→Moni) ve ikisi birbirini ezerdi.
-               Burada emoji KLASÖRÜNÜN durumu var: eksik resim uyarısı ve karakter başına
-               duygu kapsamı. İkisi de eskiden yalnızca AYARLAR ekranına yazılıyordu, oysa
-               "Yenile" düğmesi bu ekranda: kullanıcı basıyor, hiçbir şey değişmiyor ve
-               "5 resim eksik" uyarısını hiç görmüyordu. -->
-          <span class="dict-status" id="emojiKapsamDurum" style="display:block;margin-top:6px"></span>
 
           <div class="dict-actions" style="margin-top:12px">
             <button class="btn-ghost" id="btnEmojiEkle" title="Konuşanın duygusuna göre tepki resmi koyar. Emoji en az 5 kelimelik cümlelere konur.">Emoji Ekle</button>
@@ -434,12 +355,6 @@
             <button class="btn-ghost" id="btnEmojiIptal" hidden title="Sıradaki parçayı başlatma — o ana kadar konanlar kalır">İptal</button>
             <button class="btn-ghost" id="btnEmojiYenile" title="Kanal listesini ve emoji klasörünü yeniden oku">Yenile</button>
           </div>
-          <!-- İLERLEME PANELİ. Kullanıcının ekran görüntüsündeki karmaşanın kaynağı buydu:
-               aşama + sayaç + parça no + geçen süre + KRİTİK UYARI hepsi aşağıdaki tek
-               satırlık #emojiDurum'a `·` ile yazılıyordu. Artık uzun iş buraya çiziliyor
-               (aşamalar alt alta, kalan süre rozette, uyarılar kendi kutusunda);
-               #emojiDurum yalnız kısa/anlık mesajlar için duruyor. -->
-          <div class="iler" id="emojiIler" hidden></div>
           <span class="dict-status" id="emojiDurum" style="display:block;margin-top:8px"></span>
 
           <!-- Klasörde karşılığı OLMAYAN adlar için (yalnız gerektiğinde dolar). -->
@@ -470,103 +385,6 @@
       <!-- ================= AYARLAR ================= -->
       <!-- Üretim ekranını sadeleştirmek için açılan görünüm. Altyazı ekranında sürekli
            göze giren ama nadiren dokunulan ayarlar buraya taşınıyor. -->
-      <!-- ══ SHORTS SEKANSI ══
-           Uzun video bittikten sonra en iyi anlardan dikey bir özet üretir. Altyazı ve emoji
-           KOPYALANMAZ, yeniden üretilir — panel caption track'e erişemiyor (üç API yüzeyi
-           ölçüldü) ve kesitler birleşince zamanlar zaten kayıyor. -->
-      <div class="view" id="viewShortsSekans" hidden>
-        <div class="card">
-          <div class="card-title">Tekli Shorts</div>
-          <p class="note" style="margin:0 0 10px">
-            Videonun her yerinden <b>en iyi anları</b> seçip tek bir dikey (1080×1920) sekans kurar.
-            Uzun videona <b>dokunmaz</b>. <b>Önce Altyazı ekranında altyazı üret</b> — anlar o metinden seçiliyor.
-          </p>
-
-          <!-- ⚠ id ESKİDEN "shortsAyar" İDİ VE ALTYAZI EKRANINDAKİ KUTUYLA ÇAKIŞIYORDU.
-               index.html'de aynı id iki kez geçiyordu (Altyazı ekranındaki Shorts kutusunun
-               ayar bloğu ve burası). getElementById HER ZAMAN ilkini döndürür, yani buradaki
-               blok app.js'ten hiç erişilemiyordu — bugün bir zararı yoktu çünkü kimse bu
-               bloğu göstermeye/gizlemeye çalışmıyor, ama gizlemeye kalkan ilk satır sessizce
-               YANLIŞ bloğu gizlerdi. Nöbetçi testi tumtest.js'e eklendi. -->
-          <div class="kanal-liste" id="shortsSecenekler" style="margin-bottom:10px">
-            <label class="chk"><input type="checkbox" id="shortsEmoji" checked> Emoji de koy</label>
-            <label class="chk"><input type="checkbox" id="shortsAltyazi" checked> Altyazı da yaz</label>
-          </div>
-
-          <!-- KALSIN: kadraj kaybı geri alınamaz bir sürpriz; kullanıcı bunu bilerek kabul etti. -->
-          <p class="note" style="margin:0 0 10px;color:var(--warn)">
-            ⚠ Görüntü <b>tam ekran</b> yapılır — yatay karenin sağı ve solu kırpılır.
-          </p>
-
-          <div class="dict-actions">
-            <button class="btn" id="btnShortsUret" type="button">Shorts Oluştur</button>
-            <button class="btn-ghost" id="btnShortsIptal" type="button" hidden>İptal</button>
-          </div>
-          <!-- İLERLEME PANELİ. İçeriğini app.js çiziyor (tek kaynak: ilerlemePaneli).
-               Eskiden burada tek satırlık bir #shortsDurum <div>'i vardı ve bütün aşamalar,
-               sayaçlar ve uyarılar oraya `·` ile sıkıştırılıyordu. -->
-          <div class="iler" id="shortsIler" hidden></div>
-          <div class="dict-status" id="shortsDurum" style="margin-top:10px"></div>
-        </div>
-
-        <!-- ⚠ BAŞLIK BÖLÜMÜ ÜRETİMDEN SONRA DOLAR. Kullanıcı isteği: "o klibe uygun en çok
-             izlenecek başlığı bulacak, emojiyi ve hashtagleri ekleyecek, sonra Shorts'a özel
-             etiket üretecek, biz oradan direkt kopyalayabilecez." -->
-        <div class="card" id="shortsBaslikKart" hidden>
-          <div class="card-title">Başlık ve Etiketler</div>
-          <p class="note" style="margin:0 0 10px">YouTube'a yüklerken kopyala-yapıştır.</p>
-          <div id="shortsBaslikListe"></div>
-        </div>
-      </div>
-
-      <!-- ══ ÇOKLU SHORTS ══ -->
-      <div class="view" id="viewCokluShorts" hidden>
-        <div class="card">
-          <div class="card-title">Çoklu Shorts</div>
-          <p class="note" style="margin:0 0 10px">
-            Videoyu <b>anlatı bölümlerine</b> ayırır ve <b>her bölümden ayrı bir Shorts</b> üretir
-            (Tekli, videonun her yerinden karışık anları alır). <b>Önce Altyazı ekranında altyazı üret.</b>
-          </p>
-
-          <div class="kanal-liste" style="margin-bottom:10px">
-            <label class="chk"><input type="checkbox" id="cokluEmoji" checked> Emoji de koy</label>
-            <label class="chk"><input type="checkbox" id="cokluAltyazi" checked> Altyazı da yaz</label>
-          </div>
-          <div class="field" style="margin-bottom:10px">
-            <label for="cokluAdet">Kaç Shorts üretilsin?</label>
-            <!-- ⚠ .kanal-ad DEĞİL .select: .kanal-ad metin KUTUSU için yazılmış bir sınıf
-                 (arka plan + kenarlık), <select> için değil — açılır ok işareti çıkmıyordu
-                 ve kutu diğer menülerden farklı görünüyordu. Panelin geri kalanı her yerde
-                 .select sarmalayıcısını kullanıyor. -->
-            <div class="select"><select id="cokluAdet">
-              <option value="3">3 Shorts</option>
-              <option value="4">4 Shorts</option>
-              <option value="5" selected>5 Shorts</option>
-              <option value="6">6 Shorts</option>
-            </select></div>
-          </div>
-
-          <!-- KALSIN ama kısa: "Premiere donuk görünecek" bilgisi olmadan kullanıcı
-               Premiere'i öldürüyor (ikinci kullanıcıda iki kez oldu). -->
-          <p class="note" style="margin:0 0 10px;color:var(--warn)">
-            ⚠ Uzun sürer ve Premiere bu sırada <b>donuk görünür</b> — normaldir, dokunma.
-          </p>
-
-          <div class="dict-actions">
-            <button class="btn" id="btnCokluUret" type="button">Çoklu Shorts Oluştur</button>
-            <button class="btn-ghost" id="btnCokluIptal" type="button" hidden>İptal</button>
-          </div>
-          <div class="iler" id="cokluIler" hidden></div>
-          <div class="dict-status" id="cokluDurum" style="margin-top:10px"></div>
-        </div>
-
-        <div class="card" id="cokluBaslikKart" hidden>
-          <div class="card-title">Başlık ve Etiketler</div>
-          <p class="note" style="margin:0 0 10px">Her Shorts için ayrı — YouTube'a yüklerken kopyala-yapıştır.</p>
-          <div id="cokluBaslikListe"></div>
-        </div>
-      </div>
-
       <div class="view" id="viewAyarlar" hidden>
         <details class="card dict-card" id="dictCard" open>
           <summary class="dict-summary">
@@ -606,16 +424,6 @@
              CLAUDE.md'ye yazıldı. Fonksiyonlar host.jsx'te duruyor (captionStilTani,
              presetTani), yeni bir Premiere sürümünde DevTools'tan tekrar çağrılabilir. -->
 
-        <!-- ⚠ "Shorts — API ölçümü (geçici)" KARTI KALDIRILDI (12 Ağustos 2026).
-             Kartın kendi açıklaması "ölçüm bitip karar verilince bu kart da kaldırılacak"
-             diyordu; ölçüm bitti (createNewSequenceFromClips / setSettings / createSubClip /
-             overwriteClip hepsi çalışıyor, sonuçlar CLAUDE.md'de) ve Tekli + Çoklu Shorts
-             yazıldı. Geçici bir tanılama kartını üründe bırakmak, kullanıcıya artık cevabı
-             bilinen bir soruyu sormak demekti. Aynı yol captionStilTani ve presetTani
-             kartlarında da izlenmişti: host.jsx'teki ölçüm fonksiyonları DURUYOR, yeni bir
-             Premiere sürümünde DevTools'tan çağrılabilir. -->
-
-
         <!-- EMOJİ AYARLARI. Asıl düğme Altyazı ekranında (üretimden sonra basılıyor);
              burada yalnız bir kez ayarlanan şeyler + ölçüm testi duruyor. -->
         <div class="card">
@@ -652,30 +460,6 @@
           <span class="dict-status" id="emojiTestDurum" style="display:block;margin-top:8px"></span>
           <textarea id="emojiTestCikti" class="dict-text" rows="10" spellcheck="false" readonly
                     style="margin-top:8px;display:none;font-family:monospace;font-size:11px"></textarea>
-        </div>
-
-        <!-- ⚠ PANEL GÜNLÜĞÜ / TANILAMA — "HATA VERİYOR AMA HANGİSİ?" SORUSUNUN CEVABI.
-             GERÇEK SORUN (ParsMazi): panel bir şey ters gittiğinde sebebi logLine ile
-             yazıyordu, ama #log `display:none !important` olan #progressBox'ın içindeydi ve
-             onu açan #logToggle da aynı kutunun içinde — yani TIKLANAMIYORDU. Açılışta
-             yazılan bütün tanılamalar (modül yüklenemedi, config bozuk, sözlük birleşmedi,
-             stil klasörü okunamadı, Init hatası…) hiçbir yere ulaşmıyordu. Panelin kendi
-             kodu birden çok yerde "Ayrıntılar log'una bak" diyor — kullanıcı basıyor, kutu
-             BOŞ açılıyordu.
-             Artık logLine her satırı bir halka tampona da yazıyor (görünürlükten bağımsız)
-             ve burası o tamponu gösteriyor. "Kopyala" panoya alıyor: ikinci kullanıcı tek
-             yapıştırmayla tam tabloyu gönderebiliyor. -->
-        <div class="card">
-          <div class="card-title">Panel Günlüğü <small style="color:var(--faint);text-transform:none;letter-spacing:0">— bir sorun olduğunda burayı gönder</small></div>
-          <p class="note" style="margin:0 0 10px">Panel ne yaptığını buraya yazar. Bir şey ters giderse <b>Kopyala</b>'ya basıp metni gönder — sorunun sebebi neredeyse her zaman burada yazılı.</p>
-          <div class="dict-actions">
-            <button class="btn-ghost" id="tanilamaYenile" type="button">Yenile</button>
-            <button class="btn-ghost" id="tanilamaKopyala" type="button">Kopyala</button>
-            <button class="btn-ghost" id="tanilamaTemizle" type="button">Temizle</button>
-            <span class="dict-status" id="tanilamaDurum"></span>
-          </div>
-          <textarea id="tanilamaCikti" class="dict-text" rows="16" spellcheck="false" readonly
-                    style="margin-top:8px;font-family:monospace;font-size:11px"></textarea>
         </div>
       </div>
 
@@ -771,19 +555,13 @@
 
         <div class="card" id="snkCekenCard" hidden>
           <div class="card-title">2 · Videoyu kim çekiyor?</div>
-          <!-- ⚠ BU DÜĞMELER JS TARAFINDAN KADRODAN YENİDEN ÜRETİLİYOR (app.js snkCekenDoldur).
-               Buradaki Tofi/Moni yalnızca GÜVENLİ TABAN: kişi listesi boş/bozuksa ya da
-               tarayıcı önizlemesinde çalışıyorsa bunlar kalır.
-               Eskiden SABİTTİ ve tek seçenek bu ikisiydi; kadrosunda Tofi de Moni de olmayan
-               bir kullanıcı KENDİNİ seçemiyor, panel A1'i "Tofi" sanıyor ve kullanıcının kendi
-               Craig kaydını A2+'ya yerleştiriyordu → ses videoda ÇİFT/yankılı çıkıyordu. -->
           <div class="seg" id="snkCeken">
             <button class="seg-btn active" data-ceken="Tofi" type="button">Tofi</button>
             <button class="seg-btn" data-ceken="Moni" type="button">Moni</button>
           </div>
           <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
                yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
-          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz. Seçenekler “Kişiler” listenden gelir — kendini göremiyorsan oraya ekle.</p>
+          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · A2 = Tofi/Moni'den diğeri · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz.</p>
           <!-- "Oyun sesi şu an hangi kanalda?" seçici KALDIRILDI. Panel oyun sesini artık
                taşımıyor (Premiere'de klip taşıma API'si yok; overwriteClip çoklu-akışlı OBS
                kaydında yanlış ses akışını yerleştiriyordu). Yerleşim tablosu oyun sesi için
@@ -883,13 +661,6 @@
   </div>
 
   <script src="js/CSInterface.js"></script>
-  <!-- İLERLEME/KALAN SÜRE HESABI — app.js'ten ÖNCE yüklenmek zorunda (window.ILER'i kurar).
-       ⚠ require() ile DEĞİL <script> ile: diğer modüller (emoji.js, shorts.js…) Premiere'e
-       ya da dosya sistemine bağlı olduğu için require ediliyor, bu ise saf matematik.
-       Script etiketi hem tarayıcı önizlemesinde de çalışmasını sağlıyor hem de require'ın
-       sessizce başarısız olup ilerleme göstergesini tümden öldürme ihtimalini kaldırıyor.
-       Dosya aynı zamanda module.exports da veriyor — testler\tumtest.js onu require ediyor. -->
-  <script src="js/ilerleme.js"></script>
   <script src="js/app.js"></script>
   <script>
     /* Başlıktaki sürüm rozeti (#brandSub) — CSS'i vardı ama hiç doldurulmuyordu, yüksekliği 0'dı.

@@ -237,15 +237,6 @@ function _post(yol, govde, zamanAsimi) {
         var g = null; try { g = JSON.parse(b); } catch (e) { g = null; }
         resolve({ kod: res.statusCode, govde: g || {} });
       });
-      /* ⚠ CEVAP AKIŞININ HATASI DA DİNLENMELİ. Sunucu 200 + başlıkları yollayıp gövde
-         ORTASINDA bağlantı koparsa (VPN açılışı, wifi→ethernet geçişi, CDN reset) Node
-         `res`i yok ediyor: "end" HİÇ gelmiyor ve `req.on("error")` de tetiklenmiyor —
-         yani Promise HİÇ sonuçlanmıyordu. Kilit ekranındaki "Devam" düğmesi sonsuza kadar
-         bekliyor, kullanıcı paneli donmuş sanıyordu.
-         `resolve` (reject DEĞİL): kod 0 + hata "ag" zaten "teknik arıza → kilitleme" kuralına
-         bağlanıyor. Bu projenin değişmez kuralı: ARIZA ASLA KALICI KİLİT ÜRETMEZ. */
-      res.on("error", function () { resolve({ kod: 0, hata: "ag" }); });
-      res.on("aborted", function () { resolve({ kod: 0, hata: "ag" }); });
     });
     req.on("error", function (e) { resolve({ kod: 0, hata: (e && e.code) || "ag" }); });
     req.setTimeout(zamanAsimi || ZAMAN_ASIMI, function () { req.destroy(); resolve({ kod: 0, hata: "zamanasimi" }); });

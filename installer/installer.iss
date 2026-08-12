@@ -14,49 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.14.1"
-
-; ============================================================
-;  STAGING TAZELIK KAPISI - DERLEMEYI DURDURUR
-;
-;  GERCEKTEN OLDU (12 Agustos 2026 denetiminde yakalandi):
-;  staging\panel klasoru v1.11.1'de DONMUSTU ama AppVersion 1.13.8 diyordu. Yani bugun
-;  derlenen exe, kurulum sihirbazinda ve Programlar listesinde "1.13.8" yazip {app}
-;  klasorune IKI SURUM ESKI paneli kuruyordu. O panelde:
-;    · "function wireShorts()" IKI KEZ tanimli -> tek tikta IKI paralel Shorts uretimi,
-;      IKI ayri yapay zeka istegi (cift ucret) ve birbirinin aktif sekansini ceken iki akis
-;    · js\ilerleme.js YOK -> ilerleme/kalan sure gostergesi hic calismiyor
-;    · v1.12.0'in tanimsiz CSS sinifi ve emoji "_" parametre duzeltmeleri YOK
-;  Bu, ikinci kullaniciya (ParsMazi) "bozuk surumdeysen exe gonderelim" diye verilen exe'nin
-;  tam da duzeltmeye calistigi hatayi GERI KURMASI demekti - ve surum numarasi dogru
-;  gorundugu icin kimse fark etmiyordu.
-;
-;  NEDEN BU KAPI: staging\ ELLE dolduruluyor (pack-panel.ps1 -Stage). Elle yapilan her adim
-;  bir gun unutulur; unutuldugunda da SESSIZ kalir. Artik unutulursa derleme HIC olmuyor.
-;
-;  ⚠ Kapi ACILMAZ, staging TAZELENIR. Cozum:
-;      powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\pack-panel.ps1 -Stage .\installer\staging\panel
-;
-;  Islem: version.json'un ilk 4 satiri okunur ve icinde "<AppVersion>" (tirnaklariyla)
-;  araniyor. Tirnakli arama SART - tirnaksiz "1.13.8" aramasi "1.13.80" gibi bir surumde de
-;  eslesirdi. BOM'lu dosyada da calisir (metnin herhangi bir yerinde araniyor).
-;  ISCC ile IKI YONDE de dogrulandi: guncel staging -> "Successful compile",
-;  bayat staging -> "Compile aborted" (cikis kodu 2).
-; ============================================================
-#define StagingVerFile AddBackslash(SourcePath) + "staging\panel\version.json"
-#if !FileExists(StagingVerFile)
-  #error staging\panel YOK. Once calistir: powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\pack-panel.ps1 -Stage .\installer\staging\panel
-#endif
-#define hStgVer FileOpen(StagingVerFile)
-#define StagingVerTxt ""
-#expr StagingVerTxt = StagingVerTxt + (FileEof(hStgVer) ? "" : FileRead(hStgVer))
-#expr StagingVerTxt = StagingVerTxt + (FileEof(hStgVer) ? "" : FileRead(hStgVer))
-#expr StagingVerTxt = StagingVerTxt + (FileEof(hStgVer) ? "" : FileRead(hStgVer))
-#expr StagingVerTxt = StagingVerTxt + (FileEof(hStgVer) ? "" : FileRead(hStgVer))
-#expr FileClose(hStgVer)
-#if Pos('"' + AppVersion + '"', StagingVerTxt) == 0
-  #error BAYAT STAGING: installer\staging\panel surumu AppVersion ile ayni degil. Once calistir: powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\pack-panel.ps1 -Stage .\installer\staging\panel
-#endif
+#define AppVersion "1.9.21"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}

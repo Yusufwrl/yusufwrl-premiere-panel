@@ -125,118 +125,15 @@
     return s.replace(/^[a-z_]+:/, "");
   }
   function trimLog(s) { var lines = String(s).split("\n"); return (lines.length > 200 ? lines.slice(0, 200) : lines).join("\n"); }
-  /* ⚠ AÇIK İLERLEME PANELLERİNE DE YAZAR. Emoji/Shorts çalışırken tek ayrıntı log'u
-     Altyazı ekranındaydı; kullanıcı bir sorunun sebebini görmek için ekran değiştirmek
-     zorundaydı ve çoğu zaman log'un varlığından bile haberi olmuyordu.
-     ⚠ `_ILER_LOG_PANEL` bu satırdan AŞAĞIDA tanımlanıyor. `var` hoisting'i adı yukarı
-     taşır ama DEĞERİNİ atamaz — logLine ilk çağrıldığında dizi normalde hazırdır (aradaki
-     satırlar yalnızca tanım), ama bu projede tam bu tuzak emoji özelliğini bir kez HER
-     makinede çökertti (v1.9.20). Bu yüzden varlık kontrolü ZORUNLU, süs değil. */
-  /* ⚠ PANEL GÜNLÜĞÜ HALKA TAMPONU — logLine'ın HEMEN ÜSTÜNDE tanımlı olmak ZORUNDA.
-     `var` bildirimi fonksiyonun başına taşınır ama DEĞERİ taşınmaz; bu dizi logLine'ın
-     ALTINDA tanımlansaydı ilk çağrıda `undefined.push` ile patlardı. Bu projede aynı tuzak
-     v1.9.20'de emoji özelliğini tümden çökertti (_parcaToplam / kgAnah), o yüzden sıra
-     bilinçli ve nöbetçi testi var (tumtest 19. bölüm).
-
-     NEDEN VAR: logLine görünürlük kontrolü yüzünden (`if (el && !el.hidden)`) satırları
-     çoğu zaman HİÇBİR YERE yazmıyordu — #log, `display:none !important` olan #progressBox'ın
-     içinde ve onu açan #logToggle da aynı kutuda, yani tıklanamaz. Sonuç: açılışta yazılan
-     bütün tanılamalar (modül yüklenemedi, config bozuk, "Init hatası"…) kayboluyordu ve
-     ikinci kullanıcı "sürekli bir hata veriyor" derken hangisi olduğunu söyleyemiyordu.
-     Panelin kendi kodu birkaç yerde "Ayrıntılar log'una bak" diyor — kutu BOŞ açılıyordu.
-
-     ⚠ ÖLÇÜLMÜŞ YAVAŞLAMA GERİ GELMEZ: pahalı olan şey DOM metnini okuyup `trimLog` ile
-     yeniden kurmaktı (motor saniyede onlarca satır basıyor). Diziye push + tavanda bir
-     shift O(1); DOM'a yazma hâlâ yalnız kutu görünürken yapılıyor. */
-  var _LOG_TAVAN = 400;
-  var _logBuf = [];
-  function _logBufYaz(satir) {
-    _logBuf.push(satir);
-    if (_logBuf.length > _LOG_TAVAN) _logBuf.splice(0, _logBuf.length - _LOG_TAVAN);
-  }
-  /* Tamponu tek metin olarak ver — Ayarlar → "Panel Günlüğü" kartı ve hata bandı bunu kullanır. */
-  function logMetni() { return _logBuf.join("\n"); }
-
-  function logLine(msg) {
-    var el = $("log"); var t = new Date().toLocaleTimeString();
-    _logBufYaz("[" + t + "] " + msg);
-    /* ⚠ GÖRÜNMÜYORSA YAZMA — ÖLÇÜLMÜŞ YAVAŞLAMA (12 Ağustos 2026: "altyazı oluşturma çok yavaş").
-       Bu satır TÜM günlük metnini okuyup birleştiriyor ve `trimLog` ile 200 satıra bölüp
-       yeniden kuruyor. Motor transkripsiyonda saniyede onlarca satır basıyor, yani bu
-       maliyet her satırda ödeniyordu — üstelik `#log` artık gizli `#progressBox`'ın içinde
-       ve HİÇ görünmüyor (ilerleme paneli kendi günlüğünü tutuyor). Yani tam bir israftı.
-       Kapalıyken atlanıyor; kullanıcı "Ayrıntılar"ı açarsa oradan sonraki satırlar yazılır
-       ve panelin kendi günlüğü zaten tam listeyi taşıyor. */
-    if (el && !el.hidden) el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent);
-    if (typeof _ILER_LOG_PANEL !== "undefined" && _ILER_LOG_PANEL && _ILER_LOG_PANEL.length) {
-      for (var i = 0; i < _ILER_LOG_PANEL.length; i++) {
-        try { _ILER_LOG_PANEL[i].logYaz(msg); } catch (e) {}
-      }
-    }
-  }
-  /* ⚠ NULL KORUMASI EKLENDİ. Bu fonksiyon en alttaki "Init hatası" yakalayıcısının İLK
-     satırından çağrılıyor (`catch (e) { setPill("pillHost", false); … }`). Öğe bulunamazsa
-     korumasız hâli TAM DA HATA YOLUNDA ikinci bir hata fırlatır ve o zaman ne log satırı
-     yazılır ne bağlantı kurulumu denenir: panel sessizce tümden ölür. Rozet bugün HTML'de
-     duruyor, yani bu bir gelecek-koruması — ama hata yolundaki korumasız kod, korunması en
-     ucuz ve bedeli en yüksek koddur. */
-  function setPill(id, on) {
-    var el = $(id); if (!el) return;
-    el.classList.remove("on", "off"); el.classList.add(on ? "on" : "off");
-  }
-
-  /* ================= YAKALANMAMIŞ HATA YAKALAYICI =================
-     ⚠ PANELDE HİÇBİR GLOBAL HATA YAKALAYICI YOKTU. Bir olay dinleyicisinin ya da bir
-     Promise zincirinin içinde fırlayan hata hiçbir yere yazılmıyordu: düğme çalışmıyor,
-     panel sessiz, kullanıcı "hata veriyor" diyor ve söyleyecek bir şey bulamıyor.
-     Burası mümkün olan EN ERKEN yerde kuruluyor (initCEP'ten önce), ki açılış hataları da
-     yakalansın. Hata hem tampona hem de ekranın üstündeki banda düşüyor. */
-  /* tip: "hata" (varsayılan, kırmızı) | "uyari" (sarı).
-     ⚠ "UYARI ≠ HATA" — bu projenin yerleşik kuralı (progressFail'in warn/bad ayrımı, emoji
-     kısmi başarısının sarı gösterilmesi hep bundan). CPU'ya geri düşüş İŞİ TAMAMLIYOR,
-     yalnız yavaş: onu kırmızı bir "hata" bandında göstermek kullanıcıya işin başarısız
-     olduğunu düşündürür ve gerçek hataların kırmızısını da değersizleştirir. */
-  function hataBandiGoster(baslik, detay, tip) {
-    try {
-      var b = $("hataBandi"); if (!b) return;
-      var hb = $("hataBandiBaslik"), hd = $("hataBandiDetay");
-      var ik = b.querySelector(".hata-bandi-ikon");
-      if (hb) hb.textContent = baslik || "Panelde bir hata oluştu";
-      if (hd) hd.textContent = detay || "";
-      if (tip === "uyari") { b.classList.add("uyari"); if (ik) ik.textContent = "⚠"; }
-      else { b.classList.remove("uyari"); if (ik) ik.textContent = "⚠"; }
-      b.hidden = false;
-    } catch (e) {}
-  }
-  function _hataMetni(e) {
-    if (!e) return "bilinmeyen hata";
-    if (typeof e === "string") return e;
-    var s = e.message || String(e);
-    if (e.stack) s += "\n" + String(e.stack).split("\n").slice(0, 4).join("\n");
-    return s;
-  }
-  try {
-    window.addEventListener("error", function (ev) {
-      /* ⚠ ev.error YOKSA ev.message kullanılır: kaynak yükleme hatalarında (bir <script>
-         bulunamadı) error nesnesi gelmiyor ama mesaj geliyor. */
-      var m = ev && (ev.error ? _hataMetni(ev.error) : (ev.message || "")) || "bilinmeyen hata";
-      var yer = ev && ev.filename ? (" (" + String(ev.filename).split("/").pop() + ":" + (ev.lineno || "?") + ")") : "";
-      logLine("YAKALANMAMIŞ HATA" + yer + ": " + m);
-      hataBandiGoster("Panelde beklenmedik bir hata oluştu", m + yer);
-    });
-    window.addEventListener("unhandledrejection", function (ev) {
-      var m = _hataMetni(ev && ev.reason);
-      logLine("YAKALANMAMIŞ SÖZ (promise) HATASI: " + m);
-      hataBandiGoster("Bir işlem yarıda kaldı", m);
-    });
-  } catch (eGH) { /* çok eski CEF: dinleyici kurulamazsa panel yine de çalışsın */ }
+  function logLine(msg) { var el = $("log"); var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
+  function setPill(id, on) { var el = $(id); el.classList.remove("on", "off"); el.classList.add(on ? "on" : "off"); }
   // ---------- İlerleme (yüzde + tahmini süre + bitti/hata durumu) ----------
   // _pg.max: yüzde geri gitmesin (monotonik). _pg.transT0: transkripsiyon başlangıç zamanı (ETA için).
   // _pg.etaNot: ETA'nın neyi ölçtüğünü söyleyen ek ("(bu kanal)"), aşağıda anlatılıyor.
   var _pg = { base: "", max: 0, transT0: 0, totalSec: 0, etaNot: "" };   // totalSec: ilerlemeyi zaman damgasindan hesaplamak icin
   function _fmtEta(sec) { sec = Math.max(0, Math.round(sec)); var m = Math.floor(sec / 60), s = sec % 60; return "~" + m + ":" + (s < 10 ? "0" : "") + s; }
   function setProgress(pct, label, eta) {
-    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error", "busy");
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
     var sp = $("spinner"); if (sp) sp.hidden = false;
     var bd = $("progressBadge"); if (bd) bd.hidden = true;
     if (label != null) _pg.base = label;
@@ -249,135 +146,29 @@
       if (pct < _pg.max) pct = _pg.max; else _pg.max = pct;   // geri gitmesin
       $("progressFill").style.width = pct + "%"; $("progressPct").textContent = Math.round(pct) + "%";
     }
-    /* ⚠ ASIL GÖSTERİM ARTIK YENİ PANELDE (#altyaziIler). Yukarıdaki eski kutu kodu OLDUĞU
-       GİBİ duruyor ve çalışmaya devam ediyor — yalnızca CSS ile gizli. Bilerek: bu
-       fonksiyonların onlarca çağrı yeri var ve hepsini yeni API'ye çevirmek, birini
-       atlayınca sessizce ilerleme kaybı demek olurdu. Tek yerden köprü kurmak daha güvenli. */
-    altyaziIler().baslik(_pg.base + (eta ? ("  " + eta + " kaldı" + (_pg.etaNot || "")) : ""))
-                 .yuzdeAyarla(pct >= 0 ? pct : -1, eta);
-    _altAsamaEtiketten(_pg.base);
-  }
-
-  /* ⚠ AŞAMA ETİKETTEN ÇIKARILIYOR, 8 AYRI ÇAĞRI YERİNE DOKUNULMUYOR.
-     Altyazı üretiminin ilerleme etiketleri zaten tutarlı ve TEK dosyada
-     ("A1 sesi hazırlanıyor…", "Moni yazıya dökülüyor…"). Her çağrı yerine ayrı bir
-     `adim()` satırı eklemek, ileride eklenecek bir kanal/adımda unutulmaya açıktı —
-     bu projede aynı unutma az önce emoji tarafında "yapılmış işi yapılmadı göstermek"
-     olarak yaşandı. Tek huni daha güvenli.
-     ⚠ `_altSonAdim` ŞART: `adim()` her çağrıldığında adımın süre sayacını sıfırlıyor;
-     aynı adım için saniyede bir çağrılırsa süre hiç ilerlemez. */
-  var _altSonAdim = "";
-  function _altAsamaEtiketten(etiket) {
-    var s = String(etiket || ""), ad = "";
-    if (/yazıya dökül/i.test(s)) ad = "Yazıya dökülüyor";
-    else if (/hazırlanıyor/i.test(s)) ad = "Ses hazırlanıyor";
-    else if (/okunuyor/i.test(s)) ad = "Sekans okunuyor";
-    else if (/hizalan|altyazı kurul|birleştir/i.test(s)) ad = "Altyazı hazırlanıyor";
-    if (!ad || ad === _altSonAdim) return;
-    /* ⚠ ÖNCEKİ ADIM AÇIKÇA KAPATILIYOR. `adim()` zaten çalışan adımı kendiliğinden kapatıyor,
-       yani bu satır olmadan da doğru çalışır — ama üretim ilk adımda HATA ile biterse
-       "Sekans okunuyor" kapanmamış kalır ve `kalanlariIptal` onu "atlandı" gösterir; yani
-       gerçekte YAPILMIŞ bir adım yapılmamış görünür. Emoji tarafında tam olarak bu oldu.
-       Açık kapanış aynı zamanda nöbetçi testinin aradığı şey (21/e bölümü). */
-    if (_altSonAdim === "Sekans okunuyor") altyaziIler().adimBitir("Sekans okunuyor");
-    _altSonAdim = ad;
-    altyaziIler().adim(ad);
-    /* Hangi kanalda olduğumuzu adımın NOTUNA yaz: "Moni yazıya dökülüyor…" etiketindeki
-       kanal adı, adım satırının sağında görünsün. */
-    var kanal = s.replace(/\s*(sesi\s*)?(hazırlanıyor|yazıya dökülüyor|okunuyor).*$/i, "").trim();
-    if (kanal && kanal.length < 24) altyaziIler().adimNot(ad, kanal);
   }
   function progressReset(label) {
     _pg.base = label || ""; _pg.max = 0; _pg.transT0 = 0; _pg.totalSec = 0; _pg.etaNot = "";
-    /* Yeni üretim başlıyor — "CPU'ya düşüldü" uyarısı bu koşu için yeniden gösterilebilsin.
-       Sıfırlanmazsa ikinci üretimde CUDA yine düşse bile kullanıcı hiç uyarılmazdı. */
-    cpuUyariSifirla();
-    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error", "busy");
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
     $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
     $("progressLabel").style.color = ""; $("progressLabel").textContent = _pg.base;
     $("progressFill").style.width = "0%"; $("progressPct").textContent = "0%";
-    /* Aşama listesi altyazı üretiminin gerçek adımları. "Herkes" kaynağında ses hazırlama ve
-       yazıya dökme kanal kanal tekrar ediyor — o yüzden kanal adı adımın NOTUNA yazılıyor,
-       her kanal için ayrı satır açılmıyor (7 kanallı kadroda 14 satır olurdu). */
-    _altSonAdim = "Sekans okunuyor";   // aşama izleyicisi de sıfırlansın (bkz. _altAsamaEtiketten)
-    altyaziIler().basla({
-      baslik: _pg.base || "Başlıyor…",
-      adimlar: ["Sekans okunuyor", "Ses hazırlanıyor", "Yazıya dökülüyor", "Altyazı hazırlanıyor"]
-    }).adim("Sekans okunuyor");
   }
-  /* ⚠ SÜRESİ BİLİNMEYEN İŞ = BELİRSİZ ÇUBUK, "%100" DEĞİL — ÖLÇÜLMÜŞ HATA (12 Ağustos 2026).
-     Bu fonksiyon yalnız `done/error` sınıfını kaldırıp etiketi değiştiriyordu; #progressFill
-     genişliğine, yüzde metnine ve monotonik tavan `_pg.max`'a HİÇ dokunmuyordu. Altyazı
-     üretimi biterken progressDone() çubuğu %100'e ve _pg.max'ı 100'e çekiyor; hemen ardından
-     "Timeline'a Ekle" progressBusy() ile başlıyor ve çubuk %100'DE KİLİTLİ kalıyordu —
-     yani iş daha yeni başlarken kullanıcı bitmiş sanıyordu. (Monotonik tavan yüzünden
-     sonradan gelen küçük yüzdeler de yükselemiyordu.)
-     ÇÖZÜM: tavanı sıfırla ve çubuğu BELİRSİZ moda al. "%0" yazmak da yanlış olurdu —
-     iş sürüyor ve ne kadar sürdüğü bilinmiyor; belirsiz çubuk bunu dürüstçe anlatıyor. */
   function progressBusy(label) {
     var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
-    box.classList.add("busy");
-    _pg.max = 0;
-    $("progressFill").style.width = "100%";   // .busy sınıfı bunu soluk + kayan parlamalı gösterir
-    $("progressPct").textContent = "";
     $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
     $("progressLabel").style.color = ""; if (label != null) { _pg.base = label; $("progressLabel").textContent = label; }
-    altyaziIler().belirsiz(label);
   }
   function progressDone(label) {
-    var box = $("progressBox"); box.hidden = false; box.classList.add("done"); box.classList.remove("error", "busy");
+    var box = $("progressBox"); box.hidden = false; box.classList.add("done"); box.classList.remove("error");
     $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✓"; bd.className = "prog-badge ok"; }
     _pg.max = 100; $("progressFill").style.width = "100%"; $("progressPct").textContent = "100%";
     $("progressLabel").style.color = "var(--good)"; $("progressLabel").textContent = label || "Bitti";
-    altyaziIler().bitir(label || "Bitti");
-  }
-  /* ⚠ UYARI ≠ HATA — ÖLÇÜLDÜ (kullanıcı bildirdi, 12 Ağustos 2026: "neden çarpı var, sorun ne?").
-     Bu fonksiyon `kind === "warn"` bilgisini ALIYORDU ama yalnız YAZI RENGİNE uyguluyordu:
-     rozet koşulsuz "✕", rozet sınıfı koşulsuz "bad" (kırmızı yuvarlak), kutu sınıfı koşulsuz
-     "error" (kırmızı çubuk). Yani BAŞARIYLA biten ama not düşülen bir iş — örneğin "414 altyazı
-     kondu, 14 tanesi aynı anda konuşma yüzünden gizlendi" — ekranda BAŞARISIZ görünüyordu.
-     Panelin her yerinde "kısmi başarı YEŞİL değil SARI" kuralı var (bkz. sonucGoster); burada
-     eksik olan, sarının HATA'dan da ayrılmasıydı. Üç görsel sinyalin ÜÇÜ birden uyarıya döner. */
-  /* ⚠ CPU'YA DÜŞÜLDÜYSE KULLANICIYA SÖYLE — SESSİZ KALMAZ.
-     pipeline.transcribe, CUDA kullanılamadığında kendiliğinden CPU'ya geçiyor ve işi
-     TAMAMLIYOR (eskiden hiç tamamlamıyordu: NVIDIA kartı olmayan makinede her koşu
-     "çıkış kodu 1" ile ölüyordu). Ama CPU 5-15 kat yavaş; bunu söylemezsek kullanıcı
-     "panel dondu / bir tuhaflık var" diye düşünür. Hata değil, ama sessiz de kalamaz.
-     Her transcribe çağrısından SONRA çağrılır. */
-  /* Tek-sefer bayrağı: uyarı her kanalda yeniden açılmasın (kullanıcı bandı kapattıysa
-     tekrar açmak rahatsız edici). Üretim başında `cpuUyariSifirla()` ile sıfırlanır. */
-  var _cpuUyarildi = false;
-  function cpuUyariSifirla() { _cpuUyarildi = false; }
-  function cpuDusuUyar() {
-    try {
-      if (_cpuUyarildi) return false;
-      if (!pipeline || !pipeline.transcribe || pipeline.transcribe.sonCihaz !== "cpu") return false;
-      if (String(cfg && cfg.device).toLowerCase() === "cpu") return false;   // zaten CPU seçilmiş, sürpriz değil
-      _cpuUyarildi = true;
-      var m = "⚠ Ekran kartı (CUDA) kullanılamadı — CPU ile yapıldı, bu yüzden çok daha uzun sürdü. " +
-              "Kalıcı çözüm: NVIDIA sürücünü güncelle.";
-      logLine(m);
-      hataBandiGoster("Ekran kartı kullanılamadı — CPU ile çalışıldı",
-                      "İş tamamlandı ama normalden 5-15 kat yavaş. NVIDIA sürücünü güncellersen hızlanır. " +
-                      "Ayrıntı için Ayarlar → Panel Günlüğü.", "uyari");
-      return true;
-    } catch (e) { return false; }
   }
   function progressFail(label, kind) {
-    var uyari = (kind === "warn");
-    var box = $("progressBox"); box.hidden = false;
-    box.classList.remove("done", "busy", "error", "warn");
-    box.classList.add(uyari ? "warn" : "error");
-    $("spinner").hidden = true;
-    var bd = $("progressBadge");
-    if (bd) {
-      bd.hidden = false;
-      bd.textContent = uyari ? "⚠" : "✕";
-      bd.className = "prog-badge " + (uyari ? "warn" : "bad");
-    }
-    $("progressLabel").style.color = uyari ? "var(--warn)" : "var(--bad)";
-    $("progressLabel").textContent = label || "Hata";
-    altyaziIler().bitir(label || "Hata", uyari ? "warn" : "bad");
+    var box = $("progressBox"); box.hidden = false; box.classList.add("error"); box.classList.remove("done");
+    $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✕"; bd.className = "prog-badge bad"; }
+    $("progressLabel").style.color = (kind === "warn") ? "var(--warn)" : "var(--bad)"; $("progressLabel").textContent = label || "Hata";
   }
   // Whisper transkripsiyon yüzdesini (0-100) genel ilerlemeye [lo,hi] eşler + kalan süreyi tahmin eder.
   function transProgress(rawPct, lo, hi) {
@@ -389,498 +180,6 @@
     }
     setProgress(overall, null, eta);
   }
-
-  /* ================= İLERLEME PANELİ — BÜTÜN UZUN İŞLER İÇİN TEK ARAYÜZ =================
-     NEDEN VAR: panelde iki ayrı "ilerleme dili" vardı.
-       · Altyazı / AutoCut / Senkron → düzgün .progress-box (yüzde + çubuk + log)
-       · Emoji / Preset / Tekli Shorts / Çoklu Shorts → TEK bir <span>, içine `·` ile
-         ayrılmış metin. Kullanıcının ekran görüntüsündeki satır aynen buydu:
-           "emoji yerleştiriliyor... 120/172 · parça 4 (127 sn) · ⚠ Premiere yanıt vermiyor…"
-     Aynı satırda dört farklı türde bilgi yarışıyordu ve KRİTİK UYARI en sonda kaldığı için
-     dar panelde çoğu zaman hiç görünmüyordu — oysa kullanıcının o an yapması gereken tek
-     şey oradaydı. Üstelik "127 sn" GEÇEN süreydi; "daha ne kadar sürecek" sorusunun cevabı
-     panelin hiçbir yerinde yoktu.
-
-     YENİ DÜZEN — her bilgi kendi satırında, tek bir tasarımla:
-       1) başlık + kalan süre rozeti + yüzde
-       2) ilerleme çubuğu
-       3) sayaç satırı ("107 / 172 emoji · parça 5/7 · geçen 1:20")
-       4) AŞAMA LİSTESİ (alt alta; bitti ✓ / çalışıyor ◐ / atlandı – / hata ✕)
-       5) uyarı kutuları (ayrı satır, renkli)
-       6) ayrıntı log'u (katlanır)
-
-     ⚠ KALAN SÜRE GERİ SAYAR. Hesap yalnız yeni veri geldiğinde (bir parça bitince)
-     güncelleniyor; ekranda öylece durursa kullanıcı panelin donduğunu sanıyor. Bu yüzden
-     hesaplanan ETA bir HEDEF ANA çevriliyor (etaBitisT) ve saniyede bir oradan geri sayılıyor.
-     ILER.yuvarlaEta granülerliği koruduğu için sayı titremiyor, kademeli iniyor.
-
-     ⚠ UYARILAR ANAHTARLI. "Premiere yanıt vermiyor" uyarısı parça bitince KENDİLİĞİNDEN
-     kalkmalı; anahtarsız bir listede aynı uyarı her saniye tekrar eklenir ya da hiç silinmez.
-     Anahtar aynı zamanda "aynı uyarıyı iki kez gösterme" işini de çözüyor. */
-  var _ILER_LOG_PANEL = [];      // açık paneller — logLine hepsine yazar
-
-  /* Süre biçimi için GÜVENLİ sarmalayıcı. js/ilerleme.js bir <script> etiketiyle
-     yükleniyor; dosya eksik/bozuk olursa `ILER` tanımsız kalır ve doğrudan çağrı
-     ReferenceError fırlatır. Bu fonksiyonlar nöbetçi geri çağrılarının içinde
-     çalışıyor — orada atılan bir hata, uzun bir Premiere işini yarıda bırakabilir.
-     Yedek biçim kaba ama çalışır. */
-  function _sure(sn) {
-    try { return ILER.sureMetni(sn); }
-    catch (e) { return Math.round(sn || 0) + " sn"; }
-  }
-
-  /* ⚠ ILER YOKSA PANEL YOK — AMA İŞ DE DURMAZ. js/ilerleme.js index.html'de bir <script>
-     etiketiyle yükleniyor; dosya eksik/bozuk olursa `ILER` tanımsız kalır. O durumda bu
-     fonksiyon HER ÇAĞRIYA "tamam" diyen boş bir nesne döndürür: emoji/Shorts akışı
-     ilerleme göstergesiz ama SORUNSUZ çalışmaya devam eder.
-     Bu projede tam tersi bir kez oldu (v1.9.20): gösterim katmanındaki bir hata, işin
-     kendisini — ödenmiş yapay zekâ isteğinden SONRA — tümden çökertti. Gösterge, işi
-     asla düşürmemeli. */
-  function _ilerBos() {
-    var b = {};
-    var adlar = ["basla", "baslik", "not", "adim", "adimBitir", "adimAtla", "adimHata",
-                 "adimNot", "ilerle", "uyari", "uyariSil", "logYaz", "bitir", "gizle"];
-    for (var i = 0; i < adlar.length; i++) b[adlar[i]] = function () { return b; };
-    return b;
-  }
-
-  /* iptalId (isteğe bağlı): panelin eylem satırına TAŞINACAK mevcut iptal düğmesinin id'si. */
-  /* "~2:14" / "12 sn" gibi hazır ETA metnini milisaniyeye çevir. Altyazı akışı ETA'yı
-     METİN olarak üretiyor (transProgress); panel ise geri sayabilmek için sayı istiyor. */
-  function _etaMsCoz(s) {
-    s = String(s || "").replace("~", "").trim();
-    var m = s.match(/^(\d+):(\d+)/);
-    if (m) return ((+m[1]) * 60 + (+m[2])) * 1000;
-    m = s.match(/^(\d+)\s*sn/);
-    if (m) return (+m[1]) * 1000;
-    m = s.match(/^(\d+)\s*sa\s*(\d+)/);
-    if (m) return ((+m[1]) * 3600 + (+m[2]) * 60) * 1000;
-    return 0;
-  }
-
-  function ilerlemePaneli(kutuId, iptalId) {
-    if (typeof ILER === "undefined" || !ILER || !ILER.olustur) return _ilerBos();
-    var ref = null, sayac = null, asama = null;
-    var uyariAnah = [], uyariVer = {};
-    var etaBitisT = 0, tik = null, t0 = 0, bitmis = false, altNot = "";
-    /* sayacAdim: sayacın AİT OLDUĞU adımın adı (sayacKur çağrıldığında hangi adım
-       çalışıyorsa o). Ağırlıklı yüzde hesabı buna bakıyor — bkz. _ciz(). */
-    var sayacAdim = "", enYuksekYuzde = 0;
-    /* disYuzde: dışarıdan verilen yüzde. Altyazı üretiminde ilerlemeyi MOTOR bildiriyor
-       (zaman damgalarından hesaplanıyor) ve o sayı aşama listesinden çok daha isabetli;
-       verildiğinde aşama tabanlı hesabın önüne geçer. -1 = verilmedi. */
-    var disYuzde = -1;
-    /* Günlük satırları DİZİDE — DOM'a yalnız "Ayrıntılar" açıkken yazılıyor (bkz. logYaz). */
-    var logSatir = [];
-    /* ⚠ ÇİZİM KISITLAMASI. `setProgress` motorun bastığı HER satırda çağrılıyor (whenLog →
-       transProgress → setProgress) ve her çağrı `_ciz()` demek. Transkripsiyonda saniyede
-       onlarca satır geliyor; ekranı saniyede 40 kez yeniden çizmenin görsel bir karşılığı
-       yok, maliyeti var. 1 saniyelik zamanlayıcı zaten arka planda çalışıyor, yani hiçbir
-       güncelleme KAYBOLMUYOR — yalnız gereksiz olanlar atlanıyor. */
-    var sonCizim = 0;
-
-    function _kur() {
-      var kutu = $(kutuId);
-      if (!kutu) return null;
-      if (ref && ref.kok === kutu) return ref;
-      while (kutu.firstChild) kutu.removeChild(kutu.firstChild);
-      function el(tag, cls) { var e = document.createElement(tag); if (cls) e.className = cls; return e; }
-
-      var head = el("div", "iler-head");
-      var sp = el("span", "spinner");
-      var bd = el("span", "prog-badge"); bd.hidden = true;
-      var bs = el("span", "iler-baslik");
-      var eta = el("span", "iler-eta"); eta.hidden = true;
-      var pct = el("span", "iler-pct");
-      head.appendChild(sp); head.appendChild(bd); head.appendChild(bs);
-      head.appendChild(eta); head.appendChild(pct);
-
-      var trk = el("div", "progress-track");
-      var fil = el("div", "progress-fill"); trk.appendChild(fil);
-
-      var syc = el("div", "iler-sayac"); syc.hidden = true;
-      var adm = el("div", "iler-adimlar"); adm.hidden = true;
-      var ozt = el("div", "iler-ozet"); ozt.hidden = true;
-      var uya = el("div", "iler-uyarilar"); uya.hidden = true;
-
-      var act = el("div", "progress-actions");
-      var tgl = el("button", "log-toggle"); tgl.type = "button"; tgl.textContent = "Ayrıntılar ▾";
-      act.appendChild(tgl);
-      /* ⚠ VAR OLAN İPTAL DÜĞMESİNİ SAHİPLEN, YENİSİNİ YAPMA.
-         Altyazı üretiminin iptal düğmesi (#btnCancel) eski .progress-box'ın İÇİNDE duruyor;
-         o kutu gizlenince düğme de kaybolurdu ve uzun bir GPU işini durdurmanın tek yolu
-         kapanırdı. Düğmeyi KOPYALAMAK yerine TAŞIMAK şart: üzerindeki click dinleyicisi ve
-         iptal bayrağı mantığı olduğu gibi çalışmaya devam etsin, hiçbir şey yeniden
-         bağlanmasın (yeniden bağlamak, bu projede en sık sessiz hata kaynağı). */
-      if (iptalId) {
-        var _ib = $(iptalId);
-        if (_ib) { try { act.appendChild(_ib); } catch (eIb) {} }
-      }
-      var lg = el("pre", "log"); lg.hidden = true;
-      /* Ayrıntı log'u BU ekranda da olsun: emoji/Shorts çalışırken tek log Altyazı
-         ekranındaydı ve kullanıcı sorunun ne olduğunu görmek için ekran değiştirmek
-         zorundaydı — "sorun neyse belirtebilen bir eklenti" isteğinin karşılığı bu. */
-      tgl.addEventListener("click", function () {
-        lg.hidden = !lg.hidden;
-        /* Açılırken biriken satırlar bir kez yazılır — kapalıyken DOM'a hiç dokunulmuyor. */
-        if (!lg.hidden) lg.textContent = logSatir.join("\n");
-        tgl.textContent = lg.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴";
-      });
-
-      kutu.appendChild(head); kutu.appendChild(trk); kutu.appendChild(syc);
-      kutu.appendChild(adm); kutu.appendChild(ozt); kutu.appendChild(uya);
-      kutu.appendChild(act); kutu.appendChild(lg);
-      ref = { kok: kutu, sp: sp, bd: bd, baslik: bs, eta: eta, pct: pct, fil: fil,
-              sayac: syc, adim: adm, ozet: ozt, uyari: uya, log: lg };
-      return ref;
-    }
-
-    function _adimCiz() {
-      if (!ref) return;
-      var l = (asama && asama.liste()) || [];
-      ref.adim.hidden = !l.length;
-      while (ref.adim.firstChild) ref.adim.removeChild(ref.adim.firstChild);
-      for (var i = 0; i < l.length; i++) {
-        var a = l[i];
-        var row = document.createElement("div"); row.className = "iler-adim " + a.durum;
-        var ik = document.createElement("span"); ik.className = "iler-ikon";
-        /* "çalışıyor" durumunda metin YOK: CSS o yuvarlağı döndürüyor ve içindeki
-           karakteri şeffaf yapıyor (dönerken okunmuyor). */
-        ik.textContent = a.durum === "bitti" ? "✓" : a.durum === "hata" ? "✕"
-                       : a.durum === "atlandi" ? "–" : "";
-        var ad = document.createElement("span"); ad.className = "iler-ad"; ad.textContent = a.ad;
-        var nt = document.createElement("span"); nt.className = "iler-not";
-        /* Not verilmemişse biten adımın SÜRESİ yazılır — "hangi adım uzun sürüyor"
-           sorusunun cevabı, bir dahaki sefere ne bekleyeceğini bilmek için. */
-        nt.textContent = a.not || ((a.durum === "bitti" && a.sure >= 1) ? ILER.sureMetni(a.sure) : "");
-        row.appendChild(ik); row.appendChild(ad); row.appendChild(nt);
-        ref.adim.appendChild(row);
-      }
-    }
-
-    function _uyariCiz() {
-      if (!ref) return;
-      ref.uyari.hidden = !uyariAnah.length;
-      while (ref.uyari.firstChild) ref.uyari.removeChild(ref.uyari.firstChild);
-      for (var i = 0; i < uyariAnah.length; i++) {
-        var u = uyariVer[uyariAnah[i]]; if (!u) continue;
-        var d = document.createElement("div");
-        d.className = "iler-uyari" + (u.tip ? " " + u.tip : "");
-        d.textContent = u.metin;
-        ref.uyari.appendChild(d);
-      }
-    }
-
-    /* Ekranı tazele. Saniyede bir çağrılıyor (geri sayım) ve her veri değişiminde. */
-    function _ciz(zorla) {
-      if (!_kur()) return;
-      var simdi = Date.now();
-      /* En fazla ~4 kez/sn çiz. `zorla` = durum gerçekten değişti (adım/uyarı/bitiş). */
-      if (!zorla && (simdi - sonCizim) < 250) return;
-      sonCizim = simdi;
-      var d = sayac ? sayac.durum(simdi) : null;
-
-      /* ⚠⚠ YÜZDE İŞİN TAMAMINI ANLATIR, SAYACIN TAMAMINI DEĞİL — ÖLÇÜLMÜŞ HATA
-         (kullanıcı bildirdi, 12 Ağustos 2026: emoji panelinde "54/54 · %100 · birazdan biter"
-         yazarken "Animasyon uygulanıyor" adımı hâlâ dönüyordu).
-         Eski hâli sayaç varsa doğrudan sayacın yüzdesini basıyordu; sayaç YALNIZ yerleştirme
-         adımını ölçüyor, oysa ondan sonra bir adım daha var. Sonuç: iş sürerken çubuk dolu,
-         kullanıcı "bitti ama takıldı mı?" diye bakıyor.
-         YENİ MODEL — ağırlıklı ilerleme: her adım eşit paya sahip; biten/atlanan adımlar
-         payını tam alır, ÇALIŞAN adım kendi iç ilerlemesi kadar alır. İç ilerleme yalnız
-         sayacın AİT OLDUĞU adımda sayaçtan okunur (`sayacAdim`), başka bir adım çalışırken
-         yarım sayılır — yoksa yerleştirme bitince animasyon adımı da %100 sayılırdı. */
-      var yuzde = -1;
-      if (disYuzde >= 0) yuzde = disYuzde;
-      else if (asama) {
-        var _l = asama.liste(), _biten = 0, _calisan = null, _li;
-        for (_li = 0; _li < _l.length; _li++) {
-          if (_l[_li].durum === "bitti" || _l[_li].durum === "atlandi") _biten++;
-          else if (_l[_li].durum === "calisiyor") _calisan = _l[_li].ad;
-        }
-        var _pay = _l.length ? (100 / _l.length) : 0;
-        yuzde = _biten * _pay;
-        if (_calisan) {
-          var _ic = (sayacAdim && _calisan === sayacAdim && d && d.yuzde >= 0) ? (d.yuzde / 100) : 0.5;
-          yuzde += _ic * _pay;
-        }
-      } else if (d && d.yuzde >= 0) yuzde = d.yuzde;
-      if (bitmis) yuzde = 100;
-      /* Geri gitmesin: adım listesi ile sayaç farklı hızda ilerleyebiliyor ve çubuğun geri
-         kayması "bir şeyler ters gitti" hissi veriyor (progressBox'ta da aynı kural var). */
-      if (yuzde >= 0) { if (yuzde < enYuksekYuzde) yuzde = enYuksekYuzde; else enYuksekYuzde = yuzde; }
-      if (yuzde >= 0) {
-        ref.fil.style.width = Math.max(0, Math.min(100, yuzde)) + "%";
-        ref.pct.hidden = false;
-        ref.pct.textContent = Math.round(yuzde) + "%";
-      } else { ref.pct.hidden = true; }
-
-      /* --- kalan süre: hesaplanan değerden GERİ SAYAR ---
-         ⚠ SAYAÇ DOLDUYSA ETA GİZLENİR. Kalan süre yalnız sayacın ölçtüğü adım için
-         hesaplanıyor; o adım bitip sıradaki adım (ör. "Animasyon uygulanıyor") çalışırken
-         elde tahmin üretecek hiçbir veri yok. Eskiden burada sayaç tükendiği için
-         "birazdan biter" yazıyordu ve kullanıcı dakikalarca sürebilen bir adımın
-         "birazdan biteceğini" sanıyordu — söz vermek, susmaktan kötü. */
-      var sayacDoldu = !!(d && d.toplam > 0 && d.kalanIs === 0);
-      if (bitmis || !etaBitisT || sayacDoldu) { ref.eta.hidden = true; }
-      else {
-        var kalanSn = (etaBitisT - simdi) / 1000;
-        if (kalanSn <= 1) {
-          /* ⚠⚠ TAHMİN AŞILDIĞINDA "BİRAZDAN BİTER" DEMEK YALANDIR — ÖLÇÜLDÜ (ParsMazi,
-             12 Ağustos 2026): tek bir parça 845 saniye sürerken panel 14 DAKİKA boyunca
-             "birazdan biter" yazdı. Kullanıcı buna güvenip bekledi.
-             Tahmin tükendiğinde iki farklı durum var ve ayrılmaları ŞART:
-               · Az aştı (< 45 sn)  → gerçekten bitmek üzere olabilir
-               · Çok aştı           → tahmin ÇÖKTÜ; bunu söylemek, yanlış bir söz vermekten
-                                      iyidir. Rozet artık beklemeyi değil AŞIMI gösteriyor. */
-          var asim = (simdi - etaBitisT) / 1000;
-          ref.eta.hidden = false;
-          ref.eta.textContent = (asim > 45)
-            ? ("tahmini " + ILER.sureMetni(ILER.yuvarlaEta(asim)) + " aştı")
-            : "birazdan biter";
-        } else {
-          ref.eta.hidden = false;
-          ref.eta.textContent = "~" + ILER.sureMetni(ILER.yuvarlaEta(kalanSn)) + " kaldı";
-        }
-      }
-
-      /* --- sayaç satırı: "107 / 172 emoji · parça 5/7 · geçen 1:20" --- */
-      var parca = [];
-      if (d && d.toplam > 0) parca.push(d.sayacMetin);
-      if (altNot) parca.push(altNot);
-      if (t0) {
-        var gecen = (simdi - t0) / 1000;
-        if (gecen >= 5) parca.push("geçen " + ILER.sureMetni(gecen));
-      }
-      /* Tahmin henüz güvenilir değilken bunu SÖYLE — boş bir rozet, kullanıcıya
-         "hesaplayamıyor" demez, "hesaplamıyor" dedirtir. */
-      if (!bitmis && d && d.toplam > 0 && !d.guvenilir && !etaBitisT) parca.push("kalan süre hesaplanıyor…");
-      ref.sayac.hidden = !parca.length;
-      ref.sayac.textContent = parca.join("  ·  ");
-    }
-
-    function _tikBasla() {
-      if (tik) return;
-      tik = setInterval(function () { try { _ciz(); } catch (e) {} }, 1000);
-    }
-    function _tikDur() { if (tik) { try { clearInterval(tik); } catch (e) {} tik = null; } }
-
-    var API = {
-      /* opt: { baslik, toplam, birim, adimlar:[...] } — toplam verilmezse yüzde
-         aşama listesinden hesaplanır (sayısı bilinmeyen işler için). */
-      basla: function (opt) {
-        opt = opt || {};
-        if (!_kur()) return API;
-        t0 = Date.now(); bitmis = false; etaBitisT = 0; altNot = "";
-        sayacAdim = ""; enYuksekYuzde = 0;
-        uyariAnah = []; uyariVer = {};
-        sayac = opt.toplam ? ILER.olustur({ toplam: opt.toplam, birim: opt.birim || "", simdi: t0 }) : null;
-        asama = (opt.adimlar && opt.adimlar.length) ? ILER.asamalar(opt.adimlar) : null;
-        ref.kok.hidden = false;
-        ref.kok.classList.remove("done", "error");
-        ref.sp.hidden = false; ref.bd.hidden = true;
-        ref.baslik.style.color = "";
-        ref.baslik.textContent = opt.baslik || "Çalışıyor…";
-        ref.fil.style.width = "0%";
-        while (ref.log.firstChild) ref.log.removeChild(ref.log.firstChild);
-        if (_ILER_LOG_PANEL.indexOf(API) < 0) _ILER_LOG_PANEL.push(API);
-        _adimCiz(); _uyariCiz(); _ciz(true); _tikBasla();
-        return API;
-      },
-      baslik: function (m) { if (_kur()) ref.baslik.textContent = m || ""; return API; },
-      /* Sayacı SONRADAN kur. Bazı işlerde toplam adet ancak birkaç aşama sonra belli
-         oluyor (emojide plan üretilip seyreltildikten sonra). Hızın saati de buradan
-         başlar — önceki aşamaların süresi (yapay zekâ isteği gibi) yerleştirme hızına
-         karışırsa kalan süre tahmini baştan bozuk doğar. */
-      /* Dışarıdan yüzde ver (motorun bildirdiği ilerleme). eta: "2:14" gibi hazır metin ya da
-         boş. Altyazı akışı bunu kullanıyor; emoji/Shorts aşama+sayaçtan hesaplıyor. */
-      /* Süresi bilinmeyen iş: çubuk dolu ama SOLUK, yüzde yok. Panel kapalıysa/bitmişse
-         kendini yeniden başlatır — yoksa "Timeline'a ekleniyor…" bir önceki işin bitmiş
-         panelinin üstüne yazılırdı. Çalışırken yalnız başlık değişir (nöbetçi saniyede bir
-         çağırıyor; her çağrıda basla() demek aşama listesini sıfırlamak olurdu). */
-      belirsiz: function (label) {
-        if (!_kur()) return API;
-        if (bitmis || ref.kok.hidden) API.basla({ baslik: label || "Çalışıyor…" });
-        else if (label) ref.baslik.textContent = label;
-        disYuzde = -1; etaBitisT = 0;
-        ref.kok.classList.add("busy");
-        ref.fil.style.width = "100%";
-        _ciz();
-        return API;
-      },
-      yuzdeAyarla: function (p, eta) {
-        if (!_kur()) return API;
-        disYuzde = (p >= 0) ? p : -1;
-        if (eta) { etaBitisT = Date.now() + _etaMsCoz(eta); }
-        _ciz();
-        return API;
-      },
-      sayacKur: function (toplam, birim) {
-        if (!_kur()) return API;
-        sayac = toplam ? ILER.olustur({ toplam: toplam, birim: birim || "", simdi: Date.now() }) : null;
-        /* Sayacın hangi adıma ait olduğunu KAYDET: yüzde hesabı, sayaç dolduğunda sonraki
-           adımı da dolu saymasın diye buna bakıyor. */
-        sayacAdim = "";
-        if (asama) {
-          var _sl = asama.liste();
-          for (var _si = 0; _si < _sl.length; _si++)
-            if (_sl[_si].durum === "calisiyor") { sayacAdim = _sl[_si].ad; break; }
-        }
-        etaBitisT = 0; _ciz(true);
-        return API;
-      },
-      /* Sayaç satırının ortasındaki serbest not ("parça 5/7"). */
-      not: function (m) { altNot = m || ""; _ciz(); return API; },
-      adim: function (ad) { if (asama) { asama.basla(ad, Date.now()); _adimCiz(); _ciz(true); } return API; },
-      adimBitir: function (ad, not) { if (asama) { asama.bitir(ad, not, Date.now()); _adimCiz(); _ciz(true); } return API; },
-      adimAtla: function (ad, not) { if (asama) { asama.atla(ad, not); _adimCiz(); _ciz(true); } return API; },
-      adimHata: function (ad, not) { if (asama) { asama.hata(ad, not); _adimCiz(); _ciz(true); } return API; },
-      adimNot: function (ad, not) { if (asama) { asama.not(ad, not); _adimCiz(); } return API; },
-      /* biten: O ANA KADAR GERÇEKTEN biten sayı (gönderilen değil). */
-      ilerle: function (biten, not) {
-        if (!sayac) { if (not != null) altNot = not; _ciz(); return API; }
-        var simdi = Date.now();
-        sayac.ilerle(biten, simdi);
-        if (not != null) altNot = not;
-        var d = sayac.durum(simdi);
-        /* ETA'yı hedef ana çevir → ekranda geri sayabilsin. */
-        if (d.etaSn >= 0) etaBitisT = simdi + d.etaSn * 1000;
-        _ciz(true);
-        return API;
-      },
-      /* satirlar: [["Kanallar", "V6 sağ · V7 sol"], ["Dağılım", "Moni 45 · Tofi 38"], …]
-         Boş/atlanan değerler çağıran tarafta elenir; burada gelen her satır çizilir. */
-      ozet: function (satirlar) {
-        if (!_kur()) return API;
-        satirlar = satirlar || [];
-        ref.ozet.hidden = !satirlar.length;
-        while (ref.ozet.firstChild) ref.ozet.removeChild(ref.ozet.firstChild);
-        for (var i = 0; i < satirlar.length; i++) {
-          if (!satirlar[i] || !satirlar[i][1]) continue;
-          var s = document.createElement("div"); s.className = "iler-ozet-satir";
-          var a = document.createElement("span"); a.className = "iler-ozet-ad";
-          a.textContent = satirlar[i][0];
-          var v = document.createElement("span"); v.className = "iler-ozet-deg";
-          v.textContent = satirlar[i][1];
-          s.appendChild(a); s.appendChild(v); ref.ozet.appendChild(s);
-        }
-        if (!ref.ozet.firstChild) ref.ozet.hidden = true;
-        return API;
-      },
-      uyari: function (anahtar, metin, tip) {
-        if (!metin) return API.uyariSil(anahtar);
-        if (!uyariVer[anahtar]) uyariAnah.push(anahtar);
-        uyariVer[anahtar] = { metin: metin, tip: tip || "" };
-        _uyariCiz();
-        return API;
-      },
-      uyariSil: function (anahtar) {
-        if (uyariVer[anahtar]) {
-          delete uyariVer[anahtar];
-          var i = uyariAnah.indexOf(anahtar); if (i >= 0) uyariAnah.splice(i, 1);
-          _uyariCiz();
-        }
-        return API;
-      },
-      /* ⚠⚠ GÜNLÜK DİZİDE TUTULUR, DOM'A YALNIZ GÖRÜNÜRKEN YAZILIR — ÖLÇÜLMÜŞ YAVAŞLAMA
-         (kullanıcı bildirdi, 12 Ağustos 2026: "altyazı oluşturma da çok yavaş").
-         Eski hâl her satırda `textContent = yeni + eski` yapıyordu: TÜM günlük metni (200
-         satır ≈ 10 KB) okunuyor, birleştiriliyor, `trimLog` ile satırlara bölünüp yeniden
-         birleştiriliyordu. Motor transkripsiyon sırasında saniyede onlarca satır basıyor ve
-         bu maliyet HER SATIRDA ödeniyordu — üstelik günlük varsayılan olarak KAPALI, yani
-         kimse görmeden.
-         Artık satırlar diziye ekleniyor (O(1)) ve DOM ancak kullanıcı "Ayrıntılar"ı açtığında
-         güncelleniyor. */
-      logYaz: function (satir) {
-        if (!ref) return API;
-        var t = new Date().toLocaleTimeString();
-        logSatir.unshift("[" + t + "] " + satir);
-        if (logSatir.length > 200) logSatir.length = 200;
-        if (!ref.log.hidden) ref.log.textContent = logSatir.join("\n");
-        return API;
-      },
-      /* kind: yok = başarı · "warn" = kısmi · "bad" = hata.
-         KISMİ BAŞARI YEŞİL DEĞİL SARI — panelin her yerindeki kural (bkz. sonucGoster). */
-      bitir: function (metin, kind) {
-        if (!_kur()) return API;
-        bitmis = true; _tikDur();
-        if (asama) { asama.kalanlariIptal(kind === "bad" ? "yapılmadı" : ""); _adimCiz(); }
-        if (sayac) sayac.bitir(Date.now());
-        /* ⚠ ÜÇ DURUM, ÜÇ GÖRÜNÜM: başarı ✓ yeşil · UYARI ⚠ sarı · hata ✕ kırmızı.
-           Uyarıyı ✓ göstermek "her şey yolunda" yalanı, ✕ göstermek "başarısız" yalanı olurdu;
-           ikisi de bu panelde gerçekten yaşandı (bkz. progressFail'deki not). */
-        ref.kok.classList.remove("done", "error", "warn");
-        ref.kok.classList.add(kind === "bad" ? "error" : kind === "warn" ? "warn" : "done");
-        ref.sp.hidden = true;
-        ref.bd.hidden = false;
-        ref.bd.textContent = kind === "bad" ? "✕" : kind === "warn" ? "⚠" : "✓";
-        ref.bd.className = "prog-badge " + (kind === "bad" ? "bad" : kind === "warn" ? "warn" : "ok");
-        ref.baslik.style.color = kind === "bad" ? "var(--bad)" : kind === "warn" ? "var(--warn)" : "var(--good)";
-        ref.baslik.textContent = metin || (kind === "bad" ? "Olmadı" : "Bitti");
-        ref.eta.hidden = true;
-        if (kind === "bad") ref.fil.style.width = "100%";
-        var i2 = _ILER_LOG_PANEL.indexOf(API); if (i2 >= 0) _ILER_LOG_PANEL.splice(i2, 1);
-        _ciz(true);
-        return API;
-      },
-      gizle: function () {
-        _tikDur();
-        var i3 = _ILER_LOG_PANEL.indexOf(API); if (i3 >= 0) _ILER_LOG_PANEL.splice(i3, 1);
-        var k = $(kutuId); if (k) k.hidden = true;
-        return API;
-      }
-    };
-    return API;
-  }
-
-  /* ---------- PANEL ÖRNEKLERİ (tembel: ilk kullanımda kurulur) ----------
-     Neden tembel: `ilerlemePaneli()` yalnızca `basla()` çağrıldığında DOM'a dokunuyor,
-     ama örneği modül yüklenirken kurmak `ILER` global'inin o an hazır olmasına bağımlılık
-     yaratırdı (index.html'de <script> sırası değişirse sessizce boş panele düşerdi).
-     Tembel kurulum bu sırayı önemsiz kılıyor.
-     ⚠ ÖRNEK TEK: her çağrıda yeni panel üretilirse `basla()` her seferinde DOM'u
-     yeniden kurar ve o ana kadarki aşama/uyarı durumu kaybolur. */
-  var _ilerEmoji = null, _ilerShorts = null, _ilerCoklu = null, _ilerAlt = null;
-  /* ⚠ ALTYAZI PANELİ İPTAL DÜĞMESİNİ SAHİPLENİR ("btnCancel"). O düğme eski .progress-box'ın
-     içindeydi; kutu gizlenince uzun bir GPU işini durdurmanın tek yolu kapanırdı. Düğme
-     TAŞINIYOR (kopyalanmıyor), yani üzerindeki dinleyici olduğu gibi çalışmaya devam ediyor. */
-  function altyaziIler() { if (!_ilerAlt) _ilerAlt = ilerlemePaneli("altyaziIler", "btnCancel"); return _ilerAlt; }
-  function emojiIler()  { if (!_ilerEmoji)  _ilerEmoji  = ilerlemePaneli("emojiIler");  return _ilerEmoji; }
-  function shortsIler() { if (!_ilerShorts) _ilerShorts = ilerlemePaneli("shortsIler"); return _ilerShorts; }
-  function cokluIler()  { if (!_ilerCoklu)  _ilerCoklu  = ilerlemePaneli("cokluIler");  return _ilerCoklu; }
-
-  /* ⚠⚠ HOST SÜRÜMÜ PANELİNKİYLE TUTUYOR MU?
-     `jsx/host.jsx` YALNIZ Premiere açılırken belleğe yükleniyor. Paneli kapat-aç, hatta
-     paneli yeniden kurmak bile onu tazelemiyor — ama panelin başlığındaki sürüm
-     version.json'dan okunduğu için PANEL yeni görünürken HOST eski olabiliyor.
-     Bu, bu projenin en sık tekrar eden kafa karışıklığı: "düzeltmeyi kurdum ama hiçbir şey
-     değişmedi". Host tarafındaki bir düzeltme hiç yüklenmemiş oluyor ve bunu ayırt etmenin
-     hiçbir yolu yoktu; iki tur boyunca yanlış yerde hata arandı.
-     Boş dize döner = sorun yok. Aksi hâlde kullanıcıya gösterilecek uyarı metni döner. */
-  async function hostSurumUyari() {
-    if (!CEP) return "";
-    var hs = "";
-    try { hs = String(await evalES("hostSurum()")).trim(); } catch (e) { return ""; }
-    /* Eski host'ta bu fonksiyon YOK → "EvalScript error" ya da boş döner. İkisi de
-       "host eski" demektir; sessiz geçmek tam da önlemek istediğimiz durum. */
-    var panelS = "";
-    try { panelS = String(JSON.parse(fs.readFileSync(path.join(extRoot, "version.json"), "utf8")).version || ""); } catch (e2) {}
-    if (!panelS) return "";
-    if (hs === panelS) return "";
-    return "⚠ Premiere'deki motor dosyası (host.jsx) ESKİ: panel v" + panelS +
-           ", Premiere'e yüklü olan " + (hs && hs.indexOf("error") < 0 ? ("v" + hs) : "daha eski bir sürüm") +
-           ".\n\nhost.jsx yalnız Premiere AÇILIRKEN yükleniyor — paneli kapatıp açmak yetmez.\n" +
-           "Premiere'i TAMAMEN kapatıp yeniden aç, sonra tekrar dene.";
-  }
-
-  /* ⚠ esPath YALNIZCA TERS BÖLÜ ÇOĞALTIR — TÜRKÇE KARAKTERİ KORUMAZ.
-     Adı "ExtendScript'e güvenli yol" izlenimi veriyor ve bir yorumda öyle iddia edilmişti;
-     gerçekte tek yaptığı `\` → `\\`. ASCII-dışı karakterler (Masaüstü, Çok Mutlu Tofi.png)
-     evalScript kaynak dizgesine HAM giriyor. Bugün çalışıyor, ama projenin kuralı bu yüzden
-     "metni evalScript string'ine gömme, DOSYAdan geçir" — uzun/kritik yollar (emoji planı,
-     silinecek yollar, altyazı metni) zaten dosya sözleşmesini kullanıyor.
-     Buraya yeni bir çağrı eklerken: yol kısa ve tek seferlikse esPath yeter, plan/liste
-     taşıyorsan dosya kullan. */
   function esPath(p) { return String(p).replace(/\\/g, "\\\\"); }
   /* izle (isteğe bağlı): uzun süren çağrılarda saniyede bir çağrılan NÖBETÇİ.
      ⚠ ZAMAN AŞIMI DEĞİL — promise ASLA terk edilmiyor, yalnızca "hâlâ bekliyoruz" bilgisi
@@ -985,9 +284,7 @@
     for (var i = 0; i < all.length; i++) { all[i].classList.remove("active"); all[i].setAttribute("hidden", ""); }
     var id = name === "altyazi" ? "viewAltyazi" : name === "autocut" ? "viewAutocut"
            : name === "senkron" ? "viewSenkron" : name === "ayarlar" ? "viewAyarlar"
-           : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji"
-           : name === "shortsSekans" ? "viewShortsSekans"
-           : name === "cokluShorts" ? "viewCokluShorts" : "viewHome";
+           : name === "preset" ? "viewPreset" : name === "emoji" ? "viewEmoji" : "viewHome";
     var el = $(id); el.removeAttribute("hidden"); el.classList.add("active");
     $("backBtn").hidden = (id === "viewHome");
     var c = document.querySelector(".content"); if (c) c.scrollTop = 0;
@@ -1186,17 +483,6 @@
     catch (e) { dictStatus("✕ Kaydedilemedi: " + (e.message || e), "var(--bad)"); }
   });
 
-  /* ⚠ GEÇİCİ SHORTS ÖLÇÜM DÜĞMELERİ KALDIRILDI (12 Ağustos 2026) — arama.
-     `shortsOlcBtn` ve `shortsDeneBtn` dinleyicileri buradaydı; Ayarlar'daki "Shorts — API
-     ölçümü (geçici)" kartı da index.html'den silindi. Ölçüm görevini TAMAMLADI: sekans
-     yaratma yolunun altı çağrısı da (createNewSequenceFromClips · setSettings ·
-     createSubClip · overwriteClip · openSequence · deleteSequence) çalışıyor çıktı ve
-     sonuçlar CLAUDE.md'ye yazıldı; Tekli + Çoklu Shorts o ölçümün üstüne kuruldu.
-     Emsal aynı: captionStilTani ve presetTani kartları da sorularını cevaplayınca
-     kaldırılmıştı. host.jsx'teki `shortsTani` / `shortsDene` fonksiyonları DURUYOR —
-     yeni bir Premiere sürümünde DevTools'tan tekrar ölçmek için:
-       new CSInterface().evalScript("shortsTani()", console.log) */
-
   // transcribe() ortak seçenekleri — model/sansür + karakter sözlüğünün iki katmanı
   /* ================= SHORTS (dikey video) =================
      Dikey karede (1080x1920) satır yatayın ~yarısı kadar dar. İki şey değişir:
@@ -1220,24 +506,16 @@
     if (!shortsAcik()) { u.hidden = true; return; }
     var bilgi = null;
     try { bilgi = JSON.parse(await evalES("getSequenceInfoJSON()")); } catch (e) { bilgi = null; }
-    /* ⚠ METİN BAYATTI VE PANELİN YAPTIĞININ TERSİNİ SÖYLÜYORDU.
-       Eski hâli "altyazı dikey videoya göre KONULACAK — yatay videoda YANLIŞ YERDE durur"
-       diyordu. Bu, MOGRT dönemine ait: o zaman panel altyazının konumunu kendisi yazıyordu.
-       v1.8.0'dan beri altyazı Premiere'in caption track'ine gidiyor ve panel KONUMA HİÇ
-       DOKUNMUYOR — Shorts kutusu artık yalnız `maxWords 2 + maxChars 16` uyguluyor, yani
-       satırları kısaltıyor. Kullanıcıya var olmayan bir riski haber vermek, gerçek uyarılara
-       olan güveni de aşındırıyor. */
     if (!bilgi || bilgi.error || !bilgi.frameWidth || !bilgi.frameHeight) {
       u.hidden = false;
-      u.textContent = "Sekans ölçüsü okunamadı. Shorts kutusu yalnızca satırları kısaltır " +
-        "(en fazla 2 kelime / 16 karakter); konumu Premiere'deki Track Style belirler.";
+      u.textContent = "Sekans ölçüsü okunamadı — Shorts konumlandırması yine de uygulanacak.";
       return;
     }
     if (bilgi.dikey) { u.hidden = true; return; }
     u.hidden = false;
-    u.textContent = "Bu sekans " + bilgi.frameWidth + "x" + bilgi.frameHeight +
-      " (yatay). Shorts kutusu yalnızca altyazı satırlarını kısaltır (en fazla 2 kelime / " +
-      "16 karakter) — konumu Premiere'deki Track Style belirler, panel konuma dokunmaz.";
+    u.textContent = "⚠ Bu sekans " + bilgi.frameWidth + "x" + bilgi.frameHeight +
+      " (yatay). Shorts işaretli olduğu için altyazı dikey videoya göre konulacak — " +
+      "yatay videoda yanlış yerde durur. Dikey bir sekansta çalıştığından emin ol.";
   }
 
   /* Shorts açıkken "Konuşmacıya Göre" kapatılır: dikey karede üst üste katmanlar sığmıyor
@@ -1275,9 +553,6 @@
   var VUR = null;
   var EMJ = null;                // js/emoji.js — emoji klasörü tarayıcı (Premiere'e dokunmaz)
   var AYNA = null;               // js/pngayna.js — sol taraf emojileri için yatay ayna (saf dosya işi)
-  var SHORTS = null;             // js/shorts.js — Shorts kesit secimi (AI)
-  var SZAMAN = null;             // js/shortszaman.js — kaynak->Shorts zaman haritalama
-  var KONUM = null;              // js/emojikonum.js — emoji konumu/ölçeği (saf hesap, tumtest'ten çağrılabilir)
   /* Emoji eşleme onayı — OTURUMLUK, diske YAZILMAZ. Anahtar sekans kimliği, değer eşlemenin
      imzası. Bilerek localStorage değil: sekans adları projeler arası tekrar ediyor ve kalıcı
      bir onay, başka bir projenin kararıyla bu videonun sorusunu susturabilirdi. */
@@ -1308,33 +583,6 @@
     var c = $("chkCakisma"); if (!c) return;
     c.checked = (lsGet("cakismaGizle", "1") === "1");
     c.addEventListener("change", function () { lsSet("cakismaGizle", c.checked ? "1" : "0"); });
-    /* ⚠⚠ HIZLI MOD (--batched) KALDIRILDI — ÖLÇÜLDÜ VE BOZUK ÇIKTI (12 Ağustos 2026).
-       v1.11.0'da "deneysel" diye eklenmişti ve CLAUDE.md'deki plan şuydu: "iyiyse varsayılan
-       yapılır, BOZUKSA KUTU KALDIRILIR". Ölçüm yapıldı, sonuç net:
-
-         Hızlı mod KAPALI (A1.json, 25 Temmuz): dakikada 17.8 segment · segment başına
-                                                4.5 kelime / 1.54 sn
-         Hızlı mod AÇIK   (12 Ağustos koşusu):  dakikada  2.5 segment · "segment" başına
-                                                ~32 cue / 21.6 sn
-         → segment yoğunluğu 7.1 KAT düşüyor.
-
-       Neden yıkıcı: `cumleId` doğrudan Whisper SEGMENT sırasından türetiliyor
-       (pipeline.js flattenWords → seg). Segmentler devleşince:
-         · "Tofi Moni video modu" ÇALIŞAMIYOR. 623 sn'lik videoda 120 sn sonrası için 41
-           pencere var ama yalnız 21 "cümle" kalıyor; cümle sayısı pencereden az olunca
-           HEPSİ seçiliyor ve seyreltme SIFIR oluyor. Kullanıcının gördüğü "7. dakikada
-           altyazı hâlâ dolu" tam olarak budur — kural bozulmadı, kuralın dayandığı veri bozuldu.
-         · `cumleBirlestir` yanlış yerlerde köprü kuruyor: gerçekte AYRI cümleler tek
-           `cumleId` altında toplandığı için cümle sınırları kayboluyor.
-       ⚠ SESSİZ BİR BOZULMA: altyazı üretiliyor, panel yeşil diyor, hata yok — yanlışlık
-       ancak Premiere'de timeline'a bakınca görülüyor.
-
-       KUTU GERİ EKLENMEYECEK. Motor sürümü değişip batched'ın segment üretimi düzelirse
-       önce YUKARIDAKİ ÖLÇÜM tekrarlanır (segment/dakika ~15+ olmalı), sonra konuşulur.
-       ⚠ KAYITLI SEÇİM DE TEMİZLENİYOR: kutuyu HTML'den silmek yetmez — kullanıcının
-       localStorage'ında "batchedMod=1" kalırsa ve ileride biri o anahtarı yeniden okursa
-       mod GÖRÜNMEZ biçimde açık kalırdı. */
-    try { lsSet("batchedMod", "0"); } catch (eB) {}
   }
 
   function wireVurucu() {
@@ -1405,26 +653,6 @@
     "Aşağıya Pop Out", "Cinematic Border In", "Cinematic Border Out",
     "Pop In 1", "Pop In RGB", "Yukarıya Pop In", "Zoom In Center", "Zoom Out Center"
   ];
-  /* ⚠ PAKET SÜRÜMÜ — `varsayilan/preset-paketi.json`'A YENİ PRESET EKLEYİNCE BUNU ARTIR.
-     Artırmazsan yeni preset, presetler.json'ı ZATEN OLAN hiçbir kullanıcıya ULAŞMAZ
-     (hazır içerik kurulumu yalnız dosya hiç yokken çalışıyor) — yani sessizce ölü doğar.
-     Bu, projede dördüncü kez çıkan aynı soru; sözlükteki PAKET_SURUM ile birebir aynı desen.
-     Damga localStorage'da (`preset.pkgSurum`) tutuluyor: presetler.json'ın şemasına
-     dokunmamak için: o dosya düz bir "ad → yığın" nesnesi ve içine alan koymak onu
-     "pkgSurum adlı preset" yapardı. */
-  var PRESET_PAKET_SURUM = 1;
-  /* Kullanıcının BİLEREK kaldırdığı preset adları. Paket birleştirmesi bunları atlar —
-     yoksa her paket sürümünde kaldırdığı kart geri gelirdi. */
-  function presetSilinenler() {
-    try { var a = JSON.parse(lsGet("preset.silinen", "[]")); return (a && a.length) ? a : []; }
-    catch (e) { return []; }
-  }
-  function presetSilinenEkle(ad) {
-    try {
-      var a = presetSilinenler();
-      if (a.indexOf(ad) === -1) { a.push(ad); lsSet("preset.silinen", JSON.stringify(a)); }
-    } catch (e) {}
-  }
   /* "Hiç yazılmamış" ile "boşaltılmış" AYRI: kullanıcı bütün düğmeleri kaldırdıysa
      varsayılanlar geri gelmemeli, yoksa sildiği düğmeler her açılışta dirilir. */
   function presetSeciliOku() {
@@ -1511,68 +739,11 @@
        2. Sessiz kalma. Ne kurulduğu log'a yazılır.
      Stil dosyaları pakette ASCII adla (stil01.prtextstyle) durur ve gerçek adları
      stiller.json'dan okunur — zip'e Türkçe dosya adı koymak bozulma riski taşıyor. */
-  /* ⚠ BELGELER KLASÖRÜNÜN GERÇEK YERİ REGISTRY'DE YAZILI — TAHMİN LİSTESİ YETMİYOR.
-     Eskiden yalnız dört sabit aday deneniyordu (Documents · Belgeler · OneDrive\Documents ·
-     OneDrive\Belgeler). İş/okul hesaplı bir makinede Belgeler "OneDrive - Firma\Belgeler"
-     altında; başka bir sürücüye taşınmış olabiliyor. O durumda dördünün hiçbirinde
-     Adobe\Common bulunmuyor ama `%USERPROFILE%\Documents` boş bir klasör olarak DURUYOR →
-     stilKlasoruBul 2. tercih dalından oraya bir yol üretiyor, Track Style'lar Premiere'in
-     HİÇ BAKMADIĞI bir klasöre yazılıyor ve panel "kuruldu" diyordu. Kullanıcı stilleri
-     Premiere'de asla göremiyor, sebebi hiçbir yerde yazmıyor.
-     Registry'deki "Personal" değeri Windows'un kendi cevabı; en başa konuyor.
-     ⚠ reg okunamazsa (PATH'te yok / 32-bit görünüm) eski dört aday olduğu gibi kalıyor —
-     bu bir EKLEME, davranış daraltması değil. Tam yol yedeği js/lisans.js'teki ölçülmüş
-     desenden alındı: aynı komut PowerShell'de çalışırken başka bir ortamda BOŞ dönmüştü. */
-  /* ⚠ ÖNBELLEK: bu SENKRON bir süreç çağrısı ve AÇILIŞ yolunda (varsayilanlariKur →
-     stilKlasoruBul). Ölçüldü (bu makine, 6 koşu): soğuk 32 ms, sonrakiler ~26 ms —
-     kıyas için readdirSync 0.2 ms. Bugün iki çağrı yeri var (açılış + "Stilleri projeye al"),
-     yani toplam bedel ihmal edilebilir; ama önbelleksiz bırakmak, ileride bir döngüye
-     girmesi hâlinde açılışı görünmez şekilde yavaşlatırdı — 27 ms × N kimsenin aklına
-     gelmeyen bir maliyet olurdu.
-     ⚠ BOŞ SONUÇ ÖNBELLEĞE ALINMAZ: geçici bir okuma hatası (PATH'te reg yok, kilit)
-     kalıcılaşmasın. Aynı kural js/lisans.js hwid() önbelleğinde de var. */
-  var _regBelgelerCache = "";
-  function _regBelgelerYolu() {
-    if (_regBelgelerCache) return _regBelgelerCache;
-    try {
-      var cp = require("child_process");
-      var argv = ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
-                  "/v", "Personal"];
-      function calistir(exe) {
-        try {
-          return String(cp.execFileSync(exe, argv, { windowsHide: true, timeout: 4000 }) || "");
-        } catch (e) { return ""; }
-      }
-      var out = calistir("reg");
-      if (!out) {
-        var kok = String(process.env.SystemRoot || process.env.windir || "C:\\Windows");
-        out = calistir(path.join(kok, "System32", "reg.exe"));
-      }
-      var m = out.match(/Personal\s+REG_(?:EXPAND_)?SZ\s+(.+)/);
-      if (!m) return "";
-      var yol = String(m[1]).trim();
-      // REG_EXPAND_SZ %USERPROFILE% gibi token taşır — genişlet.
-      yol = yol.replace(/%([^%]+)%/g, function (t, ad) { return process.env[ad] || t; });
-      _regBelgelerCache = yol;          // yalnız DOLU sonuç önbelleğe alınır (bkz. üstteki not)
-      return yol;
-    } catch (e) { return ""; }
-  }
   function belgelerAdayKlasorleri() {
     var h = process.env.USERPROFILE || process.env.HOME || "";
-    var liste = [];
-    var reg = _regBelgelerYolu();
-    if (reg) liste.push(reg);                 // Windows'un kendi cevabı — en güvenilir
-    if (!h) return liste;
-    liste.push(path.join(h, "Documents"), path.join(h, "Belgeler"),
-               path.join(h, "OneDrive", "Documents"), path.join(h, "OneDrive", "Belgeler"));
-    /* İş/okul OneDrive'ı: "OneDrive - <Firma>" adında olur, adı önceden bilinemez — tara. */
-    try {
-      fs.readdirSync(h).forEach(function (ad) {
-        if (!/^OneDrive[ -]/i.test(ad)) return;
-        liste.push(path.join(h, ad, "Documents"), path.join(h, ad, "Belgeler"));
-      });
-    } catch (eOd) {}
-    return liste;
+    if (!h) return [];
+    return [path.join(h, "Documents"), path.join(h, "Belgeler"),
+            path.join(h, "OneDrive", "Documents"), path.join(h, "OneDrive", "Belgeler")];
   }
   /* Premiere'in Track Style klasörü. Windows'ta "Belgeler" OneDrive'a yönlendirilmiş
      olabiliyor ve adı dile göre değişiyor — bu yüzden adaylar taranır ve İÇİNDE Adobe\Common
@@ -1607,10 +778,7 @@
       var hedef = presetDosyaYolu();
       if (!fs.existsSync(hedef)) {
         /* DOSYA ADI BİLEREK "presetler.json" DEĞİL — ADI DEĞİŞTİRME.
-           Korunan kullanıcı dosyalarını atlayan DÖRT mekanizma da adı KLASÖR FARK ETMEKSİZİN
-           (.gitignore · pack-panel.ps1 · updater.js copyDir · installer.iss Excludes — sonuncusu
-           sayımda unutulmuştu; bugün çakışan ad yok ama pakete `varsayilan\kisiler.json` gibi
-           bir hazır içerik eklenirse exe ile kuran kullanıcıda o dosya sessizce HİÇ kopyalanmaz)
+           Korunan kullanıcı dosyalarını atlayan üç mekanizma da adı KLASÖR FARK ETMEKSİZİN
            eşliyor (.gitignore · pack-panel.ps1 · updater.js copyDir). Aynı adı kullanınca
            paketteki hazır dosya üçünde de sessizce eleniyor ve arkadaşın panelinde
            preset'ler boş geliyordu. Farklı ad bu sınıfın tamamını kökten çözüyor —
@@ -1640,78 +808,6 @@
           }
           presetSeciliYaz();
         }
-      }
-      /* ⚠⚠ KULLANICININ DOSYASI VARSA PAKETE SONRADAN EKLENEN PRESET'LER DE ULAŞMALI.
-         Yukarıdaki blok YALNIZCA `!fs.existsSync(hedef)` iken çalışıyor — yani presetler.json'ı
-         bir kez oluşmuş HERKES için pakete eklenen yeni bir preset SESSİZCE ÖLÜ DOĞUYORDU.
-         Bu, bu projede DÖRDÜNCÜ kez çıkan aynı soru: "yeni hazır içerik MEVCUT kullanıcıya
-         nasıl ulaşacak?" (öncekiler: emoji PNG tazeleme · presetSeciliTazele · sözlük
-         paketBirlestir). Cevabı olmayan her ekleme sessizce ölü doğuyor.
-
-         ⚠ ŞEMA DEĞİŞTİRİLMEDİ — DAMGA localStorage'DA. presetler.json düz bir "ad → yığın"
-         nesnesi; içine `pkgSurum` gibi bir alan koymak onu "pkgSurum adlı preset" yapardı ve
-         atomik yazma + .bak kurtarma zincirinin tamamını (5 lensli denetimden geçmiş kod)
-         riske atardı. Damga kaybolursa (CEF önbelleği temizlenirse) en kötü ihtimalle
-         birleştirme bir kez daha koşar — veri kaybı yok.
-
-         ⚠ SİLİNENLER GERİ GELMEZ: presetKaldir sildiği adı `preset.silinen`e yazıyor ve
-         burası o listeyi atlıyor. Bu olmadan "bilerek kaldırdığım kart her sürümde geri
-         geliyor" hatası doğardı — sözlük tarafında tam olarak bu ölçüldü (finding 14). */
-      if (fs.existsSync(hedef)) {
-        try {
-          var damga = String(lsGet("preset.pkgSurum", ""));
-          if (damga !== String(PRESET_PAKET_SURUM)) {
-            var pkgYol = path.join(kok, "preset-paketi.json");
-            var pkg = presetDosyaOku(pkgYol);          // BOM temizliği + tip doğrulaması onda
-            var yaziBasarisiz = false;
-            if (pkg) {
-              var mevcut = presetYiginlar() || {};
-              var silinen = presetSilinenler(), yeni = [];
-              for (var pAd in pkg) {
-                if (!Object.prototype.hasOwnProperty.call(pkg, pAd)) continue;
-                if (mevcut[pAd]) continue;                       // kullanıcıda zaten var — DOKUNMA
-                if (silinen.indexOf(pAd) !== -1) continue;        // bilerek silmiş — geri getirme
-                mevcut[pAd] = pkg[pAd]; yeni.push(pAd);
-              }
-              if (yeni.length) {
-                /* ⚠ YAZMA BAŞARISINI KONTROL ET. presetYiginlarYaz() hata durumunda `false`
-                   dönüyor (OneDrive kilidi / EPERM) ama istisna FIRLATMIYOR — dönüşü
-                   yoksaymak şu sessiz duruma yol açıyordu: `mevcut` zaten ÖNBELLEĞİN kendisi
-                   olduğu için kartlar o oturumda çalışıyor, ama diske hiçbir şey yazılmıyor;
-                   panel kapanınca kayıt yok oluyor ve damga atıldığı için birleştirme BİR
-                   DAHA HİÇ denenmiyor. Aynı kontrol presetTersiUret'te zaten var. */
-                /* ⚠ `return` KULLANMA — burası varsayilanlariKur'un İÇİ ve return oradan
-                   TÜMDEN çıkar: Track Style ve emoji PNG kurulum adımları hiç çalışmaz.
-                   Bu tuzağa bu projede bir kez düşüldü (o zaman ikinci kullanıcıda 46 emoji
-                   HİÇ kurulmamıştı ve tek iz gizli log'daki bir satırdı). Adımlar birbirinden
-                   BAĞIMSIZ kalmak zorunda — bayrakla çık, return'le değil. */
-                if (!presetYiginlarYaz()) {
-                  logLine("Pakete eklenen preset'ler DİSKE YAZILAMADI — bir sonraki açılışta tekrar denenecek.");
-                  yaziBasarisiz = true;
-                }
-                /* ⚠⚠ LİSTEYİ DİSKTEN OKU — `_presetSecili` BU NOKTADA HENÜZ BOŞ.
-                   varsayilanlariKur(), wirePreset içinde `_presetSecili = presetSeciliOku()`
-                   satırından ÖNCE çağrılıyor. Global diziyi kullanıp presetSeciliYaz()
-                   demek, localStorage'daki kart listesini YALNIZ yeni paket adlarıyla
-                   EZMEK demekti: kullanıcının elle eklediği ama henüz öğretilmemiş kartlar
-                   kalıcı olarak siliniyordu (presetSeciliTazele yalnız YIĞINI OLAN adları
-                   geri koyabiliyor). Damga atıldığı için de kendini onarmıyordu.
-                   Diskten okumak fonksiyonu çağrı sırasından BAĞIMSIZ kılıyor — üç ayrı
-                   çağrı yeri var, hepsinde doğru çalışmalı. */
-                if (!yaziBasarisiz) {
-                  var sec = presetSeciliOku();
-                  yeni.forEach(function (a) { if (sec.indexOf(a) === -1) sec.push(a); });
-                  _presetSecili = sec;
-                  presetSirala(); presetSeciliYaz();
-                  logLine("Pakete eklenen yeni preset'ler kuruldu (" + yeni.length + "): " + yeni.join(", "));
-                }
-              }
-            }
-            /* Damga YALNIZ iş gerçekten diske yazıldıysa atılır — yoksa "kart var, yığın yok"
-               durumu kalıcılaşır ve birleştirme bir daha hiç denenmez. */
-            if (!yaziBasarisiz) lsSet("preset.pkgSurum", String(PRESET_PAKET_SURUM));
-          }
-        } catch (ePb) { logLine("Preset paket birleştirmesi yapılamadı: " + (ePb.message || ePb)); }
       }
     } catch (e1) { logLine("Hazır preset kurulamadı: " + (e1.message || e1)); }
 
@@ -1911,22 +1007,9 @@
       return (j && j.length) || 0;
     } catch (e) { return 0; }
   }
-  /* ⚠ DURUM SATIRI İKİ EKRANA BİRDEN YAZILIR.
-     #emojiKlasorDurum Ayarlar ekranında, #emojiKapsamDurum ise Emoji ekranında. "Yenile"
-     düğmesi EMOJİ ekranında ama uyarı yalnız AYARLAR'a yazılıyordu: kullanıcı Yenile'ye
-     basıyor, ekranda hiçbir şey değişmiyor ve "5 resim eksik, Yeniden Kur'a bas" uyarısını
-     hiç görmüyordu (ParsMazi'de emoji klasöründe paketteki 57 resmin 30'u vardı).
-     ⚠ #emojiKanalDurum'a YAZILMAZ: orası kanal→karakter özetini (A1→Tofi · A2→Moni)
-     taşıyor ve ikisi birbirini ezerdi. */
   function emojiKlasorDurumYaz() {
-    var hedefler = [$("emojiKlasorDurum"), $("emojiKapsamDurum")].filter(function (x) { return !!x; });
-    if (!hedefler.length) return;
-    function yaz(m, renk) {
-      for (var i = 0; i < hedefler.length; i++) {
-        hedefler[i].textContent = m;
-        hedefler[i].style.color = renk || "var(--muted)";
-      }
-    }
+    var el = $("emojiKlasorDurum"); if (!el) return;
+    function yaz(m, renk) { el.textContent = m; el.style.color = renk || "var(--muted)"; }
     var kok = String(($("emojiKlasor") || {}).value || "").trim();
     if (!kok) { yaz("Emoji klasörü seçilmedi.", "var(--warn)"); return; }
     if (!EMJ) { yaz("emoji.js yüklenemedi — paneli yeniden kur.", "var(--bad)"); return; }
@@ -1937,41 +1020,9 @@
     var ozet = t.dosyalar.length + " resim · " + t.karakterler.length + " karakter (" +
                t.karakterler.map(function (k) { return k.ad; }).join(", ") + ") · " +
                t.duygular.length + " tepki";
-
-    /* ⚠⚠ KARAKTER BAŞINA DUYGU KAPSAMI — "HEP ŞAŞIRMIŞ KOYUYOR"UN ÖLÇÜLMÜŞ SEBEBİ.
-       Panel yapay zekâya karakter başına YALNIZ o karakterde GERÇEKTEN OLAN duyguları
-       gönderiyor (karakterDuygu). Bir karakterde "mutlu" yoksa model mutlu bir cümlede
-       onu SEÇEMİYOR ve elindeki en yakına (Sevgi · Havalı · Şaşırmış) kayıyor.
-       Ölçüldü (12 Ağustos 2026, 57 resim): "mutlu" YALNIZ Tofi'de var — yani kadrosunda
-       Tofi olmayan bir kullanıcıda (ParsMazi) hiçbir karakter mutlu emojisi ALAMIYOR.
-       Kapsam: Tofi 19/19 · Moni 14/19 · Dora 8/19 · Mimi 8/19 · Sage 5/19.
-       Bu bir KOD hatası değil, İÇERİK eksiği — kodla çözülemez. Ama panel bunu hiç
-       söylemiyordu: kullanıcı "duygu seçimi kötü" deyip Sıklık ayarını kurcalıyor, oysa
-       yapması gereken tek şey o karaktere birkaç resim eklemek.
-       Eşik yarı kapsam: onun altındakiler pratikte hep aynı birkaç yüzü tekrarlıyor. */
-    var zayif = [];
-    try {
-      var duyKeys = (t.duygular || []).map(function (d) { return d.key || d; });
-      (t.karakterler || []).forEach(function (k) {
-        var kk = k.key || k;
-        var vSay = 0;
-        duyKeys.forEach(function (dk) { if (t.matris[dk + "|" + kk]) vSay++; });
-        if (duyKeys.length && vSay < duyKeys.length / 2) {
-          zayif.push((k.ad || kk) + " " + vSay + "/" + duyKeys.length);
-        }
-      });
-    } catch (eZ) { zayif = []; }
-    var zayifNot = zayif.length
-      ? ("\n⚠ Az tepkisi olan karakterler: " + zayif.join(" · ") +
-         " — bu karakterler ekranda az görünür ve duyguları hep birbirine benzer. " +
-         "Klasöre “<Duygu> <Karakter>.png” adında yeni resim eklemek en çok işe yarayan şeydir.")
-      : "";
-
     if (paketSay && t.dosyalar.length < paketSay) {
       yaz("⚠ " + ozet + " — pakette " + paketSay + " resim var, " + (paketSay - t.dosyalar.length) +
-          " tanesi bu klasörde YOK. “Emojileri Yeniden Kur”a bas." + zayifNot, "var(--warn)");
-    } else if (zayifNot) {
-      yaz("✓ " + ozet + (paketSay ? (" · paketle uyumlu") : "") + zayifNot, "var(--warn)");
+          " tanesi bu klasörde YOK. “Emojileri Yeniden Kur”a bas.", "var(--warn)");
     } else {
       yaz("✓ " + ozet + (paketSay ? (" · paketle uyumlu") : ""), "var(--muted)");
     }
@@ -2201,17 +1252,7 @@
            değilse preset özelliği motorla ilgisiz bir hatayla patlıyordu. */
         yol = path.join(extRoot, "preset_gecici.json");
         fs.writeFileSync(yol, yigin, "utf8");
-        /* ⚠ NÖBETÇİ EKLENDİ (12 Ağustos 2026). `presetYaz` seçili KLİPLERİN HEPSİNE
-           keyframe yazıyor ve her klipte QE ağacında arama yapıyor: 20 klipte yüzlerce
-           Premiere çağrısı demek. Nöbetçisiz hâlinde kart "uygulanıyor…" yazısında donuyor
-           ve kullanıcı çalışan Premiere ile kilitlenmiş Premiere'i ayırt edemiyordu.
-           Nöbetçi ZAMAN AŞIMI DEĞİL — promise asla terk edilmiyor, yalnız bilgi veriyor. */
-        r = String(await evalES('presetYaz("' + esPath(yol) + '", "' + (kafaya ? "1" : "0") + '")',
-          function (sn) {
-            durumYaz("preset uygulanıyor… (" + _sure(sn) + ")" +
-                     (sn >= 45 ? " — Premiere'de açık bir pencere var mı? Kapatınca devam eder."
-                               : ""), "var(--muted)");
-          }));
+        r = String(await evalES('presetYaz("' + esPath(yol) + '", "' + (kafaya ? "1" : "0") + '")'));
       } else if (sira >= 0) {
         r = String(await evalES("efektUygula(" + sira + ")"));
         // Hangi yolun çalıştığı SÖYLENİR: öğretilmiş kayıt yokken "başarılı" demek yanıltıcı.
@@ -2311,11 +1352,6 @@
     var k = _presetSecili.indexOf(ad);
     if (k !== -1) _presetSecili.splice(k, 1);
     presetSeciliYaz();
-    /* ⚠ SİLME KARARI KALICI OLARAK KAYDEDİLİR. Paket birleştirmesi (varsayilanlariKur)
-       kullanıcıda olmayan paket preset'lerini ekliyor; bu kayıt olmadan kullanıcının
-       bilerek kaldırdığı bir paket preset'i BİR SONRAKİ paket sürümünde geri gelirdi.
-       Sözlük tarafında aynı hata ölçüldü (silinen varsayılan isimler dirilyordu). */
-    presetSilinenEkle(ad);
     // Öğrenilmiş yığın da gitsin — adı olmayan yığın dosyada çöp olarak birikirdi.
     var y = presetYiginlar();
     if (y[ad]) { delete y[ad]; presetYiginlarYaz(); }
@@ -2336,15 +1372,6 @@
        yeniden "öğretilmemiş" görünür ve kullanıcının elle yaptığı sürükleme boşa gider. */
     var y = presetYiginlar();
     if (y[eski]) { y[yeni] = y[eski]; delete y[eski]; presetYiginlarYaz(); }
-    /* ⚠ ESKİ AD "artık kullanılmıyor" olarak KAYDEDİLİR — presetKaldir ile aynı sebep.
-       Paket birleştirmesi yalnız iki kapıya bakıyor: "kullanıcıda var mı" ve "silinenlerde
-       mi". Yeniden adlandırma ikisine de girmiyordu (yığın yeni ada taşındığı için eski ad
-       artık yok, silinenlerde de yok) → bir sonraki PRESET_PAKET_SURUM artışında paket
-       preset'i ESKİ adıyla geri gelip yinelenen kart üretirdi.
-       Koşulsuz: paket preset'i olmayan bir adı kaydetmek zararsız (birleştirme yalnız
-       PAKET adlarına bakıyor), ama koşul koymak "hangi durumda kaydediliyor" sorusunu
-       gereksizce zorlaştırırdı. */
-    presetSilinenEkle(eski);
     presetBtnlarCiz();
     durumYaz("“" + eski + "” → “" + yeni + "”");
   }
@@ -2529,13 +1556,6 @@
      hesaplandığı için "Bol emoji" seçeneği sözünü tutuyor.
      Kelime sayısı boşluktan sayılır; cue metni cleanPunct'tan geçtiği için noktalama yok. */
   var EMOJI_MIN_KELIME = 5;
-  /* ⚠ EMOJİ KONUŞMANIN BAŞINA ÇEKİLİR (kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne
-     zaman geliyo"). 5 kelime filtresi kısa açılış cümlelerini elediği için emoji ilk sesin
-     2-3 saniye sonrasında görünüyordu. En fazla bu kadar geriye çekilir. */
-  var EMOJI_ONE_CEK = 2.5;
-  /* İki cue arasında bu kadardan uzun sessizlik varsa konuşma KESİLMİŞ sayılır ve öne
-     çekme orada durur — yoksa emoji bambaşka bir repliğin üstüne kayar. */
-  var EMOJI_KESINTI = 0.7;
   /* İKİ EMOJİ ARASI EN AZ BOŞLUK. Artık süre değişken olduğu için fren "başlangıçlar arası
      mesafe" değil "önceki emojinin BİTİŞİ" üzerinden çalışıyor — sabit süre varsayımına
      dayanan eski EMOJI_ARA (2.2) bu yüzden kaldırıldı.
@@ -2543,28 +1563,20 @@
      sonra konabiliyor (host.jsx `sonBitis` freni); kare yuvarlaması yukarı giderse çakışan
      emoji EZİLMEZ ama SESSİZCE ATILIR ve her çalıştırma sarıya döner. 0.08 ≈ iki kare payı. */
   var EMOJI_GAP = 0.08;
-  /* ⚠ EMOJİ KONUMU/ÖLÇEĞİ ARTIK `js/emojikonum.js`'TE — buraya geri yazma.
-     Sebep: app.js kapalı bir IIFE, yani buradaki hiçbir fonksiyon tumtest.js'ten
-     çağrılamıyor. Emoji konumu kullanıcı onaylı bir sabite (ORAN = 0.574) ve İKİ KEZ
-     dönmüş bir taraf kararına dayanıyor; ölçülemeyen değişiklik bu projede en pahalı yer.
-     Modül ayrıca dikey (Shorts) karesindeki ölçülmüş hatayı düzeltiyor: ölçü tabanı
-     `min(seqW,seqH)` — yatayda TEK SAYI değişmiyor, dikeyde sağ/sol artık ayrışıyor.
-     ALT BOŞLUK NOTU (kullanıcı isteği, 7 Ağustos 2026: "aşağıda o küçücük yer kapansın"):
-     BOSLUK_Y = 0, emoji alt kenara DAYANIR. ⚠ Bu her resimde boşluğu bitirmez — bazı
-     PNG'lerin KENDİ altında şeffaf payı var (ölçüldü, alfa bounding box: Çok Mutlu/Havalı/
-     Mızmızlanan/Heyecanlı Tofi 2 → %10.9 · Şaşırmış Moni → %12.2 · Şaşırmış Mimi → %3.1).
-     O boşluk resmin kendi boşluğu; çözümü kod değil, resmi yeniden kaydetmek. */
+  var EMOJI_ORAN = 0.574;      // emoji yüksekliği / kare yüksekliği — KULLANICI ONAYLADI, DOKUNMA
+  var EMOJI_BOSLUK_X = 0.005;  // SAĞ kenar boşluğu (kare yüksekliğinin oranı) ≈ 5 px
+  /* ALT BOŞLUK YOK (kullanıcı isteği, 7 Ağustos 2026: "aşağıda boşluk kalıyo çok az, o
+     küçücük yer kapanıcak şekilde aşağı indirebilir miyiz"). Emoji kareyi alt kenara dayanır.
+     ⚠ BU HER RESİMDE BOŞLUĞU BİTİRMEZ: bazı PNG'lerin KENDİ altında şeffaf pay var —
+     ölçüldü (alfa bounding box): çoğu dosyada %0 (yani resim alt kenara dayalı, panel 0
+     yapınca tam oturuyor) ama Çok Mutlu/Havalı/Mızmızlanan/Heyecanlı Tofi 2 → %10.9,
+     Şaşırmış Moni → %12.2, Şaşırmış Mimi → %3.1. O dosyalarda kalan boşluk resmin kendi
+     boşluğudur; çözümü kod değil, resmi alt kenara dayalı yeniden kaydetmek. */
+  var EMOJI_BOSLUK_Y = 0;
   /* Bir evalScript'te kaç emoji. Klip başına 12-15 ExtendScript↔Premiere turu var ve tek
      çağrı boyunca Premiere'in arayüzü DONUYOR; 150 emoji tek seferde gitseydi kullanıcı ne
      kadar kaldığını göremez, "kilitlendi" sanıp Premiere'i öldürebilirdi. */
-  /* ⚠ 40 → 25 (11 Ağustos 2026). ParsMazi'de 172 emojilik bir planda 4. parça 127 saniye
-     boyunca döndü ve Premiere araya bir pencere soktu. Parça küçüldükçe: (a) her parça daha
-     kısa sürüyor, yani Premiere'in pencere açması için daha az fırsat kalıyor, (b) takılma
-     olursa KAYBEDİLEN iş daha az, (c) ilerleme sayısı daha sık güncelleniyor.
-     Bedeli: daha çok evalScript turu (toplam süre ~%5 artar) — takılmanın bedelinin yanında
-     önemsiz. ⚠ host.jsx `_TARA_TAVAN` (60) bu sayıdan BÜYÜK kalmak ZORUNDA, yoksa önceki
-     parçanın klipleri güvenlik taramasının dışında kalır; 25 < 60 olduğu için güvende. */
-  var EMOJI_PARCA = 25;
+  var EMOJI_PARCA = 40;
   /* Plandaki en fazla emoji (host tavanı 400). Aşılırsa REDDEDİLMEZ, eşit aralıkla
      SEYRELTİLİR: host'un eski davranışı (plan > 100 ise tek emoji koymadan "err:") ödenmiş
      API isteğini ve 25 dakikalık GPU işini çöpe atıyordu. */
@@ -2632,18 +1644,22 @@
      artık ÇAĞIRAN SEÇMİYOR — emojiSagMi(karakter) belirliyor, yani "yanlış taraf" ancak
      yukarıdaki listeyi bozarak geçilebilir. Sol x, sağ x'in kare merkezine göre TAM AYNASI
      (solX = 1 - sağX), çünkü iki kenar boşluğu da aynı `bosX` değerinden hesaplanıyor. */
-  /* ⚠ GÖVDE `js/emojikonum.js`'E TAŞINDI — buraya geri yazma (sebep: test edilebilirlik,
-     bkz. o dosyanın başı). Burası yalnız ince bir sarmalayıcı: modül yüklenemezse emoji
-     özelliği DURUR, sessizce yanlış konuma emoji koymaz.
-     `ust` parametresi Shorts içindir (emoji üstte, altyazı altta — kullanıcı isteği). */
-  /* ⚠ BÜTÜN PARAMETRELER GEÇİRİLMEK ZORUNDA — GERÇEK HATA (11 Ağustos 2026).
-     Sarmalayıcı bir ara yalnız (seqW, seqH, sag, ust) alıyordu; Shorts ise beş argümanla
-     çağırıyordu ve 5.'si (`orta`) BURADA SESSİZCE YUTULUYORDU. Emoji "ortada" istenmişken
-     sağ köşeye gidiyordu ve hiçbir test yakalamıyordu: testler doğrudan modülü çağırıyor,
-     yani modül doğru, KÖPRÜ kırıktı. Nöbetçi testi eklendi (imza + gövde metin taraması). */
-  function emojiKonum(seqW, seqH, sag, ust, orta, oran) {
-    if (!KONUM) throw new Error("emojikonum.js yüklenemedi — paneli yeniden kur");
-    return KONUM.hesapla(seqW, seqH, sag, ust, orta, oran);
+  function emojiKonum(seqW, seqH, sag) {
+    var boyPx = seqH * EMOJI_ORAN;                 // emoji ekranda bu kadar yüksek
+    var yariPx = boyPx / 2;
+    var bosX = Math.round(seqH * EMOJI_BOSLUK_X), bosY = Math.round(seqH * EMOJI_BOSLUK_Y);
+    var x = sag ? ((seqW - bosX - yariPx) / seqW) : ((bosX + yariPx) / seqW);
+    var y = (seqH - bosY - yariPx) / seqH;
+    /* ⚠ DİKEY (Shorts) SEKANSTA TARAFLAR YER DEĞİŞTİREBİLİYORDU. Ölçek kare YÜKSEKLİĞİNE
+       bağlı (EMOJI_ORAN); 1080x1920'de emoji 1102 px oluyor, yani kareden GENİŞ. O zaman
+       "sağ" formülü 0.481, "sol" formülü 0.519 veriyor — sağdaki soldan solda kalıyor ve
+       tarafSay sayımı da ters okuyor. Kelepçe iki tarafın ÇAPRAZLAMASINI engelliyor;
+       yatay videoda hiçbir şeyi değiştirmiyor (orada sağ 0.836, sol 0.164 çıkıyor).
+       NOT: dikey sekansta emojinin kareyi taşması AYRI ve ESKİ bir konu — bu kelepçe onu
+       çözmez, yalnız "hangi taraf" bilgisini dürüst tutar. Shorts'ta emoji hiç ölçülmedi. */
+    if (sag && x < 0.5) x = 0.5;
+    if (!sag && x > 0.5) x = 0.5;
+    return { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 };
   }
 
   /* Tarama sonucunda bir karakter anahtarını bul (yoksa null). Eşleşme ASCII üzerinden:
@@ -2877,19 +1893,6 @@
        "Önce altyazı oluştur" diyordu — ekranda 800 altyazı dururken 25 dakikalık GPU işini
        tekrar etmeye yolluyordu. */
     var liste = [], elle = [], kisaAtilan = 0, yokSay = 0;
-    /* ── KANAL BAŞINA DÖKÜM ──
-       NEDEN VAR (ParsMazi, 11 Ağustos 2026: "moniyi yine az koymuş"): panel toplam sayıları
-       söylüyordu ("448 cümlenin 180'ini işaretledi · 12 kısa cümle elendi") ama KİMİN kaç
-       cümlesinin elendiğini hiçbir yerde yazmıyordu. Bir karakter az emoji aldığında sebebi
-       üç yerden biri olabiliyor — az konuşmuş · cümleleri 5 kelimeden kısa · yapay zekâ
-       işaretlememiş — ve kullanıcı bunları ayırt edemediği için hep yanlış kolu arıyordu
-       (ağırlık kuralı ölçüldü: bu şikâyette payı yalnız %4).
-       Ölçemediğimiz şeyi ayarlamak yerine ÖLÇÜMÜ kullanıcıya veriyoruz. */
-    var kanalDokum = {}, dokumSira = [];
-    function dokum(ad) {
-      if (!kanalDokum[ad]) { kanalDokum[ad] = { ad: ad, ham: 0, kisa: 0, aday: 0 }; dokumSira.push(ad); }
-      return kanalDokum[ad];
-    }
 
     /* a1 = bu kanal SENİN mikrofonun mu. Çağıran taraf biliyor; emojiEkle bunu "bu videoyu
        gerçekten X mi çekti" onayını YALNIZ A1 için sormak üzere kullanıyor. Adı karşılaştırıp
@@ -2941,10 +1944,8 @@
           var oncekiSayEl = kayitlar.length;
           kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
           kisaAtilan += (oncekiSayEl - kayitlar.length);
-          var dEl = dokum(ad);
-          dEl.ham += oncekiSayEl; dEl.kisa += (oncekiSayEl - kayitlar.length); dEl.aday += kayitlar.length;
           if (!kayitlar.length) return;
-          kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; k.kaynakCues = cues; liste.push(k); });
+          kayitlar.forEach(function (k) { k.kar = elKar; k.a1 = !!a1; liste.push(k); });
           return;
         }
         /* Seçilen karakter klasörden silinmişse seçim GEÇERSİZ — sessizce ada düşme, aşağıdaki
@@ -2988,14 +1989,9 @@
       var oncekiSay = kayitlar.length;
       kayitlar = kayitlar.filter(function (k) { return emojiKelimeSay(k.metin) >= EMOJI_MIN_KELIME; });
       kisaAtilan += (oncekiSay - kayitlar.length);
-      var dN = dokum(ad);
-      dN.ham += oncekiSay; dN.kisa += (oncekiSay - kayitlar.length); dN.aday += kayitlar.length;
       if (!kayitlar.length) return;
 
-      /* ⚠ kaynakCues: emojiyi konuşmanın başına çekmek için o kanalın cue listesi gerekiyor
-         (bkz. denePlanaEkle'deki öne çekme). Referans tutuluyor, KOPYA DEĞİL — yalnız
-         okunuyor, hiçbir alanı değiştirilmiyor. */
-      kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; k.kaynakCues = cues; liste.push(k); });
+      kayitlar.forEach(function (k) { k.kar = kar; k.a1 = !!a1; liste.push(k); });
     }
 
     /* KARAKTER ADI KANALDAN GELİR — ayrı bir "senin karakterin" ayarı YOK. */
@@ -3025,8 +2021,7 @@
        2, 361…" diye zıplayan numaralar gidiyordu. Model numarayı değil SIRAYI yankılarsa
        cevap sessizce BAŞKA cümlelere denk gelir. */
     for (var i = 0; i < liste.length; i++) liste[i].sira = i + 1;
-    return { liste: liste, elle: elle, kisa: kisaAtilan, yokSay: yokSay,
-             dokum: dokumSira.map(function (a) { return kanalDokum[a]; }) };
+    return { liste: liste, elle: elle, kisa: kisaAtilan, yokSay: yokSay };
   }
 
   /* EŞLEŞMEYEN AD SATIRLARI — yalnız gerektiğinde. Hepsi tutuyorsa kutu gizli kalır:
@@ -3183,19 +2178,6 @@
     if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
     if (!EMJ || !VUR) { yaz("Emoji modülü yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
 
-    /* ⚠ HOST SÜRÜM KAPISI — YAPAY ZEKÂ İSTEĞİNDEN VE 300 KLİPTEN ÖNCE.
-       host.jsx eskiyse emoji yerleştirme ve preset yazma ESKİ kodla çalışır; kullanıcı
-       düzeltmeyi kurduğunu sanıp aynı hatayı görür ve hata YANLIŞ yerde aranır (bu
-       gerçekten iki tur sürdü). Kapı burada, çünkü buradan sonrası para ve zaman harcıyor. */
-    var _hsUyari = await hostSurumUyari();
-    if (_hsUyari) {
-      logLine(_hsUyari.replace(/\n+/g, " "));
-      if (!(await uiConfirm(_hsUyari + "\n\nYine de devam edeyim mi?", "Emoji"))) {
-        yaz("İptal edildi — Premiere'i tamamen kapatıp aç.", "var(--warn)");
-        return;
-      }
-    }
-
     var kok = String(($("emojiKlasor") || {}).value || "").trim();
     var tarama = EMJ.tara(kok);
     if (tarama.hata) { yaz(tarama.hata, "var(--bad)"); return; }
@@ -3256,12 +2238,7 @@
 
     var anahtar = "";
     try { anahtar = VUR.anahtarOku(extRoot); }
-    /* ⚠ e.message'I ATMA. anahtarOku "anahtar yok"tan başka şeyler de fırlatıyor ve en
-       önemlisi KISALTILMIŞ ANAHTAR teşhisi: kullanıcı Anthropic konsolunun LİSTESİNDEN
-       kopyaladığında ortadaki "..." de geliyor ("sk-ant-api03-5Ue...2gAA") ve sunucu 401
-       diyor. anahtarOku bunu tam olarak açıklıyor; sabit "anahtar yok" metni o teşhisi
-       yutup kullanıcıyı var olan bir anahtarı aramaya yolluyordu (ParsMazi'de oldu). */
-    catch (e) { yaz((e && e.message) || "Yapay zekâ anahtarı yok — Ayarlar'dan ekle (emoji duyguyu ondan seçiyor)", "var(--bad)"); return; }
+    catch (e) { yaz("Yapay zekâ anahtarı yok — Ayarlar'dan ekle (emoji duyguyu ondan seçiyor)", "var(--bad)"); return; }
 
     /* ── A1 KİMLİK KAPISI — "MONİ ÇEKTİ AMA TOFİ ÇIKTI" HATASININ SON HALKASI ──
        Üç katmanlı korumanın üçüncüsü: (1) kanal koduna kayıtlı eşleşme artık okunmuyor,
@@ -3401,50 +2378,11 @@
       return;
     }
 
-    /* ⚠ BİRİKMİŞ EMOJİ KATMANLARI SESSİZ KALMAZ — ARTIK ÖNCEDEN SÖYLENİYOR VE ONAYLANIYOR.
-       GERÇEK VAKA (ParsMazi, 11 Ağustos 2026: "emoji ekleme kısmı baya bi bozuk knkm"):
-       timeline'da birden çok kanala yayılmış, farklı boyutlarda emoji klipleri birikmişti.
-       Panel eski katmanları ZATEN temizliyor ama bunu SESSİZCE yapıyordu; temizlik bir
-       sebeple başarısız olursa (kilitli kanal, araya karışmış yabancı klip) kullanıcı
-       yalnız "bozuk" bir timeline görüyor ve sebebini hiçbir yerde bulamıyordu.
-       Emsal: capBasildi_<sekans> ve cuesStale onayları — ikisi de "panel ölçemediğini SORAR"
-       ilkesinden doğdu. */
-    if (temizlenecekler.length) {
-      var tDokum = temizlenecekler.map(function (tx) {
-        var tt = null;
-        for (var ty = 0; ty < ek.tracks.length; ty++) if (ek.tracks[ty].idx === tx) tt = ek.tracks[ty];
-        return "V" + (tx + 1) + " (" + ((tt && tt.emoji) || "?") + " emoji)";
-      }).join(" · ");
-      logLine("Emoji: önceki katmanlar bulundu → " + tDokum);
-      var temizOnay = await uiConfirm(
-        "Projede önceki emoji katman(lar)ı var:\n\n  " + tDokum + "\n\n" +
-        "Bunlar SİLİNECEK ve emojiler baştan konacak.\n" +
-        "(Silinmezse emojiler üst üste biner ve timeline karışır.)\n\nDevam edeyim mi?", "Emoji");
-      if (!temizOnay) {
-        yaz("İptal edildi — eski katmanları kendin silmek istersen “Emojileri Sil” düğmesini kullan.",
-            "var(--warn)");
-        return;
-      }
-    }
-
     var btn = $("btnEmojiEkle"); if (btn) btn.disabled = true;
     /* İptal düğmesi yalnız iş sürerken görünür; bayrak her çalıştırmada sıfırlanır. */
     _emojiIptal = false;
     var _btnIptal = $("btnEmojiIptal"); if (_btnIptal) _btnIptal.hidden = false;
-
-    /* ── İLERLEME PANELİ BURADA BAŞLAR, FONKSİYONUN BAŞINDA DEĞİL ──
-       Yukarısı baştan sona onay/doğrulama kapısı (emoji klasörü · kanal eşleşmesi ·
-       bayat cue · eski katman · yapay zekâ anahtarı). Paneli en başta açsaydım, kullanıcı
-       "İptal" dediği her seferde ekranda sonsuza kadar dönen bir spinner kalırdı —
-       "takıldı mı?" izlenimi veren tam olarak bu. Burası, ilk GERÇEKTEN uzun adımın
-       başladığı yer: buradan sonraki her çıkış yolu paneli bitir() ile kapatıyor. */
-    yaz("");   // panel devraldı; alttaki tek satırlık durum yazısı bayat kalmasın
-    var iler = emojiIler().basla({
-      baslik: "Emoji ekleniyor",
-      adimlar: ["Duygular seçiliyor", "Plan kuruluyor", "Resimler projeye alınıyor",
-                "Timeline'a yerleştiriliyor", "Animasyon uygulanıyor"]
-    });
-    iler.adim("Duygular seçiliyor").adimNot("Duygular seçiliyor", cumleler.length + " cümle");
+    yaz("duygular seçiliyor… (" + cumleler.length + " cümle)");
     try {
       /* 3) DUYGU SEÇİMİ. İPTAL DAMGASI ŞART — null GEÇİLMEZ (iptalEdildiMi "sayaç !== damga"
          diye bakıyor ve sayaç 0 ile başlıyor: null geçilirse her istek gönderilmeden
@@ -3454,51 +2392,23 @@
       var sec = await EMJ.duygulariSec(VUR, anahtar, cumleler, tarama.duygular,
                                        { hedefOran: emojiOran(), karakterDuygu: tarama.karakterDuygu },
                                        VUR.iptalDamgasi(), logLine);
-      if (sec.hata) { iler.adimHata("Duygular seçiliyor").bitir(sec.hata, "bad"); yaz(sec.hata, "var(--bad)"); return; }
-      if (sec.uyari) {
-        secUyari = sec.uyari; logLine("Emoji UYARI: " + sec.uyari);
-        /* Bu uyarı eskiden YALNIZ log'a düşüyordu ve kullanıcı videonun ortasında neden
-           hiç emoji olmadığını hiçbir yerde göremiyordu. Artık kendi satırında. */
-        iler.uyari("secim", sec.uyari, "");
-      }
+      if (sec.hata) { yaz(sec.hata, "var(--bad)"); return; }
+      if (sec.uyari) { secUyari = sec.uyari; logLine("Emoji UYARI: " + sec.uyari); }
       var isaret = sec.secimler.length;
       logLine("Emoji: yapay zekâ " + isaret + " cümlede duygu buldu (" + cumleler.length + " cümle içinden).");
-      iler.adimBitir("Duygular seçiliyor", isaret + " / " + cumleler.length + " cümle işaretlendi")
-          .adim("Plan kuruluyor");
 
       /* 4) PLAN. Karakter zaten eşleşmiş (c.kar); burada yalnız aralık freni + dosya bulma. */
       var indeks = {}; cumleler.forEach(function (c) { indeks[c.sira] = c; });
       var seqW = 1920, seqH = 1080;
-      /* ⚠ SESSİZ VARSAYILAN ARTIK LOG'A DÜŞÜYOR. Boş catch, panel hiç sekans YARATMADIĞI
-         sürece zararsızdı; dikey bir sekansta 1920x1080 varsaymak emojiyi kare dışına
-         koyup "başarılı" dedirtiyor. Ölçü okunamazsa varsayılan yine kullanılıyor (emoji
-         özelliğini tümden durdurmak daha kötü) ama SÖYLENİYOR. */
       try {
         var si = JSON.parse(String(await evalES("getSequenceInfoJSON()")));
         // Alan adları getSequenceInfoJSON'daki gibi: frameWidth/frameHeight
         if (si && si.frameWidth > 0 && si.frameHeight > 0) { seqW = si.frameWidth; seqH = si.frameHeight; }
-        else logLine("Emoji UYARI: sekans ölçüsü okunamadı, 1920x1080 varsayıldı — dikey " +
-                     "sekansta emoji yanlış yere düşer.");
-      } catch (eS) {
-        logLine("Emoji UYARI: sekans ölçüsü okunamadı (" + (eS.message || eS) +
-                "), 1920x1080 varsayıldı.");
-      }
+      } catch (eS) {}
       /* İKİ KONUM: Tofi/Moni sağ alt, konuklar sol alt (bkz. EMOJI_SAG_KARAKTER).
-         Karakter başına hesaplamaya gerek yok — yalnız iki değer var, döngüde seçiliyor.
-         `ust` YOK: yatay videoda emoji alt kenara dayanır (kullanıcı isteği). Shorts'ta
-         üstte olacak, o yolu Shorts kartı kendi konumuyla çağıracak. */
+         Karakter başına hesaplamaya gerek yok — yalnız iki değer var, döngüde seçiliyor. */
       var konSag = emojiKonum(seqW, seqH, true);
       var konSol = emojiKonum(seqW, seqH, false);
-      /* ⚠ İKİ TARAF AYNI NOKTAYA DÜŞÜYORSA İKİNCİ KANAL ANLAMSIZ — ve bunu Premiere ASLA
-         söylemez: klipler doğru konur, host "ok" der, yanlış olan panelin kendi hesabıdır.
-         (Dikey karede eski taban tam olarak bunu yapıyordu; taban min(w,h) olduktan sonra
-         ulaşılamaz olmalı, ama nöbetçi kalıyor — sessiz üst üste binmektense tek kanala
-         düşüp SÖYLEMEK yeğdir.) */
-      if (kanal2 >= 0 && konSag.x === konSol.x) {
-        logLine("Emoji: sağ ve sol aynı noktaya düşüyor (x=" + konSag.x + ") — ikinci emoji " +
-                "kanalı KAPATILDI, hepsi tek kanala konacak. Sekans ölçüsü: " + seqW + "x" + seqH);
-        kanal2 = -1;
-      }
 
       /* SOL TARAF RESİMLERİ YATAY AYNALANIR — karakter ekranın DIŞINA değil İÇİNE baksın.
          Ayna kopyaları <emoji klasörü>\ayna\ altında ÖNBELLEKLENİR: ilk çalıştırmada üretilir
@@ -3537,9 +2447,7 @@
       var plan = [], planSag = [], planAyna = [], sonBitisSag = -999, sonBitisSol = -999;
       /* tarafDolu: aynı pencerede o TARAF zaten dolduğu için denenmeyen aday. Ayrı sayaç şart —
          `yakin`e katılsaydı iki taraflı seçimin gerçekten çalışıp çalışmadığı log'da görünmezdi. */
-      /* ⚠ YENİ ALAN EKLERKEN BURAYI DA GÜNCELLE: `undefined++` NaN üretir ve sayaç
-         sessizce "NaN" yazar (bu projede sayaçlar rapor metnine giriyor). */
-      var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0, tarafDolu: 0, oneCekKirpildi: 0 };
+      var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0, tarafDolu: 0 };
       var sureTop = 0, kisaltilan = 0, varyantSay = {}, tarafSay = { sag: 0, sol: 0 };
       /* KAÇ FARKLI RESİM KULLANILDI — "45 emojim var ama projede 24 tane görüyorum, kalanı
          kullanmıyor mu?" sorusunun cevabı (kullanıcı sordu, 8 Ağustos 2026).
@@ -3649,70 +2557,13 @@
            İLK adayın frenine göre açıyor; grup içinden başka bir taraf seçilirse o tarafın
            freni ayrıca kontrol edilmeli, yoksa aynı kanalda üst üste binen iki klip doğar
            ve host ikincisini sessizce atar. */
-        /* ⚠ FREN TABANI DEĞİŞKENE ALINDI: aşağıdaki "öne çekme" bloğu da aynı tabana
-           uymak ZORUNDA (bkz. oradaki kelepçe). Eskiden bu satır tek kullanımlıktı ve
-           öne çekme onu görmüyordu. */
-        var frenTaban = (kanal2 < 0 ? sonBitisSag : (sagMi ? sonBitisSag : sonBitisSol));
-        if (c.bas < frenTaban + EMOJI_GAP) {
+        if (c.bas < (kanal2 < 0 ? sonBitisSag : (sagMi ? sonBitisSag : sonBitisSol)) + EMOJI_GAP) {
           atlanan.yakin++; return false;
         }
-        /* ══ EMOJİ KONUŞMANIN BAŞINDA GÖRÜNSÜN ══
-           GERÇEK ŞİKÂYET (ParsMazi/kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne zaman
-           geliyo, ses dalgasına bak"). Ölçülen durum: ses 02:11'de başlıyor, emoji 02:13'te.
-           SEBEP: emoji SEÇİLEN CÜMLENİN başına konuyor, ama EMOJI_MIN_KELIME (5) filtresi
-           kısa cümleleri eliyor. Konuşma kısa bir cümleyle başlayıp ("Aa!", "Ya ne") uzun
-           cümleye geçince emoji ilk sesin 2-3 saniye SONRASINDA görünüyor — kullanıcı için
-           "emoji geç geldi" demek.
-           ÇÖZÜM: emojiyi, aynı kanalda kesintisiz devam eden konuşmanın BAŞINA çek.
-           ⚠ SINIRLI VE TEK YÖNLÜ: en fazla EMOJI_ONE_CEK saniye ve YALNIZ geriye. Sınırsız
-           öne çekmek emojiyi başka bir konuşmacının cümlesine bindirirdi.
-           ⚠ SÜRE DE BÜYÜR (bas öne gider, bit sabit) — emoji erken gelip aynı yerde bitiyor,
-           yani konuşmanın tamamını kapsıyor. */
-        var gercekBas = c.bas;
-        if (EMOJI_ONE_CEK > 0 && c.kaynakCues && c.kaynakCues.length) {
-          var enErkenC = c.bas, kc, ki2;
-          for (ki2 = c.kaynakCues.length - 1; ki2 >= 0; ki2--) {
-            kc = c.kaynakCues[ki2];
-            if (!kc || !isFinite(kc.start) || !isFinite(kc.end)) continue;
-            if (kc.end > c.bas) continue;                       // cümlenin içinde/sonrasında
-            if (enErkenC - kc.end > EMOJI_KESINTI) break;       // araya sessizlik girmiş: dur
-            if (c.bas - kc.start > EMOJI_ONE_CEK) break;        // tavanı aştı
-            enErkenC = kc.start;
-          }
-          gercekBas = enErkenC;
-        }
-        if (gercekBas < 0) gercekBas = 0;
-        /* ⚠⚠ ÖNE ÇEKME ÇAKIŞMA FRENİNİ AŞIYORDU — ÖLÇÜLMÜŞ HATA (12 Ağustos 2026).
-           Yukarıdaki fren (satır ~3005) `c.bas`'ı, yani CÜMLENİN GERÇEK BAŞLANGICINI
-           kontrol ediyor. Ama bu blok başlangıcı `EMOJI_ONE_CEK` (2.5 sn) kadar GERİYE
-           çekebiliyor ve plana yazılan `gercekBas` oluyor — yani fren, onayladığı sayıdan
-           BAŞKA bir sayıyı geçiriyordu. Sonuç: emoji bir öncekinin üstüne biniyor ve
-           host.jsx'in kendi freni (`it.bas < sonBitis - 0.001`) onu SESSİZCE ATIYOR.
-           Belirtisi "az emoji çıktı / bir kısmı OLMADI" — sebebi hiçbir yerde yazmıyordu.
-           En kötü hâli: cümle bir öncekinden 0.08 sn sonra başlıyorsa emoji 2.4 sn'ye
-           kadar üst üste binebiliyordu.
-           ÇÖZÜM: öne çekmeyi iptal etme, YASAL EN ERKEN NOKTAYA kelepçele — böylece
-           "emoji konuşmayla birlikte gelsin" isteğinden mümkün olan kadarı korunuyor,
-           çakışma ise imkânsız hâle geliyor. `frenTaban` ilk emojide -999 olduğu için
-           bu satır ilk emojiyi etkilemez. */
-        var enErkenIzin = frenTaban + EMOJI_GAP;
-        if (gercekBas < enErkenIzin) { gercekBas = enErkenIzin; atlanan.oneCekKirpildi++; }
-        if (gercekBas > c.bas) gercekBas = c.bas;   // emniyet: öne çekme asla İLERİ gitmez
-        sure += (c.bas - gercekBas);                            // bitiş aynı kalsın
-        /* ⚠ TAVAN YENİDEN UYGULANIR: öne çekme süreyi büyütüyor ve EMOJI_MAX_SURE kontrolü
-           bu satırdan ÖNCE yapılmıştı — kontrolsüz bırakılsa emoji tavanı aşardı.
-           Tavana çarparsa BAŞLANGIÇ korunur (konuşmayla birlikte gelmesi asıl istek),
-           kısalan taraf bitiş olur. */
-        if (sure > EMOJI_MAX_SURE) { sure = EMOJI_MAX_SURE; kisaltilan++; }
         var kon = sagMi ? konSag : konSol;
         var pngYol = sagMi ? png.yol : aynaliYol(png.yol);
-        plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, gercekBas.toFixed(3), sure.toFixed(3),
-                   /* ⚠ ÖLÇEK TABANI KONUM TABANIYLA AYNI OLMAK ZORUNDA. Burada `seqH`
-                      geçiliyordu; konum tarafı min(w,h)'ye çevrilince dikey sekansta ikisi
-                      AYRIŞIYOR ve emoji hesaplanan yerin dışına taşıyordu (konum 620 px'e
-                      göre, boyut 1102 px). Yatayda min(w,h) === seqH, yani bu satır yatay
-                      videoda tek bir sayıyı bile değiştirmiyor. */
-                   kon.x, kon.y, EMJ.olcekHesapla(png, KONUM.taban(seqW, seqH), KONUM.ORAN),
+        plan.push([pngYol, (sagMi || kanal2 < 0) ? kanal : kanal2, c.bas.toFixed(3), sure.toFixed(3),
+                   kon.x, kon.y, EMJ.olcekHesapla(png, seqH, EMOJI_ORAN),
                    png.duygu + " " + png.karakter].join("|"));
         /* ⚠ TARAF VE AYNA BİLGİSİ PLANA PARALEL DİZİLERDE. Plan satırından geri çıkarım
            YAPILMIYOR: x alanına bakmak dikey sekansta (iki taraf da 0.5'e kelepçelenince)
@@ -3735,9 +2586,9 @@
         /* ⚠ FREN TARAF BAŞINA. İki kanal varken sol ve sağ birbirini engellemez —
            "Tofi konuşurken Mimi cevap verdi" durumunda ikisi de ekrana gelir. Tek kanal
            moduna düşüldüyse (kanal2 < 0) ikisi de AYNI freni paylaşır, yani eski davranış. */
-        if (kanal2 < 0) { sonBitisSag = gercekBas + sure; sonBitisSol = sonBitisSag; }
-        else if (sagMi) sonBitisSag = gercekBas + sure;
-        else sonBitisSol = gercekBas + sure;
+        if (kanal2 < 0) { sonBitisSag = c.bas + sure; sonBitisSol = sonBitisSag; }
+        else if (sagMi) sonBitisSag = c.bas + sure;
+        else sonBitisSol = c.bas + sure;
         sureTop += sure;
         return true;
       }
@@ -3762,42 +2613,19 @@
            başka bir kanalda görünürse onu "sahip" tarafına düşürüp emojiFren ile tutarlı kalır. */
         a1Kar[kk] = a1Kar[kk] || !!x.c.a1;
       });
-      /* ── HANGİ SINIF HANGİ HEDEFİ ALIR ──
-         ⚠ SARKAÇ ÜÇÜNCÜ KEZ DÖNDÜ, TARİHÇEYİ OKUMADAN DEĞİŞTİRME:
-         (1) hedef yoktu → konuklar (Dora/Mimi/Sage) videoda neredeyse hiç görünmüyordu;
-         (2) konuklara hedef verildi ama A1 rolü hesaba katılmadığı için A1 "konuk" sayıldı ve
-             emojilerin ÇOĞUNU yedi (ParsMazi) → A1 sahip sınıfına alındı, hedefi sıfırlandı;
-         (3) bu kez A1 ÇOK AZ aldı — ParsMazi 11 Ağustos 2026: "moniyi yine az koymuş, video
-             çekeni seçince onu daha ağırlıklı koyabilir". Artık üç sınıf var ve hiçbiri sıfır
-             değil, yani sarkaç iki uca da gitmiyor.
-         KANAL SAHİBİNE DE HEDEF VERİLDİ (yalnız A1'e değil) — bu bilerek: Tofi ve Moni AYNI
-         tarafı (sağ) paylaşıyor, yani tek bir emoji kanalını bölüşüyorlar. Yalnız A1'e hedef
-         verilseydi öteki sahip hedefsiz kalır ve Yusuf'un kadrosunda (A1=Tofi) bu kez MONİ
-         azalırdı — düzeltilen hatanın aynadaki eşi. */
-      var EMOJI_CEKEN_HEDEF = 0.30;    // videoyu çeken (A1): her ~3 aday cümleden 1'i
-      var EMOJI_SAHIP_HEDEF = 0.22;    // kanal sahibi ama çeken değil (öteki Tofi/Moni)
-      function emojiHedefOran(karKey) {
-        /* ⚠ SIRA ÖNEMLİ: önce A1 rolü, sonra sahiplik listesi. emojiSagMi'ye burada `false`
-           geçilmesi ESKİ HATANIN TEKRARI DEĞİL — A1 durumu bir üstteki satırda zaten
-           ayrıldı, yani rol hesaba KATILMIŞ oluyor. (Eski kodda tek bir çağrı vardı ve
-           `false` geçilince A1 sessizce "konuk" sınıfına düşüyordu; buradaki `false` ise
-           "A1 olmadığı kesin" anlamına geliyor.) */
-        if (a1Kar[karKey]) return EMOJI_CEKEN_HEDEF;
-        if (emojiSagMi(karKey, false)) return EMOJI_SAHIP_HEDEF;
-        return EMOJI_KONUK_HEDEF;
-      }
       function emojiAcik(karKey) {
-        /* ⚠ AÇIK ORANSAL, MUTLAK DEĞİL — bu satır olmadan hedef vermek işe yaramıyor.
-           Eski hâli `hedef - konan` idi ve hedef aday cümle sayısıyla çarpıldığı için
-           EN ÇOK KONUŞAN her zaman en büyük açığı alıyordu: 200 cümlelik A1'in açığı (100)
-           38 cümlelik Dora'nınkinden (19) yapısal olarak büyük, yani A1'e küçücük bir hedef
-           vermek bile onu grup sıralamasında sürekli öne geçirirdi (2. maddede yaşanan hata
-           tam olarak buydu). Hedefin ne kadarının DOLDUĞUNA bakınca 200 cümlelik konuşmacı
-           ile 38 cümlelik konuşmacı aynı ölçekte yarışıyor ve herkes kendi hedefine ulaşınca
-           sıfırlanıp sıradan çıkıyor. */
-        var hedef = (karCumleSay[karKey] || 0) * emojiHedefOran(karKey);
-        if (hedef <= 0) return 0;
-        var acik = (hedef - (karSay[karKey] || 0)) / hedef;
+        /* ⚠ A1 ROLÜ HESABA KATILMAK ZORUNDA. emojiSagMi iki kuraldan oluşuyor: (a) sahiplik
+           listesi (Tofi/Moni), (b) A1 rolü. Burada ikinci argüman sabit `false` geçiliyordu,
+           yani YALNIZ liste kuralı çalışıyordu — oysa emojiFren aynı soruyu `c.a1` ile
+           soruyor. Sonuç: A1'in karakteri listede değilse AYNI karakter fren tarafında
+           "kanal sahibi", kota tarafında "konuk" sayılıyordu. Konuk kotası aday cümle
+           sayısıyla çarpıldığı için en çok konuşan A1 en büyük "açık" değerini alıyor ve
+           grup sıralamasında sürekli öne geçiyordu — özelliğin engellemek için yazıldığı
+           şeyin tam tersi. Kadrosunda ne Tofi ne Moni olan ikinci kullanıcıda (ParsMazi)
+           "kızlarda da görünsün" diye eklenen denge, emojilerin çoğunu A1'e yiyordu. */
+        if (emojiSagMi(karKey, a1Kar[karKey])) return 0;
+        var hedef = (karCumleSay[karKey] || 0) * EMOJI_KONUK_HEDEF;
+        var acik = hedef - (karSay[karKey] || 0);
         return acik > 0 ? acik : 0;
       }
 
@@ -3858,16 +2686,7 @@
         ai = (aj > ai) ? aj : (ai + 1);
       }
 
-      if (!plan.length) {
-        var bosMsg = "Uygun emoji çıkmadı (aralık/dosya eşleşmedi)";
-        iler.adimHata("Plan kuruluyor", "0 emoji")
-            .uyari("bos", "Yapay zekâ cümleleri işaretledi ama hiçbiri yerleştirilemedi: " +
-                   "ya seçilen duygunun o karaktere ait resmi yok, ya da işaretlenen cümleler " +
-                   "çakışma frenine takıldı. Ayrıntılar'da hangi cümlenin neden düştüğü yazıyor.", "")
-            .bitir(bosMsg, "warn");
-        yaz(bosMsg + " — Ayrıntılar'a bak", "var(--warn)");
-        return;
-      }
+      if (!plan.length) { yaz("Uygun emoji çıkmadı (aralık/dosya eşleşmedi) — Ayrıntılar'a bak", "var(--warn)"); return; }
       /* TAVAN AŞILIRSA REDDETME, SEYRELT. Host'un eski davranışı (plan > 100 → "err:") tek
          emoji koymadan bütün işi çöpe atıyordu. */
       if (plan.length > EMOJI_PANEL_TAVAN) {
@@ -3913,37 +2732,8 @@
               "kadro: " + Object.keys(kadroKar).join(", ") + ".");
       logLine("Emoji atlanan: " + atlanan.yakin + " öncekiyle çakışıyor, " +
               atlanan.tarafDolu + " o pencerede kendi tarafı zaten doluydu, " +
-              atlanan.dosyaYok + " dosya yok, " + atlanan.boyutYok + " boyut okunamadı, " +
-              /* Bu sayı > 0 ise "öne çekme" isteği çakışma yüzünden kısıtlandı demektir.
-                 Emoji DÜŞMÜYOR, yalnız istendiği kadar erken başlamıyor — düşen emoji
-                 sayısıyla karıştırılmasın diye ayrı yazılıyor. */
-              atlanan.oneCekKirpildi + " öne çekme çakışmaya takılıp kırpıldı." +
+              atlanan.dosyaYok + " dosya yok, " + atlanan.boyutYok + " boyut okunamadı." +
               (kisaltilan ? (" " + kisaltilan + " uzun cümle " + EMOJI_MAX_SURE + " sn'ye kırpıldı.") : ""));
-      /* ── KİM KAÇ EMOJİ ALDI, VE ALAMADIYSA NEDEN ──
-         (ParsMazi, 11 Ağustos 2026: "moniyi yine az koymuş".) Bir karakterin az görünmesinin
-         ÜÇ ayrı sebebi var ve panel bunları hiç ayırmıyordu: (a) az konuşmuş, (b) cümleleri
-         5 kelimeden kısa olduğu için yapay zekâya hiç gitmemiş, (c) gitmiş ama işaretlenmemiş
-         ya da çeşitlilik/çakışma frenine takılmış. Üçünün çaresi bambaşka — sırasıyla hiçbir
-         şey, EMOJI_MIN_KELIME, ve o karaktere yeni resim. Ayırmadan söylemek kullanıcıyı
-         yanlış kolu çevirmeye yolluyordu (ağırlık kuralı ölçüldü: payı yalnız %4). */
-      var kdAd = {}, kdSira = [];
-      cumleler.forEach(function (c) {
-        if (c.kar && !kdAd[c.kar.key]) { kdAd[c.kar.key] = c.kar.ad; kdSira.push(c.kar.key); }
-      });
-      var karOzet = kdSira.map(function (k) {
-        return kdAd[k] + " " + (karSay[k] || 0);
-      }).join(" · ");
-      logLine("Emoji karakter dökümü: " + kdSira.map(function (k) {
-        var havuz = (tarama.karakterDuygu && tarama.karakterDuygu[k]) || [];
-        return kdAd[k] + " → " + (karSay[k] || 0) + " emoji / " + (karCumleSay[k] || 0) +
-               " aday cümle · havuzunda " + havuz.length + " duygu";
-      }).join(" · "));
-      if (top.dokum && top.dokum.length) {
-        logLine("Emoji kanal dökümü (yapay zekâya GİDEN cümleler): " + top.dokum.map(function (d) {
-          return d.ad + " " + d.aday + "/" + d.ham +
-                 (d.kisa ? " (" + d.kisa + " tanesi " + EMOJI_MIN_KELIME + " kelimeden kısaydı)" : "");
-        }).join(" · "));
-      }
       logLine("Emoji çeşitlilik: " + cesit.atlandi + " atlandı (aynı resim çok yakındı), " +
               cesit.ikinci + " tanesinde yapay zekânın 2. duygusu kullanıldı · kural: araya " +
               cesGerekBaska + " başka karakter + " + CES_AYNI + " aynı karakterin farklı emojisi" +
@@ -3987,30 +2777,12 @@
         var y = String(satir).split("|")[0];
         if (y && !uniqYol[y]) { uniqYol[y] = 1; uniqListe.push(y); }
       });
-      iler.adimBitir("Plan kuruluyor", plan.length + " emoji");
-      if (!uniqListe.length) iler.adimAtla("Resimler projeye alınıyor", "gerek yok");
       if (uniqListe.length) {
         var impYol = path.join(extRoot, "emoji_import.txt");
         try {
           fs.writeFileSync(impYol, uniqListe.join("\n"), "utf8");
-          iler.adim("Resimler projeye alınıyor").adimNot("Resimler projeye alınıyor", uniqListe.length + " dosya");
-          /* ⚠ NÖBETÇİ EKLENDİ (12 Ağustos 2026). Bu çağrı nöbetçisizdi ve ParsMazi'de
-             kilitlenen adım TAM BURASIYDI: `emojiResimYukle` Premiere'de Import işlemi
-             yapıyor, Premiere araya bir pencere (Import / Auto Save) sokabiliyor ve
-             evalScript geri çağrısı gelmiyor. Panel o anda "Resimler projeye alınıyor…"
-             yazısında SONSUZA KADAR donuyor, kullanıcı Premiere'i öldürüyordu.
-             Hemen 80 satır aşağıdaki emojiYerlestir çağrısı nöbetçiliydi — bu değildi. */
-          var ri = String(await evalES('emojiResimYukle("' + esPath(impYol) + '")',
-            function (sn) {
-              iler.adimNot("Resimler projeye alınıyor", uniqListe.length + " dosya · " + sn + " sn");
-              if (sn >= 45) {
-                iler.uyari("import-donma",
-                  "⚠ Premiere " + sn + " saniyedir yanıt vermiyor. Premiere'i öne al: " +
-                  "açık bir Import ya da Auto Save penceresi var mı? Kapat ya da onayla — " +
-                  "panel kaldığı yerden devam eder.", "");
-              }
-            }));
-          iler.uyariSil("import-donma");
+          yaz("resimler projeye alınıyor… (" + uniqListe.length + " dosya)");
+          var ri = String(await evalES('emojiResimYukle("' + esPath(impYol) + '")'));
           logLine("Emoji resim yükleme (" + uniqListe.length + " tekil dosya): " + ri);
           try { fs.unlinkSync(impYol); } catch (eIu) {}
           /* ⚠ İKİ FARKLI BAŞARISIZLIK, İKİ FARKLI DAVRANIŞ — KARIŞTIRMA:
@@ -4022,12 +2794,8 @@
                       kullanılamaz yapardı — host'un kendi yedek import dalı devreye girer,
                       eski davranışla devam edilir. Sessiz kalmaz, log'a yazılır. */
           if (ri.indexOf("err:") === 0) {
-            var impMsg = "Emoji resimleri projeye alınamadı: " + ri.replace(/^err:/, "");
-            iler.adimHata("Resimler projeye alınıyor")
-                .uyari("import", "Premiere'de bir Import penceresi açık kaldıysa kapat ve " +
-                       "tekrar bas. Hiçbir emoji konmadı, timeline'a dokunulmadı.", "bad")
-                .bitir(impMsg, "bad");
-            yaz(impMsg, "var(--bad)");
+            yaz("Emoji resimleri projeye alınamadı: " + ri.replace(/^err:/, "") +
+                " — Premiere'de bir Import penceresi açık kaldıysa kapat ve tekrar bas.", "var(--bad)");
             return;
           }
           if (ri.indexOf("ok:") !== 0) {
@@ -4068,213 +2836,41 @@
         if (!kanalGrup[kn]) { kanalGrup[kn] = []; kgAnah.push(kn); }
         kanalGrup[kn].push(satir);
       });
-      /* ⚠⚠ PLANDAKİ HER DOSYA GERÇEKTEN VAR MI — PREMIERE'E GÖNDERMEDEN ÖNCE.
-         GERÇEK VAKA (ParsMazi, 12 Ağustos 2026): yerleştirme HER SEFERİNDE tam 100 emojide,
-         yani KANAL GEÇİŞİNDE (sol kanalın ilk parçası) kilitleniyordu ve panel dakikalarca
-         hiçbir şey söyleyemiyordu. Sol kanal AYNALANMIŞ dosyaları kullanıyor; ayna kopyası
-         üretilememiş ya da silinmişse plan var olmayan bir yola işaret ediyor ve Premiere
-         medya hatası penceresi açıp BEKLİYOR — panel için ayırt edilemez bir donma.
-         Bu kontrol Node tarafında, saniyenin altında sürüyor ve o bütün sınıfı kapatıyor:
-         eksik dosya varsa Premiere'e HİÇ gidilmiyor, kullanıcı dosya adlarını görüyor. */
-      var _eksikDosya = [], _gorulen = {};
-      plan.forEach(function (satir) {
-        var y = String(satir).split("|")[0];
-        if (!y || _gorulen[y]) return;
-        _gorulen[y] = 1;
-        try { if (!fs.existsSync(y)) _eksikDosya.push(y.replace(/^.*[\\\/]/, "")); }
-        catch (eEx) { _eksikDosya.push(y.replace(/^.*[\\\/]/, "") + " (okunamadı)"); }
-      });
-      if (_eksikDosya.length) {
-        var eksikMsg = _eksikDosya.length + " emoji resmi bulunamadı: " +
-                       _eksikDosya.slice(0, 5).join(", ") + (_eksikDosya.length > 5 ? " …" : "");
-        logLine("Emoji DURDU — " + eksikMsg);
-        iler.adimHata("Timeline'a yerleştiriliyor", _eksikDosya.length + " dosya yok")
-            .uyari("eksik", "⛔ " + eksikMsg + "\n\nBu dosyalar ayna (yatay çevrilmiş) kopyalar " +
-                   "olabilir. Ayarlar → Duygu Emojileri → “Emojileri Yeniden Kur” dedikten sonra " +
-                   "tekrar dene; ayna kopyaları kendiliğinden yeniden üretilir.", "bad")
-            .bitir("Emoji resimleri eksik — hiçbir şey konmadı", "bad");
-        yaz(eksikMsg, "var(--bad)");
-        return;
-      }
-
-      /* ⚠⚠ PARÇA BOYU KÜÇÜLTÜLMESİ GERİ ALINDI — ARAMA (kullanıcı bildirdi, 12 Ağustos 2026:
-         "emoji ekleme normalde çok hızlıydı, aşırı yavaşladı").
-         Bir tur önce büyük planlarda parça 25 → 12 yapılmıştı; gerekçe iyiydi (takılmayı
-         yerelleştirmek, “İptal”i hızlandırmak) ama MALİYETİ ÖLÇÜLMEDİ. Ölçüldüğünde:
-         184 emojide parça sayısı 8 → 16, yani İKİ KATI. Her parça sabit bir maliyet ödüyor —
-         evalScript köprüsü, host kurulumu, kanaldaki son 60 klibin güvenlik taraması, plan
-         dosyasının yazılıp okunması — ve bu maliyet de iki katına çıkıyor.
-         ⚠ 25 KEYFÎ BİR SAYI DEĞİL: daha önce 40'tan 25'e ÖLÇÜLEREK indirilmişti. Ölçülmüş
-         bir değeri sezgiyle değiştirmek bu projede yasak; yaptım ve kullanıcı yavaşlamayı
-         hemen fark etti.
-         ⚠ Takılma teşhisi için parçayı küçültmek YANLIŞ ARAÇTI: asıl koruma, plandaki her
-         dosyanın Premiere'e gönderilmeden önce diskte DOĞRULANMASI (hemen yukarıda) — o
-         kontrol maliyetsiz ve aynı hata sınıfını kapatıyor. */
-      var EMOJI_PARCA_ETKIN = EMOJI_PARCA;
-
       var _parcaToplam = 0, _kg;
       for (_kg = 0; _kg < kgAnah.length; _kg++)
-        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA_ETKIN);
+        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA);
       logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
               " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
               "Durdurmak istersen “İptal” (süren parça bitince durur).");
-      /* ⚠ SAYAÇ BURADA KURULUYOR, basla()'da DEĞİL: kaç emoji konacağı ancak plan
-         üretilip seyreltildikten sonra belli oluyor. Kalan süre hesabının saati de
-         buradan başlıyor — yukarıdaki yapay zekâ isteğinin süresi yerleştirme hızına
-         karışsaydı tahmin baştan bozuk doğardı (ikisi tamamen farklı hızda işler). */
-      iler.adim("Timeline'a yerleştiriliyor")
-          .sayacKur(plan.length, "emoji")
-          .uyari("donuk", "Premiere bu sırada DONUK görünecek — normaldir, dokunma. " +
-                 "Durdurmak istersen “İptal”: süren parça bitince durur, o ana kadar " +
-                 "konan emojiler kalır.", "bilgi");
-      /* Global parça sırası. Eskiden ekranda `Math.floor(p / EMOJI_PARCA) + 1` yazıyordu ve
-         bu KANAL GRUBU BAŞINA sıfırlanıyordu: iki emoji kanalı olan (sağ + sol) her videoda
-         kullanıcı "parça 1,2,3 … sonra yine parça 1" görüyordu. Toplamla birlikte tek bir
-         global sıra yazmak hem doğru hem de "daha ne kadar var" sorusuna cevap veriyor. */
-      var _parcaSira = 0;
-      /* ⚠ "YAVAŞ" İLE "TAKILDI" AYRI ŞEYLER — ÖLÇEREK AYIRIYORUZ.
-         Kullanıcı şikâyeti (12 Ağustos 2026): "sürekli alttaki sarı yazı gidip geliyor".
-         Sebep: nöbetçi SABİT 60 sn'de alarm veriyordu, ama büyük projede bir parça normalde
-         ~110 sn sürüyor — yani alarm HER parçada çıkıp parça bitince siliniyordu. Panel her
-         şey yolundayken 7 kez "Premiere YANIT VERMİYOR" diye bağırıyor, bu da gerçek bir
-         takılmayı fark edilmez hâle getiriyordu (kurt masalı).
-         Artık eşik ÖLÇÜLEN parça süresinden türetiliyor: alarm ancak bu parça, o ana kadarki
-         ortalamanın 2.5 KATINI aşarsa çıkıyor. İlk parçada ölçüm yok — orada 90 sn tabanı
-         kullanılıyor (eski 60'tan yüksek: 60 sn büyük projede normal). */
-      var _parcaSureler = [];
-      function _parcaOrtalama() {
-        if (!_parcaSureler.length) return 0;
-        var t = 0;
-        for (var q = 0; q < _parcaSureler.length; q++) t += _parcaSureler[q];
-        return t / _parcaSureler.length;
-      }
-      function _donmaEsigi() {
-        var ort = _parcaOrtalama();
-        return ort ? Math.max(90, Math.round(ort * 2.5)) : 90;
-      }
-      /* ⚠ AUTO SAVE UYARISI — ParsMazi'de iki kez takılmaya sebep oldu (10 ve 11 Ağustos
-         2026). Premiere uzun işlem sırasında otomatik kaydetmeye kalkıyor, pencere açıyor ve
-         panelin evalScript'i o pencere kapanana kadar DÖNMÜYOR. Panel bunu ölçemiyor
-         (Preferences'a erişim yok), ama SÖYLEYEBİLİR. */
-      if (plan.length > 80) {
-        logLine("⚠ 80'den fazla emoji var: Premiere'in Auto Save'i araya girerse iş duruyor. " +
-                "Edit > Preferences > Auto Save'den aralığı uzatmak (ya da geçici kapatmak) " +
-                "bu takılmayı önler.");
-      }
       var kgi, kgPlan;
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
-      /* ⚠ HER KANAL GRUBUNDA SIFIRLANIR. Bu sayı BİR kanaldaki klip sayısı; sağ taraf
-         bitip sol tarafa geçildiğinde önceki kanalın sayısını taşımak, host'a "arada
-         kimse dokunmadı" diye YANLIŞ bir kanıt vermek olurdu. -1 = "bilmiyorum" →
-         host TAM güvenlik taraması yapar (güvenli taban).
-         ⚠ `var` bildirimi döngünün İÇİNDE ama JavaScript'te fonksiyon başına taşınır;
-         buradaki ATAMA her grupta yeniden çalıştığı için sıfırlama gerçekten oluyor. */
-      var _sonKlipSayisi = -1;
-      for (p = 0; p < kgPlan.length; p += EMOJI_PARCA_ETKIN) {
+      for (p = 0; p < kgPlan.length; p += EMOJI_PARCA) {
         /* İPTAL — parça sınırında güvenli: her parça kendi içinde tamamlanıyor ve sonraki
            parça kanalın gerçek durumunu yeniden okuyor. ⚠ İptal ZATEN DONMUŞ bir evalScript'i
            kurtarmaz (o Premiere'in elinde); sonraki parçanın hiç başlamamasını sağlar. */
         if (_emojiIptal) { parcaHata = "kullanıcı iptal etti"; break; }
-        dilim = kgPlan.slice(p, p + EMOJI_PARCA_ETKIN);
+        dilim = kgPlan.slice(p, p + EMOJI_PARCA);
         fs.writeFileSync(yol, dilim.join("\n"), "utf8");
-        _parcaSira++;
-        var _parcaNo = _parcaSira;
-        /* Bu parçada Premiere'i bir kez öne aldık mı? Saniyede bir çağrılan nöbetçinin
-           her turda pencere fırlatmasını önler. */
-        var _oneAlindi = false;
-        iler.not("parça " + _parcaSira + "/" + _parcaToplam);
+        var _parcaNo = Math.floor(p / EMOJI_PARCA) + 1;
+        yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length);
         t0 = Date.now();
         /* ⚠ NÖBETÇİ: bu çağrı sürerken durum satırı CANLI kalır. Eskiden "155/206" yazısı
            parça boyunca (dakikalarca) donuk duruyordu; Premiere bir pencere açıp kilitlense
            panel bunu hiçbir şekilde belli etmiyordu — kullanıcı "takıldı" deyip Premiere'i
            öldürüyordu. 60 saniyeden sonra ekranda ne yapması gerektiği yazıyor. */
-        /* ⚠ ÖNCEKİ PARÇANIN SONUNDAKİ KLİP SAYISI 3. ARGÜMAN OLARAK GİDER.
-           Host sayıyı kanalda AYNI bulursa, iki parça arasında kimsenin kanala dokunmadığı
-           KANITLANMIŞ olur ve 60 kliplik güvenlik taramasını atlayabilir (parça başına
-           ~180 Premiere turu). Sayı tutmazsa TAM tarama yapılır — güvenlik gevşemiyor.
-           İlk parçada -1: kanal zaten BOŞ olmak zorunda, tarama da yapılmıyor. */
         r = String(await evalES(
-          'emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '",' + _sonKlipSayisi + ')',
+          'emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '")',
           function (sn) {
-            /* Nöbetçi: saniyede bir çağrılıyor. Artık ilerleme SATIRINI bozmuyor —
-               yalnız o parçanın süresini yazıyor; sayaç, yüzde ve kalan süre panelde
-               kendi yerlerinde duruyor. */
-            iler.not("parça " + _parcaNo + "/" + _parcaToplam + " · bu parça " + sn + " sn");
-            /* ⚠ MESAJ EN SIK SUÇLUYU ADIYLA SÖYLER. ParsMazi'de ölçüldü: Premiere %0,3
-               CPU ile kendi açtığı pencereyi bekliyordu. "Bir pencere var mı?" demek
-               yetmiyor — kullanıcı Premiere'i öne alıp bakmayı akıl etmiyor ve paneli
-               öldürüyor. AUTO SAVE en sık sebep: uzun işlem sırasında tetikleniyor.
-               ⚠ ARTIK KENDİ KUTUSUNDA: eskiden bu metin ilerleme satırının SONUNA
-               ekleniyordu ve dar panelde çoğu zaman hiç görünmüyordu — oysa kullanıcının
-               o an yapması gereken tek şey buydu.
-               ⚠ BU YORUM `if (sn >= 60)` SATIRININ ÜSTÜNDE KALMALI: nöbetçi testi
-               (tumtest.js 12. bölüm) mesajın `sn >= 60`'tan sonraki ~600 karakter içinde
-               geçtiğini arıyor. Yorum araya girerse mesaj pencereden taşıyor ve test,
-               metin aslında YERİNDE dururken kırmızı veriyor. */
-            /* ⚠⚠ MESAJ KADEMELİ — TEK BİR SUÇLU ADI YETMİYOR (ParsMazi, 12 Ağustos 2026).
-               Eski mesaj yalnız "Auto Save / Save Project / Import penceresi açık mı?"
-               diyordu. ParsMazi'de Auto Save KAPALIYDI ve mesaj onu yanlış yola soktu:
-               14 dakika bekledi, sebebi bulamadı.
-               CLAUDE.md'de belgelenmiş AYIRT EDİCİ ÖLÇÜT Görev Yöneticisi'ndeki CPU'dur:
-                 · Premiere ~%0 CPU  → hesaplamıyor, GÖRÜNMEYEN bir şeyi bekliyor (pencere)
-                 · Premiere yüksek CPU → gerçekten çalışıyor, yalnız YAVAŞ (büyük proje)
-               İkisinin çaresi bambaşka, o yüzden panel artık kullanıcıyı bu ölçüme yolluyor. */
-            var _esik = _donmaEsigi();
-            if (sn >= Math.max(240, _esik * 2)) {
-              iler.uyari("donma",
-                  "⚠ Bu parça " + _sure(sn) + "'dir sürüyor (" + kondu + "/" + plan.length +
-                  " emoji kondu).\n" +
-                  "1) Premiere'i öne al: açık BİR pencere var mı? (Auto Save · Save Project · " +
-                  "Import · medya hatası). Varsa kapat/onayla — panel kaldığı yerden DEVAM EDER.\n" +
-                  "2) Pencere yoksa Görev Yöneticisi'ni aç ve Premiere'in CPU'suna bak:\n" +
-                  "   · ~%0 ise Premiere görünmeyen bir şeyi bekliyor — Premiere'i yeniden başlatman gerekir.\n" +
-                  "   · yüksekse gerçekten çalışıyor, yalnız yavaş: büyük projede " +
-                  plan.length + " emoji uzun sürer, bekle.\n" +
-                  "Konan " + kondu + " emoji her hâlükârda timeline'da kalır.", "");
-            /* ⚠⚠ PENCEREYİ KULLANICIYA ARATMA — PANEL ONU KENDİSİ ÖNE ALIR.
-               Ölçülmüş takılmanın sebebi Premiere'in kendi açtığı bir pencereyi beklemesi;
-               o pencere BAŞKA PENCERELERİN ARKASINDA kalıyor ve kullanıcı "panel dondu"
-               sanıp Premiere'i öldürüyor (ParsMazi 14 dakika bekledi). Panel süreci bloke
-               DEĞİL — yalnız Premiere'in ExtendScript motoru bloke — yani işletim sistemi
-               üzerinden pencereyi öne getirebiliyoruz: "Premiere'i öne al ve bak" talimatını
-               kullanıcı adına YAPMAK. Parça başına BİR KEZ (nöbetçi saniyede bir çağrılıyor).
-               ⚠ BU YORUM `else if` SATIRININ ÜSTÜNDE KALMALI — nöbetçi testleri mesajın
-               `sn >= _esik`'ten sonraki ~700 karakter içinde geçtiğini arıyor; araya giren
-               bir yorum mesajı pencereden taşırır ve test, metin YERİNDE dururken kırmızı
-               verir (bu tuzağa bir kez düşüldü). */
-            } else if (sn >= _esik) {
-              if (!_oneAlindi) { _oneAlindi = premiereOneAl(); logLine("Premiere öne alındı (parça " + _parcaNo + " uzun sürüyor) — açık bir pencere varsa şimdi görünür."); }
-              iler.uyari("donma",
-                  "⚠ Bu parça " + sn + " sn'dir sürüyor. Premiere'i ÖNE ALDIM — ekranda açık " +
-                  "bir pencere var mı? (Auto Save · Save Project · Import · medya hatası) " +
-                  "Kapat ya da onayla; panel kaldığı yerden DEVAM EDER, konan " + kondu +
-                  " emoji kaybolmaz. Pencere yoksa Premiere gerçekten çalışıyordur — bekle.",
-                  "");
-            }
+            var m0 = "emoji yerleştiriliyor… " + kondu + "/" + plan.length +
+                     " · parça " + _parcaNo + " (" + sn + " sn)";
+            if (sn >= 60) {
+              yaz(m0 + " · ⚠ Premiere yanıt vermiyor olabilir — ekranda açık bir pencere " +
+                  "(Save Project / Import) var mı? Kapatınca kaldığı yerden devam eder.", "var(--warn)");
+            } else yaz(m0);
           }));
-        /* Parça döndü → donma uyarısı ARTIK GEÇERSİZ. Silinmezse ekranda kalıcı olarak
-           "Premiere yanıt vermiyor" yazar ve panel her şey yolundayken alarm veriyor olur. */
-        iler.uyariSil("donma");
-        var _parcaSn = Math.round((Date.now() - t0) / 1000);
-        _parcaSureler.push(_parcaSn);
-        /* ⚠ YAVAŞLIK KALICI BİR NOT — ALARM DEĞİL. Kullanıcı "sarı yazı sürekli gidip
-           geliyor" dedi: eski kod her parçada alarm açıp kapatıyordu. Proje gerçekten
-           büyükse bu bir HATA değil, bir GERÇEK; bir kez sakin biçimde söylenir ve ekranda
-           kalır. Böylece asıl alarm ("takıldı") çıktığında ayırt edilebilir oluyor.
-           Eşik 45 sn: bunun altındaki parçalarda söylenecek bir şey yok. */
-        if (_parcaSn >= 45) {
-          var _ortSn = Math.round(_parcaOrtalama());
-          var _kalanParca = Math.max(0, _parcaToplam - _parcaSira);
-          iler.uyari("yavas",
-              "Büyük proje: her parça ortalama " + _ortSn + " sn sürüyor (" + EMOJI_PARCA_ETKIN +
-              " emoji). Kalan " + _kalanParca + " parça ≈ " + _sure(_ortSn * _kalanParca) +
-              ". Premiere bu sırada DONUK görünür — normaldir. Bir sorun olursa panel ayrıca " +
-              "uyarır ve Premiere'i öne alır.", "bilgi");
-        }
-        logLine("Emoji parça " + _parcaNo + "/" + _parcaToplam + " (" + dilim.length +
-                " emoji, " + _parcaSn + " sn = " + (dilim.length ? Math.round(_parcaSn / dilim.length * 10) / 10 : 0) +
-                " sn/emoji): " + r);
+        logLine("Emoji parça " + (Math.floor(p / EMOJI_PARCA) + 1) + " (" + dilim.length +
+                " emoji, " + Math.round((Date.now() - t0) / 100) / 10 + " sn): " + r);
         if (r.indexOf("ok:") !== 0) {
           /* Bu KANAL durdu; hangi kanal olduğunu da yaz, yoksa "V8 BOŞ DEĞİL" mesajı hangi
              tarafa ait belli olmuyor. */
@@ -4282,17 +2878,7 @@
                       ": " + r.replace(/^err:/, "");
           break;
         }
-        /* ⚠ SAYAÇ HOST'UN GERİ BİLDİRDİĞİ GERÇEK SAYIYI KULLANIR ("ok:N/M"), gönderilen
-           dilim boyunu değil. Fark önemli: Premiere kare yuvarlaması yüzünden çakışan bir
-           emojiyi sessizce atabiliyor, yani "25 gönderdim" ile "25 kondu" aynı şey değil.
-           Kalan süre tahmini de bu gerçek sayıdan besleniyor — parça bittikçe hız ölçülüyor
-           ve ETA kendiliğinden doğruya yaklaşıyor. */
-        /* Host'un bildirdiği son klip sayısını sakla — bir sonraki parçaya geçirilecek.
-           Okunamazsa -1'e düşer ve o parçada TAM tarama yapılır (güvenli taban). */
-        var _mk = r.match(/klip=(-?\d+)/);
-        _sonKlipSayisi = _mk ? parseInt(_mk[1], 10) : -1;
         m = r.match(/^ok:(\d+)\//); if (m) kondu += parseInt(m[1], 10);
-        iler.ilerle(kondu, "parça " + _parcaNo + "/" + _parcaToplam);
         u = r.indexOf(" | "); if (u !== -1) uyarilar.push(r.slice(u + 3));
       }
       /* ⚠ BİR KANALIN ÇÖKMESİ ÖTEKİNİN GEÇERLİ İŞİNİ ÖLDÜRMEZ — `break` DEĞİL `continue`.
@@ -4317,29 +2903,17 @@
          dokunmuyor; preset'in kendi Position/Scale'i ayrı bir Transform katmanında ve
          dinlenme değerleri nötr (Position [0.5,0.5], Scale 100).
          Yerleştirme başarısız olduysa preset denenmez: boş kanala uygulamak anlamsız. */
-      /* Yerleştirme adımı burada kapanıyor — hata olsa bile: kaç emojinin konduğu bilgisi
-         adımın kendi notunda kalsın, "atlandı" görünüp sanki hiç çalışmamış gibi olmasın. */
-      if (parcaHata) iler.adimHata("Timeline'a yerleştiriliyor", kondu + "/" + plan.length);
-      else iler.adimBitir("Timeline'a yerleştiriliyor", kondu + "/" + plan.length + " kondu");
-
       var presetAd = String((($("emojiPreset") || {}).value) || "");
       var presetNot = "";
-      if (!kondu || !presetAd) {
-        iler.adimAtla("Animasyon uygulanıyor",
-                      !presetAd ? "animasyon seçilmedi" : "konan emoji yok");
-      }
       if (kondu && presetAd) {
         var pYigin = "";
         try { pYigin = presetYiginOku(presetAd); } catch (ePy) { pYigin = ""; }
-        if (!pYigin) {
-          presetNot = " | “" + presetAd + "” öğretilmemiş, uygulanmadı";
-          iler.adimAtla("Animasyon uygulanıyor", "“" + presetAd + "” öğretilmemiş");
-        }
+        if (!pYigin) presetNot = " | “" + presetAd + "” öğretilmemiş, uygulanmadı";
         else {
           var pYol = path.join(extRoot, "emoji_preset.json");
           try {
             fs.writeFileSync(pYol, pYigin, "utf8");
-            iler.adim("Animasyon uygulanıyor").adimNot("Animasyon uygulanıyor", presetAd);
+            yaz("preset uygulanıyor: " + presetAd + "…");
             /* ⚠ PRESET HER İKİ EMOJİ KANALINA DA UYGULANIR. İki kanala geçtikten sonra
                yalnız birine uygulamak, sol taraftaki emojileri animasyonsuz bırakırdı —
                kullanıcı bunu ancak videoyu izlerken fark ederdi. */
@@ -4350,61 +2924,21 @@
                yazıp sonucu SARI yapıyordu — oysa konan her emojiye preset uygulanmıştı.
                `kanal2 < 0` şartı ZORUNLU: tek kanal modunda planın HEPSİ `kanal`'a gidiyor
                ve tarafSay.sag 0 olsa bile bu dal çalışmak zorunda. */
-            /* ⚠ NÖBETÇİ EKLENDİ. presetYaz o kanaldaki BÜTÜN emoji kliplerine (200+ klip)
-               keyframe yazıyor ve her klipte QE ağacında arama yapıyor — panelin en uzun
-               tek çağrılarından biri. Nöbetçisiz hâlinde CLAUDE.md'nin "ilerleme sayısı
-               bile olmayan bir adımda donar" diye tarif ettiği durum aynen oluşuyordu. */
-            /* ⚠ `function _presetIzle()` bildirimi DEĞİL, `var` ifadesi: bu satır bir blok
-               ({ … }) içinde ve blok içindeki fonksiyon BİLDİRİMİ ES5'te belirsiz davranış
-               (motorlar farklı hoisting uyguluyor). Panel JS'i CEP'in eski motorunda
-               çalıştığı için burada risk almıyoruz. */
-            var _presetIzle = function (hangi) {
-              return function (sn) {
-                iler.adimNot("Animasyon uygulanıyor", presetAd + " · " + hangi + " · " + sn + " sn");
-                /* ⚠ EŞİK 45 → 90 sn. `presetYaz` konan HER emoji klibine keyframe yazıyor ve
-                   her klipte QE ağacında arama yapıyor; 54 emojide 45 saniyeyi aşmak NORMAL.
-                   45'te uyarı vermek "Premiere yanıt vermiyor" diye yanlış alarm üretiyordu
-                   (kullanıcı bildirdi: "sarı hata verdi dondu diye, oysa sorunsuz çalıştı").
-                   Yanlış alarm, alarmın kendisini değersizleştirir — gerçek kilitlenmede
-                   kullanıcı bu satırı ciddiye almaz. */
-                if (sn >= 90) {
-                  iler.uyari("preset-donma",
-                    "⚠ Animasyon uygulanırken Premiere " + sn + " saniyedir yanıt vermiyor. " +
-                    "Emojiler ZATEN KONDU — açık bir Premiere penceresi varsa kapat, " +
-                    "panel kaldığı yerden devam eder.", "");
-                }
-              };
-            }
             var prSag = "ok:(kanal yok)";
             if (tarafSay.sag > 0 || kanal2 < 0) {
-              prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")',
-                                          _presetIzle("V" + (kanal + 1))));
+              prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")'));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + prSag);
             }
             var prSol = "ok:(kanal yok)";
             if (kanal2 >= 0 && tarafSay.sol > 0) {
-              prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")',
-                                          _presetIzle("V" + (kanal2 + 1))));
+              prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")'));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal2 + 1) + " → " + prSol);
             }
-            iler.uyariSil("preset-donma");
             var pr = (prSag.indexOf("ok:") === 0 && prSol.indexOf("ok:") === 0) ? "ok:" : (prSag.indexOf("ok:") === 0 ? prSol : prSag);
             presetNot = (pr.indexOf("ok:") === 0)
               ? (" | preset: " + presetAd)
               : (" | preset UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 60));
-            /* ⚠⚠ ADIMI KAPAT — UNUTULURSA "ATLANDI" GÖRÜNÜR (kullanıcı bildirdi, 12 Ağustos 2026:
-               "animasyonlar geldi ve sorunsuz çalıştı ama panelde gri eksi oldu").
-               `adim()` ile başlatılan her adım `adimBitir()` ile kapatılmak ZORUNDA: kapatılmayan
-               adım, iş biterken `kalanlariIptal` tarafından "atlandı" işaretleniyor. Yani panel,
-               GERÇEKTEN YAPILMIŞ bir işi yapılmamış gösteriyordu — sonuç mesajı "preset: Emoji
-               Sağ Taraf" derken aşama listesi "yapılmadı" diyordu, yani panel KENDİ KENDİSİYLE
-               çelişiyordu. Bu, "dürüst sonuç" kuralının en can sıkıcı ihlali. */
-            if (pr.indexOf("ok:") === 0) iler.adimBitir("Animasyon uygulanıyor", presetAd);
-            else iler.adimHata("Animasyon uygulanıyor", "uygulanamadı");
-          } catch (ePr) {
-            presetNot = " | preset hatası: " + (ePr.message || ePr);
-            iler.adimHata("Animasyon uygulanıyor", "hata");
-          }
+          } catch (ePr) { presetNot = " | preset hatası: " + (ePr.message || ePr); }
           try { fs.unlinkSync(pYol); } catch (ePu) {}
         }
       }
@@ -4423,46 +2957,18 @@
       var kanalOzet = [];
       if (tarafSay.sag > 0 || kanal2 < 0) kanalOzet.push("V" + (kanal + 1) + (kanal2 >= 0 ? " sağ" : ""));
       if (kanal2 >= 0 && tarafSay.sol > 0) kanalOzet.push("V" + (kanal2 + 1) + " sol");
-      /* ══ SONUÇ ══
-         ⚠ ESKİDEN TEK SATIRDI ve `·` ile ayrılmış ON BİR ayrı bilgi taşıyordu. Bilgilerin
-         hepsi GEREKLİ (her biri gerçek bir kullanıcı sorusundan doğdu) ama o biçimde
-         hiçbiri okunmuyordu — kullanıcının şikâyeti buydu. Bilgi KAYBI yok, diziliş değişti:
-           · kısa bir başlık          → panel başlığı
-           · sayısal gerçekler        → özet tablosu (ad | değer)
-           · yapılacak iş / sorunlar  → kendi kutusunda uyarı satırı
-         `msg` DURUYOR: log'a ve alttaki tek satırlık durum yazısına yine tam hâliyle
-         yazılıyor, yani hiçbir bilgi yalnızca ekran tasarımına bağımlı değil. */
       var msg = kondu + "/" + plan.length + " emoji kondu (" + (kanalOzet.join(" · ") || "kanal yok") + ")";
-      var pUyari = [], pOzet = [];
-      pOzet.push(["Kanallar", (kanalOzet.join(" · ") || "kanal yok") +
-                  " — " + tarafSay.sag + " sağda, " + tarafSay.sol + " solda"]);
       /* ⚠ TEK KANALA DÜŞÜLDÜYSE SÖYLE. Sessiz kalırsa kullanıcı "aynı anda iki emoji"
          beklerken alamaz ve sebebini hiçbir yerde göremez. */
-      if (kanal2 < 0 && tarafSay.sol > 0) {
+      if (kanal2 < 0 && tarafSay.sol > 0)
         msg += " · ⚠ ikinci boş video kanalı yoktu — sol ve sağ AYNI ANDA çıkamıyor " +
                "(kanal başlığına sağ tık → Add Track ile bir kanal daha ekle)";
-        pUyari.push(["kanal",
-          "⚠ İkinci boş video kanalı yoktu, sol ve sağ emojiler AYNI ANDA çıkamıyor. " +
-          "Düzeltmek için: kanal başlığına sağ tık → Add Track, sonra emojileri silip tekrar ekle.", ""]);
-      }
-      if (parcaHata) {
-        msg += " — DURDU: " + parcaHata;
-        pUyari.push(["durdu", "⛔ Yerleştirme yarıda DURDU: " + parcaHata +
-                     ". Konan " + kondu + " emoji timeline'da duruyor — “Emojileri Sil” ile temizleyebilirsin.", "bad"]);
-      } else if (kondu < plan.length) {
-        msg += " — " + (plan.length - kondu) + " tanesi OLMADI";
-        pUyari.push(["eksik", "⚠ " + (plan.length - kondu) + " emoji konamadı. " +
-                     "Sebebi Ayrıntılar'da yazıyor (çoğunlukla kare yuvarlaması yüzünden " +
-                     "çakışan emoji Premiere tarafından atılıyor).", ""]);
-      }
+      if (parcaHata) msg += " — DURDU: " + parcaHata;
+      else if (kondu < plan.length) msg += " — " + (plan.length - kondu) + " tanesi OLMADI";
       msg += " · " + tarafSay.sag + " sağda, " + tarafSay.sol + " solda";
       /* ÇEŞİT DURUM SATIRINDA: "projede 24 öğe var ama 45 emojim var" sorusu bir daha
          proje penceresine bakılarak tahmin edilmesin. Payda bu KADRODA kullanılabilir olan. */
       msg += " · " + kullanilanSay + "/" + uygunDosya + " farklı resim kullanıldı";
-      /* ⚠ KİM KAÇ EMOJİ ALDI — DURUM SATIRINDA, log'da değil. "X'i az koymuş" bu panelin en
-         sık gelen geri bildirimi ve kullanıcı sayıyı göremediği için hep tahmin yürütüyordu
-         (üstelik ölçüldüğünde tahmin genelde yanlış çıkıyor). */
-      if (karOzet) msg += " · dağılım: " + karOzet;
       msg += " · yapay zekâ " + cumleler.length + " cümlenin " + isaret + "'ini işaretledi";
       /* KISA CÜMLE ELEMESİ DURUM SATIRINDA: "eskisi kadar emoji çıkmadı" hissinin sebebi bu
          ve ayarlanabilir kol Sıklık DEĞİL — kullanıcı bunu bilmeli. */
@@ -4484,43 +2990,8 @@
       /* Her emoji ayrı bir işlem = plan uzunluğu kadar geri-alma adımı. Kullanıcı refleksle
          Ctrl+Z'ye basarsa hem yüzlerce basış gerekir hem kendi geçmişini ezer. */
       msg += " · geri almak için Ctrl+Z değil “Emojileri Sil”";
-
-      /* ── ÖZET TABLOSU: aynı sayılar, okunabilir dizilişte ── */
-      pOzet.push(["Resimler", kullanilanSay + " / " + uygunDosya + " farklı resim kullanıldı"]);
-      if (karOzet) pOzet.push(["Dağılım", karOzet]);
-      var yzMetin = cumleler.length + " cümlenin " + isaret + "'ini işaretledi";
-      if (top.kisa) yzMetin += " · " + top.kisa + " kısa cümle (" + EMOJI_MIN_KELIME +
-                               " kelimeden az) baştan elendi";
-      pOzet.push(["Yapay zekâ", yzMetin]);
-      if (cesit.atlandi) pOzet.push(["Çeşitlilik", cesit.atlandi +
-        " tanesi çeşitlilik kuralına takıldı — o karaktere yeni tepki resmi eklersen artar"]);
-      if (presetAd) pOzet.push(["Animasyon", presetNot ? presetNot.replace(/^ \| /, "") : presetAd]);
-
-      /* ── UYARILAR: her biri kendi kutusunda ── */
-      if (aynasizKondu) pUyari.push(["ayna", "⚠ " + aynasizKondu + " emoji AYNALANMADAN kondu " +
-        "(ters bakıyor; " + aynaHata + " resim çevrilemedi): " + (aynaHataAd || "sebep bilinmiyor"), ""]);
-      if (secUyari) pUyari.push(["secim2", "⚠ " + secUyari, ""]);
-      if (uyarilar.length) pUyari.push(["host", "⚠ " + uyarilar.slice(0, 2).join(" ; "), ""]);
-      /* Her emoji ayrı bir Premiere işlemi = plan uzunluğu kadar geri-alma adımı. Kullanıcı
-         refleksle Ctrl+Z'ye basarsa hem yüzlerce basış gerekir hem kendi geçmişini ezer.
-         Bu yüzden BİLGİ değil, her seferinde görünen bir hatırlatma. */
-      if (kondu) pUyari.push(["geri", "Geri almak için Ctrl+Z değil “Emojileri Sil” düğmesini kullan " +
-                              "— her emoji ayrı bir geri-alma adımı.", "bilgi"]);
-
-      iler.ozet(pOzet);
-      iler.uyariSil("donuk");   // iş bitti, "Premiere donuk görünecek" bilgisi artık geçersiz
-      for (var pu = 0; pu < pUyari.length; pu++) iler.uyari(pUyari[pu][0], pUyari[pu][1], pUyari[pu][2]);
-      iler.bitir(kondu + " / " + plan.length + " emoji kondu",
-                 parcaHata ? "bad" : (kismi ? "warn" : ""));
-
-      /* Alttaki tek satırlık durum yazısı DURUYOR: tam metin hem log'da hem burada kalsın
-         ki hiçbir bilgi yalnızca yeni ekran tasarımına bağımlı olmasın. */
       yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : (kondu ? "var(--good)" : "var(--bad)"));
     } catch (e3) {
-      /* ⚠ BEKLENMEYEN HATA DA PANELE YAZILIR. Eskiden yalnız alttaki tek satıra düşüyordu
-         ve panel sonsuza kadar dönen bir spinner'la kalıyordu — kullanıcı işin sürdüğünü
-         sanıp dakikalarca bekliyordu. */
-      try { emojiIler().uyariSil("donuk").bitir("Emoji eklenemedi: " + (e3.message || e3), "bad"); } catch (eP) {}
       yaz("hata: " + (e3.message || e3), "var(--bad)");
       logLine("Emoji hatası: " + (e3.stack || e3.message || e3));
     } finally {
@@ -4543,1031 +3014,6 @@
      Motor kökü doğru yer: ASCII (CEF Türkçe karakterli yolda takılıyor), kullanıcının
      kurulumda seçtiği yer, ve panel klasörünün DIŞINDA — ne güncelleme ne yeniden kurulum
      dokunuyor. Paket açılırken resimler oraya kuruluyor (bkz. varsayilanlariKur). */
-  /* ══════════════════════ SHORTS SEKANSI ══════════════════════
-     Uzun videodan 30-40 sn'lik dikey özet üretir. 8 ajanlı keşif + risk analizinden çıkan
-     korumaların hepsi burada — her biri kendi satırında işaretli.
-
-     ⚠ EN AĞIR RİSK: AKTİF SEKANS SIZINTISI. Panelin altyazı/emoji/AutoCut/Senkron kartlarının
-     HEPSİ app.project.activeSequence'a nişan alıyor ve "hangi sekanstayım" diye bir kavram
-     YOK. Shorts sekansı aktif kalırsa AutoCut 35 saniyelik Shorts'u keser, Senkron Craig
-     kayıtlarını oraya koyar ve en pahalısı: ertesi gün Premiere Shorts aktifken açılınca
-     offerSessionRestore oturumu HİÇ bulamaz, 25 dakikalık GPU işi "kayıp" görünür.
-     Bu yüzden akış NE OLURSA OLSUN (hata, iptal, başarı) kaynak sekansı geri açar — finally. */
-  var _shortsIptal = false;
-
-  async function shortsUret() {
-    var dur = $("shortsDurum");
-    var iler = shortsIler(), _panelAcik = false;
-    /* ⚠ `yaz` PANELE DE AKTARIR — bilerek tek huni. Shorts akışında onlarca yaz() çağrısı
-       var ve her birine ayrıca bir panel satırı eklemek, ileride eklenen bir adımda
-       unutulmaya açık olurdu (bu projede "yeni içerik mevcut kullanıcıya nasıl ulaşacak"
-       sorusunun UI'daki karşılığı). Böylece panel başlığı her zaman akışın gerçekten
-       bulunduğu yeri gösterir; aşama listesi, sayaç ve uyarılar ayrıca sürüyor.
-       ⚠ `_panelAcik` şart: panel açılmadan önceki ön kontrol hataları (modül yok, anahtar
-       yok) yalnız alttaki tek satıra yazılmalı — o mesajlar için panel açmak, kullanıcının
-       hiç başlatmadığı bir işin ilerleme kutusunu göstermek olurdu. */
-    function yaz(m, renk) {
-      if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; }
-      if (_panelAcik && m) iler.baslik(m);
-    }
-    if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
-    if (!SHORTS || !SZAMAN) { yaz("Shorts modülleri yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
-    if (!VUR) { yaz("Yapay zekâ modülü yüklenemedi", "var(--bad)"); return; }
-
-    /* --- 1) ÖN KONTROLLER (hepsi görünür iş başlamadan) --- */
-    var anahtar = "";
-    try { anahtar = VUR.anahtarOku(extRoot); }
-    // e.message korunur — kısaltılmış anahtar teşhisi burada da görünsün (bkz. emoji dalı).
-    catch (e) { yaz((e && e.message) || "Yapay zekâ anahtarı yok — Ayarlar'dan ekle (Shorts anları onunla seçiliyor)", "var(--bad)"); return; }
-
-    var gruplar = shortsGruplariTopla();
-    if (!gruplar.length) { yaz("Önce Altyazı ekranından altyazı üret — Shorts anları o metinden seçiliyor.", "var(--warn)"); return; }
-
-    /* AUTOCUT BAYATLIK FRENİ — altyazı ve emojide var, burada olmaması tutarsızlık olurdu.
-       Kesim timeline'ı kısalttığı için kesit zamanları dakikalarca kayar ve host "hiçbir
-       klibe denk gelmiyor" diyene kadar para da harcanmış olur. */
-    if (state.cuesStale) {
-      var dvm = await uiConfirm(
-        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\n" +
-        "Kesim timeline'ı kısalttığı için Shorts kesitleri YANLIŞ anlardan alınır.\n\n" +
-        "Doğrusu altyazıyı yeniden üretmek. Yine de devam edeyim mi?", "Shorts");
-      if (!dvm) { yaz("İptal edildi — altyazıyı yeniden üret, sonra Shorts oluştur.", "var(--warn)"); return; }
-    }
-
-    var btn = $("btnShortsUret"); if (btn) btn.disabled = true;
-    _shortsIptal = false;
-    var bIptal = $("btnShortsIptal"); if (bIptal) bIptal.hidden = false;
-    /* ⚠ KAYNAK SEKANSIN KİMLİĞİ İŞ BAŞLAMADAN ÖNCE OKUNUR — ÇOKLU AKIŞTAKİ DÜZELTMENİN AYNISI.
-       Eskiden `kaynakId` YALNIZCA `r.hs.kaynakId`'den, yani ancak Shorts BAŞARIYLA
-       kurulduktan sonra doluyordu. Oysa geri dönüşe en çok ihtiyaç duyulan an tam olarak
-       başarısızlık anı: host dikey sekansı kurup AKTİF yaptıktan sonra panel tarafındaki
-       altyazı adımında bir istisna oluşursa (ör. work klasörü OneDrive tarafından kilitliyken
-       writeFileSync ENOENT), finally bloğu kimliği bilmediği için kaynağa DÖNEMİYORDU.
-       Sonuç: kullanıcı yarım kalmış bir Shorts sekansında kalıyor ve bir sonraki
-       "Timeline'a Ekle" / "Emoji Ekle" işlemi SESSİZCE oraya yazıyordu.
-       ⚠ Ayraç kaçış dizisiyle yazılır (sekans adında "|" olabiliyor; düz kontrol karakteri
-       kaynak dosyada görünmez bir bayt bırakır — bkz. çoklu akıştaki uzun not). */
-    var kaynakId = "";
-    try {
-      var _skb = String(await evalES(
-        '(function(){try{var s=app.project.activeSequence;' +
-        'return String(s.name)+"\\u0001"+String(s.sequenceID);}catch(e){return "";}})()'));
-      kaynakId = _skb.split(String.fromCharCode(1))[1] || "";
-    } catch (eSk) { kaynakId = ""; }
-    if (!kaynakId) logLine("⚠ Shorts: kaynak sekansın kimliği okunamadı — hata olursa " +
-                           "panel kaynak sekansa geri dönemeyebilir.");
-    /* Panel BURADA açılıyor: bütün ön kontroller (modül · anahtar · altyazı · bayat cue)
-       geçildi, yani buradan sonrası gerçekten uzun süren iş. */
-    _panelAcik = true;
-    iler.basla({
-      baslik: "En iyi anlar seçiliyor…",
-      adimlar: ["En iyi anlar seçiliyor", "Dikey sekans kuruluyor", "Altyazı yazılıyor",
-                "Emoji konuyor", "Başlık üretiliyor"]
-    }).adim("En iyi anlar seçiliyor")
-      .uyari("donuk", "Premiere bu sırada DONUK görünebilir — normaldir, dokunma.", "bilgi");
-    try {
-      /* --- 2) YAPAY ZEKÂ: EN İYİ ANLAR --- */
-      yaz("en iyi anlar seçiliyor…");
-      var sec = await SHORTS.shortsSec(VUR, anahtar, gruplar,
-        { onLog: logLine, damga: VUR.iptalDamgasi() });
-      if (sec.hata) { yaz(sec.hata, "var(--bad)"); iler.adimHata("En iyi anlar seçiliyor").bitir(sec.hata, "bad"); return; }
-      if (!sec.kesitler || !sec.kesitler.length) { yaz("Uygun an bulunamadı.", "var(--warn)"); iler.adimHata("En iyi anlar seçiliyor", "0 an").bitir("Uygun an bulunamadı", "warn"); return; }
-      if (_shortsIptal) { yaz("İptal edildi.", "var(--warn)"); iler.bitir("İptal edildi", "warn"); return; }
-      iler.adimBitir("En iyi anlar seçiliyor",
-                     sec.kesitler.length + " kesit · " + sec.toplamSure.toFixed(0) + " sn");
-
-      /* --- 3) ONAY KAPISI — SEKANS YARATILMADAN ÖNCE ---
-         ⚠ Emsal: emoji kimlik kapısı (_emojiEslemeOnay). Bu tek onay satırı, yapay zekâ
-         numaralandırmasından gelen bütün eşleşme hatalarını AYNI ANDA yakalar: kullanıcı
-         metinleri görüyor ve yanlış an seçilmişse basmadan önce fark ediyor. Shorts para
-         harcıyor ve projede sekans yaratıyor. */
-      var satirlar = sec.kesitler.map(function (k, ix) {
-        return "  " + (ix + 1) + ") " + _shortsSaat(k.bas) + "-" + _shortsSaat(k.bit) +
-               "  (" + (k.bit - k.bas).toFixed(1) + " sn · " + k.grup + ")\n     " +
-               String(k.metin || "").slice(0, 90);
-      });
-      var onay = await uiConfirm(
-        "Shorts için şu " + sec.kesitler.length + " an seçildi (toplam " +
-        sec.toplamSure.toFixed(1) + " sn):\n\n" + satirlar.join("\n") +
-        "\n\nYeni bir dikey sekans oluşturulacak. Uzun videona dokunulmayacak.\n\nDevam edeyim mi?",
-        "Shorts");
-      if (!onay) { yaz("İptal edildi.", "var(--warn)"); iler.bitir("İptal edildi", "warn"); return; }
-
-      /* --- 4-6) SEKANSI KUR, ALTYAZI + EMOJİ, SONUÇ (ortak gövde) --- */
-      var _altAcik = !!($("shortsAltyazi") && $("shortsAltyazi").checked);
-      var _emjAcik = !!($("shortsEmoji") && $("shortsEmoji").checked);
-      /* Kapalı kutular listede "atlandı" görünür — LİSTEDEN ÇIKARILMAZ. Kullanıcı emojinin
-         neden gelmediğini görebilmeli; adımı hiç göstermemek o soruyu cevapsız bırakırdı. */
-      if (!_altAcik) iler.adimAtla("Altyazı yazılıyor", "kapalı");
-      if (!_emjAcik) iler.adimAtla("Emoji konuyor", "kapalı");
-      iler.adim("Dikey sekans kuruluyor");
-      yaz("dikey sekans kuruluyor… (Premiere kısa süre donuk görünebilir)");
-      var r = await shortsKurVeDoldur(sec.kesitler, gruplar, {
-        altyazi: _altAcik, emoji: _emjAcik
-      }, yaz);
-      if (r.hata) {
-        yaz(r.hata, "var(--bad)");
-        iler.adimHata("Dikey sekans kuruluyor").bitir(r.hata, "bad");
-        return;
-      }
-      iler.adimBitir("Dikey sekans kuruluyor", r.hs && r.hs.ad ? r.hs.ad : "");
-      if (_altAcik) iler.adimBitir("Altyazı yazılıyor", r.altOk ? (r.altOk + " kanal") : "");
-      if (_emjAcik) iler.adimBitir("Emoji konuyor", r.emojiSonuc || "");
-      /* YEDEK, EZME DEĞİL: kimlik yukarıda iş başlamadan önce okundu. Host'unki yalnız
-         oradaki okuma başarısızsa devreye girer. Çoklu akış da aynen böyle (bkz. 5198). */
-      if (!kaynakId) kaynakId = String(r.hs.kaynakId || "");
-
-      /* --- 7) BAŞLIK / HASHTAG / ETİKET ---
-         ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır — sekans zaten kuruldu. */
-      /* ⚠ METİN YOKSA BAŞLIK ÜRETME — UYDURMA ÜRETİYORDU.
-         "Altyazı da yaz" kutusu kapalıyken (kullanıcı altyazıyı Premiere'de elle yazmak
-         istiyor) `r.metin` BOŞ geliyor ve model boş bir konuşma metniyle çağrılıyordu:
-         tamamen uydurulmuş bir başlık + 12-18 uydurma etiket üretip kartta gösteriyordu —
-         hiç yaşanmamış bir olayı anlatan, videoyla ilgisiz bir başlık. Üstelik istek parası
-         da ödeniyordu. Metin yoksa adım ATLANIYOR ve sebebi yazılıyor. */
-      var bp = null;
-      if (!String(r.metin || "").trim()) {
-        iler.adimAtla("Başlık üretiliyor", "altyazı kapalı — konuşma metni yok");
-        logLine("Başlık üretilmedi: Shorts'un konuşma metni yok (“Altyazı da yaz” kapalı). " +
-                "Boş metinden üretilen başlık uydurma olurdu.");
-      } else {
-        iler.adim("Başlık üretiliyor");
-        yaz("başlık üretiliyor…");
-        bp = await SHORTS.baslikUret(VUR, anahtar, r.metin,
-          { onLog: logLine, damga: VUR.iptalDamgasi() });
-        bp.sekansAd = r.hs.ad;
-        shortsBaslikCiz("shortsBaslikListe", "shortsBaslikKart", [bp]);
-      }
-      /* ⚠ `bp.basliklar` DİYE BİR ALAN HİÇ YOK — baslikUret {baslik, hashtagler, etiketler,
-         uzun, tamBaslik} ya da {hata} döndürüyor. Yani bu koşul HER ZAMAN false'tu: not
-         hep boş kalıyor ve daha kötüsü, istek 429/ağ hatasıyla düştüğünde bile adım
-         "✓ Başlık üretiliyor" diye BİTMİŞ görünüyordu. Kullanıcı kartta başlığın neden
-         boş olduğunu anlayamıyordu. Hata artık ayrı dalda. */
-      /* bp null = adım ATLANDI (yukarıda adimAtla çağrıldı) — "bitti" deme, yoksa
-         atlanmış bir adım tamamlanmış görünür. */
-      if (bp && bp.hata) iler.adimHata("Başlık üretiliyor", bp.hata);
-      else if (bp) iler.adimBitir("Başlık üretiliyor",
-                                  bp.baslik ? (bp.baslik.length + " karakter" + (bp.uzun ? " (uzun)" : "")) : "");
-
-      var kismi = r.kismi || !!sec.uyari;
-      var msg = r.ozet;
-      if (r.gizli || r.disarida) msg += " (" + r.disarida + " cümle kesit dışı, " + r.gizli + " sınırda gizlendi)";
-      if (sec.uyari) msg += " · ⚠ " + sec.uyari;
-      if (r.altOk) msg += " · ⚠ altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
-                          "Essential Graphics → Track Style (Shorts stillerinden birini seç)";
-      msg += " · Shorts sekansı açık bırakıldı";
-      yaz((kismi ? "⚠ " : "✓ ") + msg, kismi ? "var(--warn)" : "var(--good)");
-
-      /* ── PANEL SONUCU: özet tablosu + kendi satırlarında uyarılar ── */
-      iler.uyariSil("donuk").ozet([
-        ["Sekans", r.hs && r.hs.ad ? r.hs.ad : ""],
-        ["Kesitler", sec.kesitler.length + " kesit · " + sec.toplamSure.toFixed(1) + " sn"],
-        ["Altyazı", _altAcik ? (r.altOk ? (r.altOk + " altyazı kanalı yazıldı") : "yazılamadı") : "kapalı"],
-        ["Emoji", _emjAcik ? (r.emojiSonuc || "kondu") : "kapalı"]
-      ]);
-      if (sec.uyari) iler.uyari("sec", "⚠ " + sec.uyari, "");
-      if (r.gizli || r.disarida)
-        iler.uyari("cue", "⚠ " + r.disarida + " cümle kesit dışında kaldı, " + r.gizli +
-                   " tanesi kesit sınırında gizlendi — Shorts kesitleri birleşince zamanlar " +
-                   "kayıyor, bu normaldir.", "");
-      if (r.altOk)
-        iler.uyari("stil", "Altyazının BOYUTU ve KONUMU Premiere'den verilir: altyazıya tıkla → " +
-                   "Essential Graphics → Track Style → Shorts stillerinden birini seç.", "bilgi");
-      /* ⚠ HANGİ SEKANSTA KALINDIĞI AÇIKÇA SÖYLENİR. Tekli akış Shorts'u BİLEREK açık
-         bırakıyor (kullanıcı sonucu görmeli) ama sessiz bırakmak panelin öteki kartlarını
-         (Timeline'a Ekle · Emoji Ekle · AutoCut) yanlış sekansa nişan aldırırdı. */
-      iler.uyari("sekans", "Şu an açık olan sekans: " + (r.hs && r.hs.ad ? r.hs.ad : "yeni Shorts") +
-                 ". Uzun videoyla çalışmaya dönmek için Premiere'de kendi sekansına geç.", "bilgi");
-      iler.bitir(kismi ? "Shorts oluşturuldu (uyarılar var)" : "Shorts oluşturuldu",
-                 kismi ? "warn" : "");
-
-      kaynakId = "";                                   // finally geri açmasın
-    } catch (e3) {
-      yaz("hata: " + (e3.message || e3), "var(--bad)");
-      /* Panel de kapatılmalı: eskiden hata dalında spinner sonsuza kadar dönerdi. */
-      try { iler.uyariSil("donuk").bitir("Shorts oluşturulamadı: " + (e3.message || e3), "bad"); } catch (eP2) {}
-      logLine("Shorts hatası: " + (e3.stack || e3.message || e3));
-    } finally {
-      /* Hata/iptal durumunda kaynak sekans geri açılır — yarım bir Shorts'ta bırakmak
-         panelin bütün kartlarını yanlış sekansa nişan aldırır. */
-      if (kaynakId) {
-        try { await evalES('app.project.openSequence("' + kaynakId + '")'); } catch (eBack) {}
-      }
-      if (btn) btn.disabled = false;
-      var bi = $("btnShortsIptal"); if (bi) { bi.hidden = true; bi.disabled = false; }
-      _shortsIptal = false;
-    }
-  }
-
-  /* ── SHORTS'A EMOJİ ──
-     ⚠ NEDEN AYRI FONKSİYON, emojiEkle YENİDEN KULLANILMIYOR: emojiEkle state'i DOĞRUDAN
-     okuyor (state.a1Cues / aktifKanallar()) ve zamanları UZUN VİDEO ekseninde. Ona bir
-     "Shorts kaynağı" alanı eklemek, kullanıcı Shorts ürettikten sonra uzun videoda Emoji'ye
-     bastığında 300 PNG'yi ilk 35 saniyeye yığardı ve panel YEŞİL derdi — bu projede
-     "global durum bir sonraki işe sızıyor" sınıfı zaten üç kez yaşandı (emoji.esle.a1).
-     Burada kaynak PARAMETRE, state'e hiç dokunulmuyor.
-     ⚠ KONUM DİKEY + ÜST: kullanıcı "emojiler ekranın üstünde" dedi. emojikonum.js'in `ust`
-     dalı bunun için var; dikeyde sağ 0.708 · sol 0.292 (ölçüldü, kareye sığıyor). */
-  /* ══ TEK BİR SHORTS SEKANSI KUR VE DOLDUR ══
-     Tekli ve Çoklu Shorts'un ORTAK gövdesi: sekans kurar, altyazıyı yeniden yazar, emojiyi
-     koyar ve dürüst bir özet döndürür.
-     ⚠ İKİ AKIŞIN AYNI KODU KULLANMASI ŞART: bu projede aynı işi iki yerde yazmanın bedeli
-     ölçülü (retry/iptal mantığı üç kez yazılırsa üçü de ayrı ayrı bozulur — vurucu.js'teki
-     istekGonder notu). Çoklu Shorts bunu N kez çağırıyor.
-     Dönen: { hs, altOk, altHata, emojiSonuc, kismi, ozet, hata } */
-  async function shortsKurVeDoldur(kesitler, gruplar, ayar, yaz) {
-    ayar = ayar || {};
-    var planYol = path.join(extRoot, "shorts_plan.txt");
-    var planSatir = ["#OLCU|1080|1920"];
-    kesitler.forEach(function (k) { planSatir.push(k.bas.toFixed(3) + "|" + k.bit.toFixed(3)); });
-    fs.writeFileSync(planYol, planSatir.join("\n"), "utf8");
-    var etiket = ayar.etiket || "";
-    var hr = String(await evalES('shortsSekansKur("' + esPath(planYol) + '")',
-      function (sn) {
-        if (yaz) yaz(etiket + "dikey sekans kuruluyor… (" + sn + " sn)" +
-          (sn >= 60 ? " · ⚠ Premiere'de açık bir pencere var mı? Kapatınca devam eder." : ""));
-      }));
-    try { fs.unlinkSync(planYol); } catch (eU) {}
-    var hs = null;
-    try { hs = JSON.parse(hr); } catch (eJ) { hs = null; }
-    if (!hs) return { hata: "Sekans kurulamadı — Premiere'i TAMAMEN kapatıp aç. Dönen: " + String(hr).slice(0, 120) };
-    if (hs.error) return { hata: "Sekans kurulamadı: " + hs.error };
-    logLine("Shorts sekansı: " + hs.ad + " · " + hs.w + "x" + hs.h + " · " + hs.sure.toFixed(2) +
-            " sn · ölçek %" + hs.olcek + " (" + hs.olcekOk + " klipte tuttu) · " +
-            hs.sesKanal + " ses kanalı / " + hs.sesKlip + " ses klibi");
-
-    /* ⚠ HOST'UN GERÇEKTEN KULLANDIĞI ARALIK — panelin isteği değil (kesit klip sınırına
-       kırpılmış olabilir; kullanıcının ilk denemesinde altyazının yarısı bu yüzden eksikti). */
-    /* ⚠ `hedefBas`/`hedefBit` DE GEÇİLİR — altyazı kaymasının sebebi bunların atılmasıydı.
-       `bas`/`bit` = KAYNAK ekseni (cue'ları eşleştirmek için), `hedefBas`/`hedefBit` =
-       host'un `overwriteClip` sonrası GERİ OKUDUĞU Shorts ekseni (altyazıyı yerleştirmek
-       için). Premiere kareye yuvarladığı için ikisi birebir tutmuyor ve fark kesit başına
-       birikiyordu. Bkz. js/shortszaman.js cueHarita içindeki not. */
-    var kaynakKesit = (hs.kesitler && hs.kesitler.length && hs.kesitler[0].kaynakBas !== undefined)
-      ? hs.kesitler.map(function (k) {
-          return { bas: k.kaynakBas, bit: k.kaynakBit, hedefBas: k.bas, hedefBit: k.bit };
-        })
-      : kesitler.map(function (k) { return { bas: k.bas, bit: k.bit }; });
-
-    var altOk = 0, altHata = "", gizli = 0, disarida = 0, sonaKirpilan = 0, metin = "";
-    if (ayar.altyazi) {
-      if (yaz) yaz(etiket + "altyazı yazılıyor…");
-      var capDir = path.join(cfg.workDir, "captions");
-      try { pipeline.ensureDir(capDir); } catch (eCd) {}
-      /* ⚠⚠ İKİ AŞAMA — ÇÜNKÜ KELİME ARASI KÖPRÜ BÜTÜN KANALLARI BİRDEN GÖRMEK ZORUNDA.
-         ÖLÇÜLMÜŞ HATA (kullanıcı bildirdi, 12 Ağustos 2026: "çoklu Shorts'ta kelimeler
-         arasında neden boşluklar var").
-         `pipeline.cumleBirlestir` — aynı cümlenin ardışık cue'ları arasındaki 2 karelik
-         boşluğu kapatan fonksiyon — YALNIZ uzun video yolunda (placeCaptions) çağrılıyordu.
-         Shorts kendi SRT'sini yazarken onu HİÇ çağırmıyordu, dolayısıyla `buildCues`'un
-         her cue bitişini `sonraki.start - MIN_GAP`e dayaması yüzünden kalan 0.08 sn'lik
-         boşluklar Shorts'ta olduğu gibi kalıyor ve yazı yanıp sönüyordu.
-         Eskiden döngü her grubun SRT'sini hemen yazıyordu; köprü ise kanallar arası çakışmayı
-         kontrol ettiği için TÜM grupları aynı anda görmeli. Bu yüzden: önce hepsini hazırla,
-         sonra bir kez köprüle, sonra yaz.
-         ⚠ SIRA KORUNUYOR: `hazir` dizisi grup sırasıyla dolduruluyor ve yazma da o sırayla —
-         hangi karakterin kaçıncı altyazı kanalına gittiği değişmiyor.
-         ⚠ KÖPRÜ EN SONDA: gizlenenler ve kırpılanlar listeden düştükten SONRA çalışıyor,
-         yani köprü gerçekten ekrana çıkacak komşuya kuruluyor (uzun videodaki kuralın aynısı). */
-      var hazir = [], gi;
-      for (gi = 0; gi < gruplar.length; gi++) {
-        var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
-        var yazilacak = hm.cues.filter(function (c) { return !c.gizliKesit && String(c.text || "").trim(); });
-        gizli += hm.sayac.gizlenen; disarida += hm.sayac.disarida;
-        if (!yazilacak.length) continue;
-        var kirp = SZAMAN.sonaKirp(yazilacak, hs.sure);
-        yazilacak = kirp.cues;
-        sonaKirpilan += kirp.sayac.kirpilan;
-        var ihlal = SZAMAN.dogrula(yazilacak, hs.sure);
-        if (ihlal.length) {
-          altHata = (altHata ? altHata + " ; " : "") + gruplar[gi].ad + ": " + ihlal.length +
-                    " zaman geçersiz (" + ihlal[0] + ")";
-          logLine("Shorts altyazı ATLANDI (" + gruplar[gi].ad + "): " + ihlal.slice(0, 3).join(" · "));
-          continue;
-        }
-        hazir.push({ ad: gruplar[gi].ad, cues: yazilacak, gi: gi });
-      }
-
-      /* ⚠⚠ KANALLAR ARASI ÇAKIŞMA — SHORTS'TA DA GİDERİLMELİ (kullanıcı bildirdi,
-         12 Ağustos 2026: "aynı saniyede altlı üstlü 3 kelime çıkıyor, yazılar ekranı kaplıyor").
-         Her karakter KENDİ altyazı kanalına yazılıyor ve Premiere caption track'lerinin
-         hepsini AYNI ANDA, AYNI YERE çiziyor (bu ölçüldü, uzun video tarafında belgeli).
-         İki kişi aynı anda konuşunca 2 kelime + 2 kelime = 4 kelime üst üste biniyor.
-         Uzun video bunu `kanallarArasiCakisma` ile çözüyor ama o fonksiyon YALNIZ
-         placeCaptions'ta çağrılıyordu — Shorts'a hiç uygulanmamıştı. Köprü ile birebir
-         aynı sınıf hata.
-         POLİTİKA UZUN VİDEODAKİYLE AYNI: KIRP → GİZLE → İTME ASLA. Kırpma yalnız bitişi
-         kısaltır, başlangıca dokunmaz, yani senkron bozulmaz.
-         ⚠ SIRA: köprüden ÖNCE. Yoksa köprü yeni çakışma doğurabilir ve gizlenen bir cue'ya
-         köprü kurulur (uzun videoda da bu sıra zorunlu).
-         ⚠ Tek grup varsa fonksiyon hiç iş yapmadan dönüyor — tek karakterli Shorts etkilenmez. */
-      var kaSay = null;
-      if (hazir.length > 1 && pipeline && typeof pipeline.kanallarArasiCakisma === "function") {
-        try {
-          kaSay = pipeline.kanallarArasiCakisma(hazir, { gizle: cakismaGizle() }, logLine);
-          /* Gizlenenleri listeden DÜŞÜR — yoksa SRT'ye yazılır ve gizleme hiç işe yaramaz. */
-          for (var ki = 0; ki < hazir.length; ki++) {
-            hazir[ki].cues = hazir[ki].cues.filter(function (c) { return !c.gizliCakisma; });
-          }
-          hazir = hazir.filter(function (h) { return h.cues.length; });
-          logLine("Shorts kanallar arası çakışma: " + (kaSay.kirpilan || 0) + " kırpıldı · " +
-                  (kaSay.gizlenen || 0) + " gizlendi" +
-                  (kaSay.kalan ? (" · " + kaSay.kalan + " hâlâ üst üste") : ""));
-        } catch (eKa2) { logLine("Shorts çakışma giderilemedi: " + (eKa2.message || eKa2)); }
-      }
-
-      /* KELİME ARASI BOŞLUKLARI KAPAT — uzun videodaki ile AYNI fonksiyon, aynı eşik (0.15).
-         `cueHarita` cumleId'ye kesit numarası eklediği için (`@s<no>`) farklı kesitlere düşen
-         aynı cümle parçaları köprülenmiyor — aralarında gerçekte dakikalar var. */
-      if (hazir.length && pipeline && typeof pipeline.cumleBirlestir === "function") {
-        try {
-          var kSay = pipeline.cumleBirlestir(hazir, {}, logLine);
-          logLine("Shorts kelime arası: " + (kSay && kSay.koprulen ? kSay.koprulen : 0) +
-                  " boşluk kapatıldı" +
-                  (kSay && kSay.uzakBosluk ? (" · " + kSay.uzakBosluk + " tanesi gerçek duraklama") : ""));
-        } catch (eKp) { logLine("Shorts kelime arası köprü kurulamadı: " + (eKp.message || eKp)); }
-      }
-
-      for (var hi = 0; hi < hazir.length; hi++) {
-        /* Başlık üretimi için metin biriktir — Shorts'un ne anlattığını yalnız bu söylüyor. */
-        hazir[hi].cues.forEach(function (c) { metin += " " + String(c.text || ""); });
-        var srtFile = path.join(capDir, "shorts_" + Date.now() + "_" + hazir[hi].gi + ".srt");
-        fs.writeFileSync(srtFile, pipeline.cuesToSrt(hazir[hi].cues), "utf8");
-        var rc = String(await evalES('addCaptionsToTimeline("' + esPath(srtFile) + '")'));
-        logLine("Shorts altyazı " + hazir[hi].ad + " (" + hazir[hi].cues.length + " satır): " + rc);
-        if (rc.indexOf("ok:") === 0) altOk++;
-        /* ⚠ BİRİKTİR, EZME. Düz atama yüzünden birden çok karakterin altyazısı
-           başarısız olduğunda yalnız SONUNCUSU görünüyordu: kullanıcı timeline'da iki
-           eksik altyazı görüp panelin yalnız birini söylediğini fark ediyor ve panele
-           güvenmeyi bırakıyordu. Yukarıdaki doğrulama dalı (4595) zaten biriktiriyor —
-           iki dal aynı biçimde davranmalı. */
-        else altHata = (altHata ? altHata + " ; " : "") + hazir[hi].ad + " — " + rc.replace(/^[a-z_]+:/, "");
-      }
-    }
-
-    var emojiSonuc = "";
-    if (ayar.emoji) {
-      if (yaz) yaz(etiket + "emoji seçiliyor…");
-      try { emojiSonuc = await shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz); }
-      catch (eEm) { emojiSonuc = "emoji hatası: " + (eEm.message || eEm); }
-      logLine("Shorts emoji: " + emojiSonuc);
-    }
-
-    var kismi = !!altHata || (hs.olcekOk < (hs.kesitler ? hs.kesitler.length : 1)) ||
-                (emojiSonuc && emojiSonuc.indexOf("✓") !== 0) || (hs.sesKanal < gruplar.length);
-    var ozet = "“" + hs.ad + "” · " + hs.kesitler.length + " kesit · " + hs.sure.toFixed(1) + " sn";
-    if (altOk) ozet += " · " + altOk + " altyazı kanalı";
-    if (sonaKirpilan) ozet += " · " + sonaKirpilan + " altyazı sona kırpıldı";
-    if (altHata) ozet += " · ⚠ altyazı: " + altHata;
-    if (hs.olcekHata) ozet += " · ⚠ ölçek: " + hs.olcekHata;
-    if (hs.sesKanal < gruplar.length)
-      ozet += " · ⚠ " + gruplar.length + " karakter ama " + hs.sesKanal + " ses kanalı — BİR KEZ DİNLE";
-    if (emojiSonuc) ozet += " · " + emojiSonuc;
-    return { hs: hs, altOk: altOk, altHata: altHata, emojiSonuc: emojiSonuc,
-             kismi: kismi, ozet: ozet, metin: metin.trim(),
-             gizli: gizli, disarida: disarida, sonaKirpilan: sonaKirpilan };
-  }
-
-  /* Başlık paketini ekranda kopyalanabilir biçimde gösterir. */
-  function shortsBaslikCiz(kutuId, kartId, kayitlar) {
-    var kutu = $(kutuId), kart = $(kartId);
-    if (!kutu || !kart) return;
-    kutu.innerHTML = "";
-    if (!kayitlar || !kayitlar.length) { kart.hidden = true; return; }
-    kayitlar.forEach(function (k, ix) {
-      var blok = document.createElement("div");
-      blok.style.cssText = "margin-bottom:14px;padding:10px;border:1px solid var(--line);border-radius:8px";
-      var ad = document.createElement("div");
-      ad.className = "note";
-      ad.style.cssText = "margin:0 0 6px;color:var(--acc)";
-      ad.textContent = (kayitlar.length > 1 ? ((ix + 1) + ") ") : "") + (k.sekansAd || "Shorts");
-      blok.appendChild(ad);
-      if (k.hata) {
-        var h = document.createElement("div");
-        h.className = "note"; h.style.color = "var(--warn)";
-        h.textContent = "Başlık üretilemedi: " + k.hata;
-        blok.appendChild(h); kutu.appendChild(blok); return;
-      }
-      /* Üç ayrı kopyalanabilir alan: başlık+hashtag, yalnız etiketler. */
-      /* ⚠ BAŞLIK UZUNLUĞU GÖSTERİLİYOR. Kullanıcı "tek satır olsun" dedi; model 42 karakteri
-         aşarsa panel kesmiyor (cümlenin ortasında bırakır ve emojiyi yer) ama SÖYLÜYOR. */
-      var basEtiket = "Başlık" + (k.baslik ? ("  (" + k.baslik.length + " karakter" +
-                      (k.uzun ? " — UZUN, ikinci satıra taşabilir" : "") + ")") : "");
-      [[basEtiket, k.tamBaslik], ["Etiketler (tags)", (k.etiketler || []).join(", ")]].forEach(function (p) {
-        var s = document.createElement("div");
-        s.style.cssText = "margin-bottom:8px";
-        var lbl = document.createElement("div");
-        lbl.className = "note"; lbl.style.margin = "0 0 4px";
-        if (k.uzun && p[0] === basEtiket) lbl.style.color = "var(--warn)";
-        lbl.textContent = p[0];
-        var ta = document.createElement("textarea");
-        ta.className = "dict-text"; ta.rows = (p[0] === basEtiket) ? 2 : 3;
-        ta.readOnly = true; ta.value = p[1] || "";
-        ta.addEventListener("focus", function () { this.select(); });
-        var btn = document.createElement("button");
-        btn.className = "btn-ghost"; btn.type = "button"; btn.textContent = "Kopyala";
-        btn.style.marginTop = "4px";
-        btn.addEventListener("click", function () {
-          ta.select();
-          try { document.execCommand("copy"); btn.textContent = "✓ Kopyalandı"; }
-          catch (e) { btn.textContent = "kopyalanamadı — elle seç"; }
-          setTimeout(function () { btn.textContent = "Kopyala"; }, 1500);
-        });
-        s.appendChild(lbl); s.appendChild(ta); s.appendChild(btn);
-        blok.appendChild(s);
-      });
-      kutu.appendChild(blok);
-    });
-    kart.hidden = false;
-  }
-
-  async function shortsEmojiKoy(hs, gruplar, kaynakKesit, yaz) {
-    if (!EMJ || !VUR || !KONUM || !SZAMAN) return "emoji modülü yok";
-    var kok = String(($("emojiKlasor") || {}).value || "").trim() || emojiKlasorVarsayilan();
-    var tarama = EMJ.tara(kok);
-    if (tarama.hata) return "emoji: " + tarama.hata;
-    var anahtar = "";
-    // e.message korunur — kısaltılmış anahtar teşhisi Shorts emoji yolunda da görünsün.
-    try { anahtar = VUR.anahtarOku(extRoot); } catch (e) { return "emoji: " + ((e && e.message) || "anahtar yok"); }
-
-    /* Cümleleri Shorts eksenine taşınmış cue'lardan çıkar; karakteri çöz.
-       ⚠ ÇÖZÜMLEME UZUN VİDEO YOLUYLA AYNI SIRADA OLMAK ZORUNDA — eskiden burada YALNIZ
-       ad eşleşmesi vardı (`emojiKarakterAra(tarama, asciiAnahtar(ad))`) ve iki kaynak
-       görmezden geliniyordu:
-         (1) Emoji ekranındaki "Bu videoda kim hangi kanalda?" seçimi (emojiKanalKarOku),
-         (2) kullanıcının bir kez verdiği elle eşleştirme kararı (emojiEsleAnahtar).
-       Sonuç ParsMazi'de şuydu: uzun videoda emojiler ÇIKIYOR (orada seçim okunuyor), aynı
-       projeden Shorts üretilince "emoji: uygun cümle yok" deyip HİÇ emoji koymuyordu —
-       kadrosunda dosya adıyla birebir tutan karakter olmadığı için. Belirti "Shorts'ta emoji
-       çalışmıyor", sebep tamamen görünmezdi.
-       Sıra uzun yoldakiyle birebir: açık seçim → ad eşleşmesi → kayıtlı karar.
-       "__yok__" = kullanıcı o kanalı BİLEREK emojisiz bıraktı; atlanır ama sayılır. */
-    var cumleler = [], gi, yokSay = 0, kararsiz = [];
-    for (gi = 0; gi < gruplar.length; gi++) {
-      var gAd = gruplar[gi].ad, gIdx = gruplar[gi].idx;
-      var gAnahtar = EMJ.asciiAnahtar(gAd);
-      var kar = null;
-      // (1) Emoji ekranındaki açık seçim her şeyin önünde.
-      var elSecim = (gIdx != null) ? emojiKanalKarOku(gIdx) : "";
-      if (elSecim === "__yok__") { yokSay++; continue; }
-      if (elSecim) kar = emojiKarakterAra(tarama, elSecim);   // silinmiş karakterse null → alta düş
-      // (2) Dosya adıyla birebir tutuyor mu.
-      if (!kar) kar = emojiKarakterAra(tarama, gAnahtar);
-      /* (3) Kullanıcının bir kez verdiği karar — UZUN YOLLA BİREBİR AYNI.
-         ⚠ BURAYA `emojiYerTutucuAd` KAPISI KOYMA. İlk yazımda kanal kodları ("a1", "a2")
-         için kayıtlı karar hiç okunmuyordu ve bu, uzun video yolundan SAPMAYDI: kanal
-         kodunun taşınma tehlikesini `emojiEsleAnahtar`'ın KENDİSİ zaten çözüyor —
-         yer tutucu adlar için SEKANSA ÖZEL bir anahtar (`emoji.esleV.<sekans>.<ad>`)
-         üretiyor, sekans kimliği yoksa boş dönüp kalıcılığı tümden kapatıyor.
-         Ek kapı yalnızca Shorts'un uzun videodan farklı davranmasına yol açıyordu:
-         kullanıcı "A1 → Dora" kararını verip uzun videoda emojileri alıyor, Shorts'ta
-         aynı kanal çözümlenemiyordu. */
-      if (!kar) {
-        var kayit = String(lsGet(emojiEsleAnahtar(gAnahtar), ""));
-        if (kayit === "__yok__") { yokSay++; continue; }
-        if (kayit) kar = emojiKarakterAra(tarama, kayit);
-      }
-      if (!kar) { kararsiz.push(gAd); continue; }           // resmi/kararı olmayan karakter
-      var hm = SZAMAN.cueHarita(kaynakKesit, gruplar[gi].cues);
-      var gorunur = hm.cues.filter(function (c) { return !c.gizliKesit; });
-      var cl = null;
-      try { cl = VUR.cumleleriCikar(gorunur); } catch (eC) { cl = null; }
-      /* ⚠ SHORTS'TA KELİME EŞİĞİ DÜŞÜK (2, yatayda 5). Kullanıcı: "Shorts boyunca FULL emoji
-         olacak, hep emoji". Yatayda 5 kelime eşiği "3 kelimelik cümlede emoji göz kırpması
-         gibi duruyor" diye konmuştu; Shorts'ta emoji zaten bir sonrakine kadar SÜRÜYOR
-         (aşağıdaki köprü), yani kısa cümlenin emojisi de ekranda kalıyor. */
-      (cl || []).forEach(function (c) {
-        if (!c.metin || emojiKelimeSay(c.metin) < 2) return;
-        cumleler.push({ bas: c.bas, bit: c.bit, metin: c.metin, kar: kar,
-                        a1: (gi === 0), ad: gruplar[gi].ad });
-      });
-    }
-    /* ⚠ "uygun cümle yok" TEK BAŞINA TEŞHİS EDİLEMEZ BİR MESAJDI. Üç bambaşka sebebi var ve
-       üçünün çaresi ayrı: (a) hiçbir karakter eşleşmedi (Emoji ekranından seçim gerekiyor),
-       (b) kullanıcı bilerek "emoji yok" dedi, (c) cümleler gerçekten çok kısa. Hangisi
-       olduğunu söylemeyen mesaj kullanıcıyı yanlış kola yolluyordu. */
-    if (!cumleler.length) {
-      if (kararsiz.length) {
-        return "emoji: şu kanallar için karakter seçilmemiş — " + kararsiz.join(", ") +
-               " (ana ekran → Emoji → “Bu videoda kim hangi kanalda?” listesinden seç)";
-      }
-      if (yokSay) return "emoji: bütün kanallar “emoji yok” işaretli";
-      return "emoji: uygun cümle yok (cümleler 2 kelimeden kısa)";
-    }
-    if (kararsiz.length) {
-      logLine("Shorts emoji: karakter seçilmemiş kanallar atlandı — " + kararsiz.join(", ") +
-              " (Emoji ekranından seçebilirsin).");
-    }
-    cumleler.sort(function (a, b) { return a.bas - b.bas; });
-    for (var q = 0; q < cumleler.length; q++) cumleler[q].sira = q + 1;
-
-    if (yaz) yaz("emoji duyguları seçiliyor… (" + cumleler.length + " cümle)");
-    /* ⚠ hedefOran 1.0 — HER cümleye duygu istenir (yatayda 0.90). Kullanıcı Shorts'ta
-       kesintisiz emoji istiyor; işaretlenmeyen cümle emojisiz bir boşluk demek. */
-    var sec = await EMJ.duygulariSec(VUR, anahtar, cumleler, tarama.duygular,
-      { hedefOran: 1.0, karakterDuygu: tarama.karakterDuygu }, VUR.iptalDamgasi(), logLine);
-    if (sec.hata) return "emoji: " + sec.hata;
-    var indeks = {}; cumleler.forEach(function (c) { indeks[c.sira] = c; });
-
-    /* Hedef kanal: Shorts sekansında V1 dolu, üstü boş. */
-    var ek = null;
-    try { ek = JSON.parse(String(await evalES("emojiKanallariJSON()"))); } catch (eK) { return "emoji: kanal okunamadı"; }
-    if (!ek || ek.error || !ek.tracks) return "emoji: kanal okunamadı";
-    var enUstDolu = -1, kanal = -1, t;
-    for (var i2 = 0; i2 < ek.tracks.length; i2++) if (ek.tracks[i2].klip > 0) enUstDolu = ek.tracks[i2].idx;
-    for (var i3 = 0; i3 < ek.tracks.length; i3++) {
-      t = ek.tracks[i3];
-      if (t.idx > enUstDolu && t.klip === 0 && !t.kilit) { kanal = t.idx; break; }
-    }
-    if (kanal < 0) return "emoji: boş video kanalı yok (kanal başlığına sağ tık → Add Track)";
-
-    /* ⚠ SHORTS'TA EMOJİ ÜSTTE VE TAM ORTADA (kullanıcı isteği, 11 Ağustos 2026).
-       Dikey karede köşeye yaslamak emojiyi kenara itiyor ve dar karede dengesiz duruyor.
-       Ortada olduğu için AYNALAMA DA YAPILMIYOR: ayna "karakter ekranın içine baksın" diye
-       vardı, ortadaki bir resmin bakış yönünü çevirmek yalnız asimetrik detayı (yazı,
-       tek taraflı aksesuar) ters gösterir. */
-    /* ⚠ BOYUT: VARSAYILAN ORAN (0.574) — "full" DENENDI VE GERI ALINDI.
-       11 Agustos 2026: kullanici once "emoji de full olmalı" dedi, oran 1.0 yapildi
-       (1080x1920'de 1080 px, kare genisligi kadar) ve sonucu gorunce GERI ISTEDI:
-       "az önce çok iyi çalışıyordu, az önceki haline döndür". Dikey karede kare
-       genisligini dolduran emoji goruntunun cogunu kapatiyor.
-       ⚠ TEKRAR BUYUTME — bu karar olculdu ve kullanici tarafindan reddedildi.
-       emojikonum.js'in `oran` parametresi DURUYOR (testleri var, ileride gerekebilir);
-       burada gecilmiyor, yani varsayilan 0.574 kullaniliyor. */
-    var konOrta = emojiKonum(hs.w, hs.h, true, true, true);
-
-    /* ══ SHORTS BOYUNCA KESİNTİSİZ EMOJİ ══
-       Kullanıcı isteği (11 Ağustos 2026): "shorts boyunca full emoji olacak, yukarıda olmalı
-       hep, emoji kim konuşursa onunla ve o cümlesiyle alakalı".
-       ⚠ YATAY VİDEODAN TAMAMEN FARKLI BİR KURAL — oradaki `EMOJI_GAP` freni ve "cümle boyunca
-       kal" süresi burada UYGULANMAZ: ikisi de emojiler arasında BOŞLUK bırakır ve kullanıcı
-       Shorts'ta boşluk istemiyor.
-       KURAL: her emoji BİR SONRAKİNİN BAŞLANGICINA kadar sürer; ilki Shorts'un 0'ından
-       başlar, sonuncusu Shorts'un sonuna kadar gider. Böylece ekranda her an bir emoji var
-       ve o an konuşanın yüzü görünüyor.
-       ⚠ Yatay yol (emojiEkle) bu değişiklikten ETKİLENMEZ — ayrı fonksiyon, ayrı kurallar. */
-    var adaylarE = [];
-    sec.secimler.forEach(function (s) {
-      var c = indeks[s.sira];
-      if (!c) return;
-      var vl = tarama.matris[s.duygu + "|" + c.kar.key];
-      if (!vl || !vl.length) return;
-      var png = vl[0];
-      if (!png.h) return;
-      adaylarE.push({ bas: c.bas, png: png });
-    });
-    adaylarE.sort(function (a, b) { return a.bas - b.bas; });
-    /* Aynı anda başlayan iki cümle olursa (iki kanal birden) ikincisi düşer — aynı
-       kanalda üst üste klip host tarafından sessizce atılırdı. */
-    var temizE = [];
-    for (var ax = 0; ax < adaylarE.length; ax++) {
-      if (temizE.length && (adaylarE[ax].bas - temizE[temizE.length - 1].bas) < 0.4) continue;
-      temizE.push(adaylarE[ax]);
-    }
-    adaylarE = temizE;
-    if (adaylarE.length) adaylarE[0].bas = 0;            // Shorts'un ilk karesinden itibaren
-    /* ⚠⚠ ARDIŞIK EMOJİLER ARASINDA EMOJI_GAP KADAR BOŞLUK ŞART — ÖLÇÜLMÜŞ HATA (12 Ağustos 2026).
-       Eski hâli `sure = sonrakiBas - bas` idi, yani her emojinin bitişi bir SONRAKİNİN
-       başlangıcına TAM olarak eşitleniyordu (boşluk = 0). host.jsx `emojiYerlestir` içindeki
-       fren ise şöyle çalışıyor: klip konduktan sonra bitişi GERİ OKUNUYOR ve
-       `sonBitis = max(gercekSon, istenenSon)` kuruluyor; sonraki klip `it.bas < sonBitis - 0.001`
-       ise "onceki emojiyle cakisiyor" diye ATILIYOR. Premiere klip bitişini KAREYE yuvarlıyor
-       ve yuvarlama YUKARI gittiği her seferde `gercekSon > istenenSon` oluyor — yani bir
-       sonraki emojinin başlangıcı frenin altında kalıp düşüyor. 30 fps'te bir kare 0.033 sn,
-       yani boşluk sıfırken bu tesadüf değil BEKLENEN durum.
-       CLAUDE.md yatay yol için bunu zaten açıkça yazıyor: "⚠ SIFIR YAPMA: kare yuvarlaması
-       yukarı giderse çakışan emoji ezilmez ama SESSİZCE ATILIR". Shorts yolu aynı tuzağa
-       boşluğu tam sıfıra çekerek giriyordu.
-       ⚠ BOŞLUK YALNIZ ARADA: son emojinin bitişi Shorts'un sonu, ondan sonra klip yok.
-       0.08 sn (EMOJI_GAP) bir karenin iki katından fazla, yani yuvarlama payını kapsıyor. */
-    for (var ay = 0; ay < adaylarE.length; ay++) {
-      var sonEmoji = (ay + 1 >= adaylarE.length);
-      var sonrakiBas = sonEmoji ? hs.sure : adaylarE[ay + 1].bas;
-      adaylarE[ay].sure = sonrakiBas - adaylarE[ay].bas - (sonEmoji ? 0 : EMOJI_GAP);
-    }
-
-    var plan = [];
-    adaylarE.forEach(function (a) {
-      var png = a.png, sure = a.sure;
-      if (sure <= 0.1) return;
-      plan.push([png.yol, kanal, a.bas.toFixed(3), sure.toFixed(3), konOrta.x, konOrta.y,
-                 EMJ.olcekHesapla(png, KONUM.taban(hs.w, hs.h), KONUM.ORAN),
-                 png.duygu + " " + png.karakter].join("|"));
-    });
-    if (!plan.length) return "emoji: plana giren yok";
-    logLine("Shorts emoji: " + plan.length + " emoji · kesintisiz (her biri bir sonrakine kadar) · " +
-            "toplam " + hs.sure.toFixed(1) + " sn kapsanıyor.");
-
-    /* Resimleri önce projeye al (ParsMazi'de kilitlenmenin sebebi parça başına import'tu). */
-    var uniq = {}, uListe = [];
-    plan.forEach(function (s2) { var y = String(s2).split("|")[0]; if (y && !uniq[y]) { uniq[y] = 1; uListe.push(y); } });
-    /* ⚠ SHORTS KENDİ GEÇİCİ DOSYA ADLARINI KULLANIR ("shorts_" ön ekiyle).
-       Eskiden uzun videonun `emojiEkle` akışıyla BİREBİR aynı iki yolu paylaşıyordu
-       (`emoji_import.txt` ve `emoji_plan.txt`). İki akış aynı anda çalışırsa biri
-       ötekinin planını ezer ve host YANLIŞ emojileri yerleştirir — üstelik hangi akışın
-       bozulduğu hiçbir yerde görünmez. Bu teorik bir risk de değildi: `wireShorts` isim
-       çakışması yüzünden Shorts düğmesi tek tıkta İKİ paralel akış başlatıyordu (aynı
-       denetimde bulundu). O hata düzeltildi; dosya ayrımı ikinci emniyet olarak duruyor. */
-    var impYol = path.join(extRoot, "shorts_emoji_import.txt");
-    try {
-      fs.writeFileSync(impYol, uListe.join("\n"), "utf8");
-      /* ⚠ DÖNÜŞ DEĞERİ ARTIK OKUNUYOR VE LOG'A YAZILIYOR. Eskiden `await evalES(...)`
-         çıplak çağrılıyor, hata da boş bir catch'e yutuluyordu: resimler projeye
-         alınamazsa emojilerin hiçbiri konmuyor ve kullanıcı sebebini hiçbir yerde
-         göremiyordu. Uzun video yolundaki eşdeğeri bunu zaten yapıyor. */
-      var riS = String(await evalES('emojiResimYukle("' + esPath(impYol) + '")',
-        function (sn) { if (yaz && sn >= 30) yaz("emoji resimleri projeye alınıyor… (" + sn + " sn — Premiere'de açık pencere var mı?)"); }));
-      logLine("Shorts emoji resim yükleme (" + uListe.length + " dosya): " + riS);
-      if (riS.indexOf("err:") === 0) return "emoji: resimler projeye alınamadı — " + riS.replace(/^err:/, "");
-      try { fs.unlinkSync(impYol); } catch (e5) {}
-    } catch (eI) {}
-
-    var yol2 = path.join(extRoot, "shorts_emoji_plan.txt"), kondu = 0, p2;   /* ⚠ uzun videonunkiyle AYNI OLAMAZ — yukarıdaki nota bak */
-    for (p2 = 0; p2 < plan.length; p2 += EMOJI_PARCA) {
-      var dilim = plan.slice(p2, p2 + EMOJI_PARCA);
-      fs.writeFileSync(yol2, dilim.join("\n"), "utf8");
-      if (yaz) yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length);
-      var r2 = String(await evalES('emojiYerlestir("' + esPath(yol2) + '","' + (p2 ? "1" : "0") + '")',
-        function (sn) { if (yaz) yaz("emoji yerleştiriliyor… " + kondu + "/" + plan.length + " (" + sn + " sn)"); }));
-      /* ⚠ HOST'UN UYARI AYRINTILARI LOG'A YAZILIR. `emojiYerlestir` başarı durumunda bile
-         hangi emojinin neden konmadığını " | " sonrasında döndürüyor ("… — 20 tanesi OLMADI
-         | X (onceki emojiyle cakisiyor, atlandi)"). Uzun video yolu bu dizgeyi olduğu gibi
-         log'a yazıyor; Shorts yolu atıyordu, yani Shorts'ta eksik emojinin sebebi hiçbir
-         yerde görünmüyordu. */
-      logLine("Shorts emoji parça " + (Math.floor(p2 / EMOJI_PARCA) + 1) + " (" + dilim.length + "): " + r2);
-      if (r2.indexOf("ok:") !== 0) { try { fs.unlinkSync(yol2); } catch (e6) {} return "emoji DURDU: " + r2.replace(/^err:/, "").slice(0, 80); }
-      var m2 = r2.match(/^ok:(\d+)\//); if (m2) kondu += parseInt(m2[1], 10);
-    }
-    try { fs.unlinkSync(yol2); } catch (e7) {}
-
-    /* ⚠⚠ SHORTS'TA PRESET OTOMATİK UYGULANMAZ — DENENDİ VE KULLANICI TARAFINDAN İPTAL EDİLDİ.
-       Tarihçe (11 Ağustos 2026, hepsi aynı gün):
-       (1) Kullanıcı "emoji sağ presetindeki pop in ve shake'i de olmalı" dedi → Emoji
-           ekranındaki preset seçicisi Shorts'a da bağlandı.
-       (2) Sonuç: "Emoji Sağ Taraf" preseti YATAY video için öğretilmiş ve içinde Position
-           var; panel emojiyi ortaya koyuyor, preset onu SAĞA itiyordu.
-       (3) `presetYaz`'a `konumAtla` (4. argüman) eklendi — Position/Anchor Point atlanıp
-           yalnız Scale/Opacity/efekt keyframe'leri geçsin diye.
-       (4) Kullanıcı bunu da istemedi: "sadece emoji sağ taraf efektini oto uygulamayı kapat,
-           efektsiz sadece emojiyi yukarıda aynı hizada ortada aynasız istiyorum."
-       ⚠ GERİ EKLEME. Kullanıcı Shorts emojisini SADE istiyor. Animasyon isterse Preset
-       ekranından kendisi seçip uyguluyor — o yol duruyor ve çalışıyor.
-       ⚠ `presetYaz`'daki `konumAtla` parametresi KALDI: nöbetçi testleri var, zararsız ve
-       ileride "konumu ben koydum, preset ezmesin" gereken her yerde doğru davranış. */
-    return (kondu === plan.length ? "✓ " : "⚠ ") +
-           kondu + "/" + plan.length + " emoji (V" + (kanal + 1) + ")";
-  }
-
-  /* ══════════════════════ ÇOKLU SHORTS ══════════════════════
-     Kullanıcı isteği (11 Ağustos 2026): "5 tane Shorts sequence'ı oluşturacak ve videonun 5
-     tane kısmını alacak — parça parça anları gibi. Videonun başında kaçırılma, sonra kafes
-     sahnesi, sonra kurtarılma; biri kaçırılmayı, biri kafesi, biri kurtarılmayı alsın."
-     ⚠ TEKLİDEN FARKI: tekli videonun HER YERİNDEN en iyi anları toplar (zaman dağılımı
-     kuralı bunun için); çoklu ise önce anlatı bölümlerini bulur ve her Shorts'u TEK BİR
-     bölümün içinden kurar. Beş bağımsız hikâye. */
-  async function cokluUret() {
-    var dur = $("cokluDurum");
-    var iler = cokluIler(), _panelAcik = false;
-    /* Tekli akıştaki ile aynı huni: bütün yaz() çağrıları panel başlığına da akar.
-       Bkz. shortsUret içindeki ayrıntılı not. */
-    function yaz(m, renk) {
-      if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; }
-      if (_panelAcik && m) iler.baslik(String(m).split("\n")[0]);   // çok satırlı sonuçta yalnız ilk satır başlığa
-    }
-    if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
-    if (!SHORTS || !SZAMAN || !VUR) { yaz("Shorts modülleri yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
-    var anahtar = "";
-    try { anahtar = VUR.anahtarOku(extRoot); }
-    // e.message korunur — kısaltılmış anahtar teşhisi burada da görünsün (bkz. emoji dalı).
-    catch (e) { yaz((e && e.message) || "Yapay zekâ anahtarı yok — Ayarlar'dan ekle", "var(--bad)"); return; }
-
-    var gruplar = shortsGruplariTopla();
-    if (!gruplar.length) { yaz("Önce Altyazı ekranından altyazı üret.", "var(--warn)"); return; }
-    if (state.cuesStale) {
-      var dvm = await uiConfirm(
-        "Bu altyazılar AutoCut kesiminden ÖNCE üretildi.\n\nKesitler YANLIŞ anlardan alınır.\n\n" +
-        "Yine de devam edeyim mi?", "Çoklu Shorts");
-      if (!dvm) { yaz("İptal edildi.", "var(--warn)"); return; }
-    }
-
-    var btn = $("btnCokluUret"); if (btn) btn.disabled = true;
-    _shortsIptal = false;
-    var bIptal = $("btnCokluIptal"); if (bIptal) bIptal.hidden = false;
-    var kaynakId = "", kaynakAd = "";
-    /* ⚠ KAYNAK SEKANSIN ADI BAŞTA OKUNUR. Geri dönüşü "adı Shorts N değilse tamam" diye
-       denetlemek kırılgan: kullanıcının kaynak sekansı da "Shorts 1" adında olabilir.
-       Gerçek adla karşılaştırmak tek doğru yol. */
-    /* ⚠⚠ KAYNAK SEKANSIN KİMLİĞİ DE BAŞTA OKUNUR — ÖLÇÜLMÜŞ HATA (12 Ağustos 2026).
-       Eskiden `kaynakId` YALNIZCA `r.hs.kaynakId` üzerinden, yani ancak bir Shorts
-       BAŞARIYLA kurulduktan sonra doluyordu. Geri-dönüş bloğunun tamamı `if (kaynakId && …)`
-       kapısının arkasında olduğu için, İLK TUR DÜŞERSE koruma tümden devre dışı kalıyordu:
-       kalan bütün turlar yanlış sekanstan kesit aramaya devam ediyor ve hepsi "kesit
-       zamanları bayat" diye düşüyordu — yani sebebi gizleyen bir zincirleme çökme.
-       Kimliği baştan okumak bu bağımlılığı kaldırıyor. */
-    try {
-      /* Ad ve kimlik TEK çağrıda, aralarında U+0001 ayracıyla. Ayraç "|" DEĞİL: sekans
-         adında "|" bulunabiliyor ve ad yanlış yerden bölünürdü; U+0001 bir sekans adında
-         bulunamaz.
-         ⚠ AYRAÇ İKİ TARAFTA DA KAÇIŞ DİZİSİYLE YAZILIR, düz karakterle DEĞİL: kaynak dosya
-         saf ASCII kalsın. Bir tur düz U+0001 yazıldı ve dosyada görünmez bir kontrol
-         karakteri olarak durdu — çalışıyordu ama bu projede görünmez karakterlerin bedeli
-         ölçülü (bkz. CLAUDE.md, BOM'suz .ps1 ve mojibake bölümleri). */
-      var _kb = String(await evalES(
-        '(function(){try{var s=app.project.activeSequence;' +
-        'return String(s.name)+"\\u0001"+String(s.sequenceID);}catch(e){return "";}})()'));
-      var _kbP = _kb.split(String.fromCharCode(1));
-      kaynakAd = _kbP[0] || "";
-      kaynakId = _kbP[1] || "";
-    } catch (eKa) { kaynakAd = ""; kaynakId = ""; }
-    if (!kaynakId) logLine("⚠ Çoklu Shorts: kaynak sekansın kimliği okunamadı — turlar arası " +
-                           "geri dönüş doğrulanamayacak.");
-    shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", []);
-    try {
-      var adet = parseInt(($("cokluAdet") || {}).value || "5", 10) || 5;
-      yaz("video bölümlere ayrılıyor…");
-      var bol = await SHORTS.coklukSec(VUR, anahtar, gruplar,
-        { onLog: logLine, damga: VUR.iptalDamgasi(), shortsAdet: adet });
-      if (bol.hata) { yaz(bol.hata, "var(--bad)"); return; }
-      if (!bol.shortslar.length) { yaz("Bölüm bulunamadı.", "var(--warn)"); return; }
-      if (_shortsIptal) { yaz("İptal edildi.", "var(--warn)"); return; }
-
-      /* ONAY KAPISI — beş sekans yaratılmadan ÖNCE. Emsal: tekli Shorts ve emoji kimlik kapısı. */
-      var satirlar = bol.shortslar.map(function (s, ix) {
-        return "  " + (ix + 1) + ") " + s.baslik + "  (" + s.kesitler.length + " kesit · " +
-               s.toplamSure.toFixed(1) + " sn · video " + _shortsSaat(s.bolumBas) + "-" +
-               _shortsSaat(s.bolumBit) + ")";
-      });
-      var onay = await uiConfirm(
-        bol.shortslar.length + " ayrı Shorts sekansı oluşturulacak:\n\n" + satirlar.join("\n") +
-        "\n\nHer biri altyazılı ve emojili olacak. Uzun sürer, Premiere donuk görünür.\n\n" +
-        "Devam edeyim mi?", "Çoklu Shorts");
-      if (!onay) { yaz("İptal edildi.", "var(--warn)"); return; }
-
-      var altYaz = !!($("cokluAltyazi") && $("cokluAltyazi").checked);
-      var emj = !!($("cokluEmoji") && $("cokluEmoji").checked);
-      var sonuclar = [], basliklar = [], i;
-
-      /* ── İLERLEME PANELİ ──
-         ⚠ SAYAÇ BİRİMİ "Shorts", saniye ya da kesit DEĞİL. Her tamamlanan sekans kalan
-         süre hesabına bir örnek veriyor; sekanslar birbirine yakın maliyette olduğu için
-         (aynı kesit sayısı, aynı altyazı/emoji işi) ikinci sekanstan sonra tahmin
-         gerçekten oturuyor. Panelin başka hiçbir yerinde bu kadar temiz bir ölçü yok.
-         Aşama listesi burada YOK: aşamalar sekans BAŞINA tekrar ediyor, beş kez tekrar
-         eden bir liste ilerlemeyi anlatmaz — onun yerine sayaç + başlık kullanılıyor. */
-      _panelAcik = true;
-      iler.basla({ baslik: "Çoklu Shorts hazırlanıyor…", toplam: bol.shortslar.length, birim: "Shorts" })
-          .uyari("donuk", "Her sekans için ayrı yapay zekâ isteği, ayrı kurulum, ayrı altyazı " +
-                 "ve emoji var. Premiere DONUK görünür — normaldir. “İptal” süren sekansı " +
-                 "bitirip durur.", "bilgi");
-
-      /* ⚠⚠ KAYNAK SEKANSA DÖNÜŞ — HER TURDAN SONRA, BAŞARISIZ TURLAR VE SON TUR DAHİL.
-         GERÇEK HATA (11 Ağustos 2026): `shortsSekansKur` işini bitirince yeni Shorts'u
-         AKTİF bırakıyor (tekli akışta doğru — kullanıcı sonucu görmeli). Çoklu döngüde
-         ikinci tur başlarken activeSequence artık 20 saniyelik Shorts 1 oluyor ve kaynak
-         videodaki 211./243./334./559. saniyeler orada YOK: host haklı olarak "hiçbir klibe
-         denk gelmiyor" diyor. Kullanıcının denemesinde 5 Shorts'un 4'ü bu yüzden düştü.
-
-         ⚠ ÜÇ AYRI KAPI DÜZELTİLDİ (12 Ağustos 2026 denetimi):
-           1) `if (r.hata) { … continue; }` bu bloğun ÜSTÜNDEYDİ — yani başarısız bir tur
-              geri dönüşü tamamen atlıyordu ve sonraki turlar yanlış sekanstan kesiyordu.
-              Oysa geri dönüşe en çok İHTİYAÇ DUYULAN an tam olarak budur: host hata
-              dalında sekansı silmiş ama aktif sekansı geri açamamış olabilir.
-           2) `i + 1 < bol.shortslar.length` şartı SON turdan sonra dönüşü engelliyordu ve
-              hemen ardından kaynak kimliği sıfırlandığı için `finally` de geri açmıyordu:
-              akış bitince aktif sekans SON Shorts kalıyordu. Kullanıcının bir sonraki
-              "Timeline'a Ekle" / "Emoji Ekle" işlemi o Shorts'a yazardı — panelin en
-              pahalı sessiz hatası. Artık son turdan sonra da dönülüyor.
-           3) `kaynakId` yalnız başarılı turdan geliyordu (yukarıda düzeltildi).
-         ⚠ GERİ DÖNÜŞ GERİ OKUNARAK DOĞRULANIR: openSequence sessizce başarısız olursa
-         sonraki tur yine yanlış sekansta kesit arar ve aynı hata "kesit zamanları bayat"
-         diye görünür — yani sebep gizlenir. */
-      var _kaynagaDon = async function () {
-        if (!kaynakId) return true;                 // kimlik yok: doğrulayamayız, akışı durdurmayalım
-        var geri = "";
-        try {
-          await evalES('app.project.openSequence("' + kaynakId + '")');
-          /* try/catch ExtendScript İÇİNDE: activeSequence null olabiliyor ve çıplak
-             ifade "EvalScript error" döndürüp sebebi gizlerdi. */
-          geri = String(await evalES(
-            '(function(){try{return String(app.project.activeSequence.name);}catch(e){return "";}})()'));
-        } catch (eG) { geri = ""; }
-        logLine("Çoklu Shorts: kaynak sekansa dönüldü → " + (geri || "okunamadı") +
-                (kaynakAd ? (" (beklenen: " + kaynakAd + ")") : ""));
-        return !(!geri || (kaynakAd && geri !== kaynakAd));
-      };
-
-      for (i = 0; i < bol.shortslar.length; i++) {
-        if (_shortsIptal) { logLine("Çoklu Shorts: kullanıcı iptal etti (" + i + " sekans yapıldı)."); break; }
-        var sh = bol.shortslar[i];
-        var etk = "[" + (i + 1) + "/" + bol.shortslar.length + " " + sh.baslik + "] ";
-        yaz(etk + "sekans kuruluyor…");
-        var r = await shortsKurVeDoldur(sh.kesitler, gruplar,
-          { altyazi: altYaz, emoji: emj, etiket: etk }, yaz);
-        if (r.hata) {
-          logLine("Çoklu Shorts " + (i + 1) + " başarısız: " + r.hata);
-          sonuclar.push({ baslik: sh.baslik, hata: r.hata });
-          /* ⚠ HATA DALINDA DA GERİ DÖN — bkz. yukarıdaki 1. madde. */
-          if (!(await _kaynagaDon())) {
-            yaz("⚠ Kaynak sekansa dönülemedi — kalan Shorts'lar yanlış sekanstan " +
-                "kesilirdi, durduruldu.", "var(--bad)");
-            logLine("Çoklu Shorts DURDU: aktif sekans kaynağa dönmedi.");
-            break;
-          }
-          continue;
-        }
-        if (!kaynakId) kaynakId = String(r.hs.kaynakId || "");
-        sonuclar.push({ baslik: sh.baslik, ozet: r.ozet, kismi: r.kismi, ad: r.hs.ad });
-
-        if (!(await _kaynagaDon())) {
-          yaz("⚠ Kaynak sekansa dönülemedi — kalan Shorts'lar yanlış sekanstan " +
-              "kesilirdi, durduruldu.", "var(--bad)");
-          logLine("Çoklu Shorts DURDU: aktif sekans kaynağa dönmedi.");
-          break;
-        }
-        /* ── BAŞLIK / HASHTAG / ETİKET ──
-           ⚠ Ağ hatasında Shorts DÜŞMEZ, yalnız başlık boş kalır: sekans zaten kuruldu ve
-           kullanıcı başlığı elle de yazabilir. */
-        yaz(etk + "başlık üretiliyor…");
-        /* ⚠ ÖNCEKİ BAŞLIKLAR GEÇİRİLİR — yoksa 5 başlığın hepsi aynı kalıba düşüyor
-           (kullanıcı bildirdi). Model her isteği ayrı görüyor, çeşitliliği panel sağlar. */
-        var bp = await SHORTS.baslikUret(VUR, anahtar, r.metin || sh.baslik,
-          { onLog: logLine, damga: VUR.iptalDamgasi(),
-            oncekiBasliklar: basliklar.map(function (x) { return x.baslik; }) });
-        bp.sekansAd = r.hs.ad + " — " + sh.baslik;
-        basliklar.push(bp);
-        shortsBaslikCiz("cokluBaslikListe", "cokluBaslikKart", basliklar);
-        /* ⚠ SAYAÇ TUR SONUNDA — turun BAŞINDA değil. Baştaki artış "1/5 bitti" gösterip
-           kalan süreyi olduğundan kısa hesaplardı; kalan süre hesabı ancak GERÇEKTEN
-           tamamlanmış işten örnek alabilir. */
-        iler.ilerle(sonuclar.length, "son biten: " + sh.baslik);
-      }
-
-      var basarili = sonuclar.filter(function (s) { return !s.hata; });
-      /* ⚠ PAYDA İSTENEN ADET, İŞLENEN ADET DEĞİL — ÖLÇÜLMÜŞ HATA (12 Ağustos 2026).
-         `sonuclar` yalnız İŞLENEN turları içeriyor; iptal (ya da geri-dönüş hatası)
-         döngüyü `break` ile kestiğinde 3 tur işlenmişse mesaj "3/3 Shorts oluşturuldu"
-         diyor ve YEŞİL çıkıyordu — kullanıcı iptal ettiği hâlde panel tam başarı
-         bildiriyordu. Payda artık kullanıcının istediği sayı. */
-      /* ⚠ PAYDA KULLANICININ İSTEDİĞİ SAYI — yapay zekânın ürettiği bölüm sayısı DEĞİL.
-         Bir tur `bol.shortslar.length` yazılmıştı ve kullanıcı 3 isteyip 2 aldığında panel
-         "2 / 2 Shorts oluşturuldu" diyerek kaybı GİZLİYORDU (kullanıcı bildirdi, 12 Ağustos
-         2026: "kaç tane seçtiysem o kadar yapmalı, önce bunu kesinleştir").
-         `adet` = ekrandaki seçicinin değeri, yani tek doğru payda. */
-      var istenen = adet;
-      if (bol.shortslar.length < adet) {
-        logLine("Çoklu Shorts: yapay zekâ " + adet + " bölüm için yalnız " +
-                bol.shortslar.length + " tanesinden geçerli kesit çıkarabildi.");
-      }
-      var yarimKaldi = sonuclar.length < istenen;
-      var kismiVar = basarili.some(function (s) { return s.kismi; }) ||
-                     basarili.length < sonuclar.length || yarimKaldi;
-      var msg = basarili.length + "/" + istenen + " Shorts oluşturuldu";
-      sonuclar.forEach(function (s, ix) {
-        msg += "\n  " + (ix + 1) + ") " + (s.hata ? ("✕ " + s.baslik + " — " + s.hata) : s.ozet);
-      });
-      if (yarimKaldi) msg += "\n⚠ " + (istenen - sonuclar.length) + " Shorts hiç başlamadı" +
-                             (_shortsIptal ? " (iptal ettin)." : " (akış durduruldu).");
-
-      /* ⚠ HEDEF SÜREYİ TUTTURAMAYAN SEKANSLARI ADIYLA SÖYLE (kullanıcı, 12 Ağustos 2026:
-         "30-40 saniye olmuyor, 2 tanesi 18 saniye"). Sebep panelde bir hata değil: o anlatı
-         bölümünde 30 saniyeyi dolduracak kadar uygun an yok. Sessiz kalmak kullanıcıyı
-         panelde hata aramaya itiyordu. */
-      var kisaListe = [];
-      (bol.shortslar || []).forEach(function (s, ix) {
-        var sy = s.sayac || {};
-        if (sy.hedefTutmadi) {
-          kisaListe.push((ix + 1) + ") " + s.baslik + " — " + sy.hedefTutmadi + " sn" +
-                         (sy.kisaElenen ? (" (" + sy.kisaElenen + " aday çok kısa diye elendi)") : ""));
-        }
-      });
-      if (kisaListe.length) {
-        msg += "\n⚠ Hedef süreye (27-45 sn) ulaşılamayan " + kisaListe.length + " Shorts: " +
-               kisaListe.join(" · ") + "\n   Sebep: o anlatı bölümünde yeterince uzun/uygun an yok. " +
-               "Daha az Shorts iste (5 yerine 3) — her birine daha geniş bölüm düşer.";
-      }
-      /* ⚠ ALT SINIRIN ALTINDA KALIP ATILAN BÖLÜMLERİ SÖYLE. Kullanıcı "27 sn'den kısa Shorts
-         istemiyorum" dedi ve panel artık o bölümleri Shorts'a çevirmiyor — ama bunu
-         söylemezse "neden 3 yerine 2 çıktı" sorusu cevapsız kalır ve panelde hata aranır. */
-      /* ⚠ "KARIŞIK" SHORTS'LARI İŞARETLE. Adet garantisi için bölüm sınırı gözetilmeden
-         doldurulan Shorts'lar, "her Shorts tek bir olaydan" sözünü tutmuyor — kullanıcı
-         bunu bilmeli, yoksa Çoklu ile Tekli arasındaki farkın kaybolduğunu sanır. */
-      if (bol.sayac && bol.sayac.karisikDoldurma) {
-        msg += "\n⚠ " + bol.sayac.karisikDoldurma + " Shorts, istediğin adede ulaşmak için " +
-               "bölüm sınırı gözetilmeden (videonun her yerinden karışık) kuruldu — " +
-               "anlatı bölümlerinde yeterli malzeme yoktu.";
-      }
-      if (bol.sayac && bol.sayac.kisaElendi) {
-        msg += "\n⚠ " + bol.sayac.kisaElendi + " bölüm 27 sn'nin altında kaldığı için ATLANDI " +
-               "(senin kuralın: 27 sn'den kısa Shorts üretme). Yedekler de yetmediyse sonuç " +
-               "istediğinden az olur — daha az Shorts iste, her birine daha geniş bölüm düşsün.";
-      }
-      if (basarili.length) msg += "\n⚠ Altyazı BOYUTU/KONUMU Premiere'den verilir: altyazıya tıkla → " +
-                                  "Essential Graphics → Track Style (Shorts stillerinden birini seç)";
-      /* ⚠ KAYNAK KİMLİĞİNİ SIFIRLAYAN SATIR KALDIRILDI — bilerek. O satır `finally`'nin kaynak sekansa
-         dönmesini engelliyordu ve son turdan sonra da dönüş yapılmadığı için akış bitince
-         aktif sekans SON SHORTS kalıyordu. Kullanıcının bir sonraki "Timeline'a Ekle" veya
-         "Emoji Ekle" işlemi sessizce o Shorts sekansına yazardı.
-         Tekli Shorts'un davranışı farklı ve DOĞRU: orada tek bir sonuç var, kullanıcı onu
-         görmeli, ve sonuç mesajı hangi sekansta kalındığını AÇIKÇA söylüyor. Çokluda beş
-         sekanstan hangisinin açık kalacağı keyfî — kaynağa dönmek tek anlamlı davranış. */
-      msg += "\n✓ Kaynak sekansına geri dönüldü" + (kaynakAd ? (" (" + kaynakAd + ")") : "") +
-             " — uzun videoyla çalışmaya kaldığın yerden devam edebilirsin.";
-      yaz((kismiVar ? "⚠ " : "✓ ") + msg, kismiVar ? "var(--warn)" : "var(--good)");
-
-      /* ── PANEL SONUCU ── */
-      iler.uyariSil("donuk").ozet([
-        ["Sonuç", basarili.length + " / " + istenen + " Shorts oluşturuldu"],
-        ["Altyazı", altYaz ? "her sekansa yazıldı" : "kapalı"],
-        ["Emoji", emj ? "her sekansa kondu" : "kapalı"],
-        ["Sekans", kaynakAd ? ("kaynağa dönüldü: " + kaynakAd) : "kaynağa dönüldü"]
-      ]);
-      sonuclar.forEach(function (s, ix) {
-        if (s.hata) iler.uyari("hata" + ix, "✕ " + (ix + 1) + ") " + s.baslik + " — " + s.hata, "bad");
-      });
-      if (yarimKaldi)
-        iler.uyari("yarim", "⚠ " + (istenen - sonuclar.length) + " Shorts hiç başlamadı" +
-                   (_shortsIptal ? " — iptal ettin." : " — akış durduruldu."), "");
-      if (basarili.length)
-        iler.uyari("stil", "Altyazının BOYUTU ve KONUMU Premiere'den verilir: altyazıya tıkla → " +
-                   "Essential Graphics → Track Style → Shorts stillerinden birini seç.", "bilgi");
-      iler.bitir(basarili.length + " / " + istenen + " Shorts oluşturuldu",
-                 kismiVar ? (basarili.length ? "warn" : "bad") : "");
-    } catch (e3) {
-      yaz("hata: " + (e3.message || e3), "var(--bad)");
-      /* Panel de kapatılmalı — yoksa hata dalında spinner sonsuza kadar döner. */
-      try { iler.uyariSil("donuk").bitir("Çoklu Shorts başarısız: " + (e3.message || e3), "bad"); } catch (eP3) {}
-      logLine("Çoklu Shorts hatası: " + (e3.stack || e3.message || e3));
-    } finally {
-      if (kaynakId) { try { await evalES('app.project.openSequence("' + kaynakId + '")'); } catch (eB) {} }
-      if (btn) btn.disabled = false;
-      var bi = $("btnCokluIptal"); if (bi) { bi.hidden = true; bi.disabled = false; }
-      _shortsIptal = false;
-    }
-  }
-
-  /* Altyazı ekranındaki cue'lardan kanal gruplarını toplar — tekli ve çoklu ORTAK kullanır. */
-  /* ⚠ GRUPLAR KANAL NUMARASINI (idx) DA TAŞIR — emoji karakter çözümlemesi buna muhtaç.
-     Emoji ekranındaki "Bu videoda kim hangi kanalda?" seçimi KANAL NUMARASINA göre
-     saklanıyor (emoji.kanalKar.<sekans>.<idx>). idx taşınmadığı için Shorts yolu o seçimi
-     hiç okuyamıyor, yalnız ad eşleşmesi yapıyordu: kullanıcı uzun videoda A1→kendi
-     karakterini seçip emojileri alıyor, sonra Shorts üretince "emoji: uygun cümle yok"
-     görüyordu (bkz. shortsEmojiKoy'daki not). */
-  function shortsGruplariTopla() {
-    var gruplar = [];
-    if (state.genMode === "channels") {
-      if (state.a1Cues && state.a1Cues.length) gruplar.push({ ad: a1Adi() || "A1", cues: state.a1Cues, idx: 0 });
-      aktifKanallar().forEach(function (ch) {
-        if (ch.cues && ch.cues.length) gruplar.push({ ad: kanalAdi(ch) || ("A" + (ch.idx + 1)), cues: ch.cues, idx: ch.idx });
-      });
-    } else if (state.singleCues && state.singleCues.length) {
-      /* Tek kaynak: A2 seçiliyse cue'lar A2'nin (idx 1), değilse A1'in (idx 0). Bu ayrım
-         uzun video yolunda da aynen var — "Kaynak Ses = A2 iken arkadaşların sesi senin
-         karakterine yazılıyordu" hatası tam buradan doğmuştu. */
-      gruplar.push({ ad: (state.track === "1" ? (String(lsGet("kanalAd.1", "")).trim() || "A2") : (a1Adi() || "A1")),
-                     cues: state.singleCues, idx: (state.track === "1" ? 1 : 0) });
-    }
-    return gruplar;
-  }
-
-  function _shortsSaat(sn) {
-    sn = Math.max(0, Math.floor(Number(sn) || 0));
-    var d = Math.floor(sn / 60), s = sn % 60;
-    return d + ":" + (s < 10 ? "0" : "") + s;
-  }
-
-  /* ⚠⚠ ADI "wireShortsSekans" — "wireShorts" DEĞİL. GERİ ADLANDIRMA.
-     Bu fonksiyonun adı da `wireShorts`'tu ve satır ~856'daki (Altyazı ekranındaki "Shorts"
-     kutusunu bağlayan) fonksiyonla AYNI KAPSAMDA aynı adı taşıyordu. JavaScript aynı
-     kapsamdaki ikinci `function X()` bildirimi için HATA VERMEZ — sessizce birinciyi ezer.
-     Ölçülen iki sonuç:
-       1) Altyazı ekranındaki Shorts kutusunun dinleyicisi HİÇ BAĞLANMIYORDU. Kutu
-          işaretlenince ne ayar bloğu açılıyor ne sekans kontrolü yapılıyor ne de seçim
-          localStorage'a yazılıyordu — yani UZUN VİDEO tarafında ölü bir kutu.
-       2) `wire()` bu adı İKİ KEZ çağırıyordu (_wire("Shorts", …) ve _wire("Shorts sekansı", …)),
-          yani Shorts/Çoklu Shorts düğmelerine İKİ dinleyici bağlanıyordu: tek tık = İKİ
-          paralel üretim, İKİ ayrı yapay zekâ isteği (çift ücret) ve aynı projede iki sekans
-          kurulumu birbirinin aktif sekansını çekiştirerek.
-     Belirtisi "Shorts garip davranıyor"du ve sebebi hiçbir yerde görünmüyordu.
-     Nöbetçi testi eklendi (tumtest.js): app.js'te aynı kapsamda yinelenen fonksiyon adı. */
-  function wireShortsSekans() {
-    var b = $("btnShortsUret");
-    if (b) b.addEventListener("click", function () { shortsUret(); });
-    var bi = $("btnShortsIptal");
-    if (bi) bi.addEventListener("click", function () {
-      _shortsIptal = true;
-      if (VUR && VUR.iptal) VUR.iptal();
-      bi.disabled = true; bi.textContent = "durduruluyor…";
-    });
-    var bc = $("btnCokluUret");
-    if (bc) bc.addEventListener("click", function () { cokluUret(); });
-    var bci = $("btnCokluIptal");
-    if (bci) bci.addEventListener("click", function () {
-      _shortsIptal = true;
-      if (VUR && VUR.iptal) VUR.iptal();
-      bci.disabled = true; bci.textContent = "durduruluyor…";
-    });
-  }
-
   function emojiKlasorVarsayilan() {
     try { if (cfg && cfg._engineRoot) return path.join(cfg._engineRoot, "Emoji"); } catch (e) {}
     var h = (typeof process !== "undefined" && process.env)
@@ -5758,14 +3204,8 @@
   function wirePreset() {
     /* HAZIR İÇERİK KURULUMU — kartlar çizilmeden ÖNCE: yeni kurulumda preset'ler dolu
        gelsin, boş kart görünüp sonradan dolmasın. Kendi kaydı olanda hiçbir şey yapmaz. */
-    /* ⚠ LİSTE ÖNCE YÜKLENİR — varsayilanlariKur ONU KULLANIYOR.
-       Eskiden sıra tersti: hazır içerik kurulumu `_presetSecili` daha BOŞ dizi iken çalışıp
-       `presetSeciliYaz()` çağırıyor ve localStorage'daki kart listesini eziyordu.
-       Birleştirme bloğu artık listeyi kendisi diskten okuyor (çağrı sırasından bağımsız),
-       ama sırayı da düzeltmek doğrusu: aynı hataya ikinci bir kapı bırakmayalım. */
-    _presetSecili = presetSeciliOku();
     try { varsayilanlariKur(); } catch (eVk) { logLine("Hazır içerik kurulamadı: " + (eVk.message || eVk)); }
-    _presetSecili = presetSeciliOku();      // kurulum yeni ad eklediyse tazele
+    _presetSecili = presetSeciliOku();
     /* Kartlar ÇİZİLMEDEN ÖNCE: öğretilmiş ama listede olmayan preset'ler eklensin, yoksa
        kullanıcı erişemediği bir kaydın varlığını hiç öğrenemiyor. */
     presetSeciliTazele();
@@ -5802,15 +3242,6 @@
        Türkçe'de belirgin kötü, sansürü kapatmak da YouTube için istenmiyor. */
     var o = { model: cfg.model || "large-v3", language: cfg.language, diarize: false,
       censor: "all",
-      /* ⚠⚠ HIZLI MOD (--batched) ARTIK HER ZAMAN KAPALI — ÖLÇÜLDÜ VE BOZUK ÇIKTI.
-         `false` SABİT: kutudan da localStorage'dan da OKUNMUYOR. Ölçüm ve gerekçe
-         wireCakisma()'nın içindeki uzun notta; özeti: batched, Whisper segmentlerini 7 kat
-         seyrelttiği için `cumleId` çöküyor, bu da "Tofi Moni video modu"nun seyreltmesini
-         tümden devre dışı bırakıyor ve cümle sınırlarını yok ediyor.
-         ⚠ `pipeline.js`'teki `--batched` desteği DURUYOR (tek satır, `opts.batched`) —
-         motor sürümü değişip segment üretimi düzelirse yeniden bağlanabilir. Ama önce
-         segment/dakika ölçülmeli (~15+ olmalı), "hızlandı" tek başına yeterli değil. */
-      batched: false,
       hotwords: SZ ? SZ.hotwords(state.dict) : "", dictMap: state.dictMap };
     /* KELİME TAVANI HER ZAMAN 2 (kullanıcı isteği): ekranın altındaki Minecraft hotbar'ını
        aşacak uzunlukta satır istenmiyor. Eskiden yalnız Shorts'ta 2'ydi, normal videoda
@@ -5978,11 +3409,9 @@
     logLine(data.sequenceName + " · " + data.clips.length + " klip");
     setProgress(20, "Ses hazırlanıyor…");
     var prep = await prepAudio(data.clips, trackIdx, "single");
-    /* Etiket cihazı SABİT "(GPU)" yazıyordu; ayar cpu iken de öyle. Gerçek ayarı yaz. */
-    setProgress(45, "Yazıya dökülüyor (" + (String(cfg.device).toLowerCase() === "cpu" ? "CPU" : "GPU") + ")…");
+    setProgress(45, "Yazıya dökülüyor (GPU)…");
     _pg.transT0 = Date.now(); _pg.totalSec = prep.dur || 0;
     var cues = await pipeline.transcribe(cfg, prep.wav, function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 45, 95); }, trOpts());
-    cpuDusuUyar();
     offsetCues(cues, prep.offset);
     cleanupFiles(prep.cleanup);
     state.singleCues = cues; state.a1Cues = []; state.a2Cues = []; state.speakers = [];
@@ -6243,9 +3672,6 @@
     _pg.transT0 = Date.now(); _pg.totalSec = prep1.dur || 0;
     state.a1Cues = offsetCues(await pipeline.transcribe(cfg, prep1.wav,
       function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, 10, 10 + pay); }, trOpts()), prep1.offset);
-    /* İLK kanalda uyarmak yeterli: CUDA bir kanalda çalışmıyorsa hepsinde çalışmayacak.
-       Her kanalda tekrar göstermek bandı gereksiz yere yeniden açardı. */
-    cpuDusuUyar();
     cleanupFiles(prep1.cleanup);
     logLine("A1: " + state.a1Cues.length + " satır");
 
@@ -6261,11 +3687,6 @@
       ch.cues = offsetCues(await pipeline.transcribe(cfg, prep.wav,
         (function (a, b) { return function (l) { var p = whenLog(l); if (p >= 0) transProgress(p, a, b); }; })(loTr, hi),
         trOpts()), prep.offset);
-      /* ⚠ HER KANALDAN SONRA DA KONTROL ET. Eskiden yalnız A1'den sonra çağrılıyordu; ama
-         A1'de GPU çalışıp (ya da A1 hiç işlenmeyip) sonraki bir kanalda CUDA düşerse uyarı
-         hiç görünmüyordu. Fonksiyonun kendi tek-sefer bayrağı var, yani bant her kanalda
-         yeniden açılmıyor. */
-      cpuDusuUyar();
       cleanupFiles(prep.cleanup);
       logLine(kanalAdi(ch) + ": " + ch.cues.length + " satır");
       // Konuşma çıkmayan kanal muhtemelen oyun sesi/müzik — kullanıcı işareti kaldırsın
@@ -6409,13 +3830,6 @@
     }
     redrawTranscript();
     modGorunumUygula();
-    /* ⚠ ÖNCE basla(), SONRA progressDone. `bitir()` panelin başlığını/rozetini yazıyor ama
-       `hidden`ına HİÇ dokunmuyor — görünür yapan tek yer `basla()`. Bu yol basla'yı hiç
-       çağırmadığı için "812 altyazı geri yüklendi" mesajı hem eski (`display:none`) hem yeni
-       (hidden) kutuda görünmez kalıyordu: kullanıcı kaç altyazının geldiğini göremiyordu.
-       Diğer progressDone çağrılarının hepsi btnRun/btnAddTimeline'ın açtığı bir panelin
-       üstüne yazıyor; sızıntı yalnız buraya özgüydü. */
-    try { altyaziIler().basla({ baslik: "Oturum geri yükleniyor…" }); } catch (eOb) {}
     progressDone("Kaydedilmiş oturum geri yüklendi — " + allCues().length + " altyazı");
   }
   /* Oturum dosyasını okur; ana dosya bozuksa .bak yedeğine düşer.
@@ -6605,76 +4019,12 @@
     if (vurucuAcik() && VUR && CEP) {
       try {
         logLine("Vurucu cümleler seçiliyor (yapay zekâ)…");
-        /* ⚠ SEYRELTMEDEN ÖNCEKİ SAYI ÖLÇÜLÜYOR — sonucu DOĞRULAMAK için.
-           12 Ağustos 2026'da gerçekten şu oldu: mod açıktı, hata yoktu, panel yeşil dedi,
-           ama 7. dakikada altyazı hâlâ doluydu ve kullanıcı bunu ancak Premiere'de gördü. */
-        var vOnceToplam = 0, vSegToplam = 0, vi2;
-        for (vi2 = 0; vi2 < isler.length; vi2++) {
-          vOnceToplam += isler[vi2].cues.length;
-          var _idSet = {};
-          isler[vi2].cues.forEach(function (q) { if (q && q.cumleId) _idSet[q.cumleId] = 1; });
-          vSegToplam += Object.keys(_idSet).length;
-        }
         var vGiris = isler.map(function (x) { return { ad: x.ad, cues: x.cues }; });
         var vSonuc = await VUR.vurucuSec(extRoot, vGiris, { onLog: logLine });
         for (var vi = 0; vi < isler.length; vi++) {
           if (vSonuc && vSonuc.gruplar && vSonuc.gruplar[vi] && vSonuc.gruplar[vi].cues) {
             isler[vi].cues = vSonuc.gruplar[vi].cues;
           }
-        }
-        /* ⚠ PARÇALARIN BİR KISMI DÜŞTÜYSE O BÖLÜMLER ALTYAZISIZ KALIR — SESSİZ KALMA.
-           vurucu.js istekleri parçalara bölüyor (parcaPencere: 40) ve TEK TEK başarısız
-           olanları sayıyor; yalnız HEPSİ düşerse hata fırlatıyor. Bir parça düşerse o
-           parçanın ~40 penceresinden HİÇBİR cümle seçilmiyor, yani videonun o bölümü
-           tamamen altyazısız kalıyor — panel ise yalnız "seyreltme oranı"na bakıyordu ve
-           oran düştüğü için her şey yolunda görünüyordu. 20 dakikalık bir videoda bu
-           dakikalarca boş altyazı demek ve kullanıcı ancak Premiere'de fark ediyor.
-           Bedeli 25-30 dakikalık GPU işinden SONRA ortaya çıktığı için onay soruyoruz. */
-        if (vSonuc && vSonuc.parcaBasarisiz > 0 && vSonuc.parcaToplam > 0) {
-          var vpMsg = vSonuc.parcaToplam + " yapay zekâ isteğinin " + vSonuc.parcaBasarisiz +
-                      " tanesi başarısız oldu (genelde internet kesintisi). O bölümlerde " +
-                      "vurucu cümle SEÇİLEMEDİ, yani video o kısımlarda altyazısız kalır.";
-          logLine("⚠ VURUCU MOD: " + vpMsg + (vSonuc.hatalar && vSonuc.hatalar.length
-                  ? " — " + vSonuc.hatalar.slice(0, 3).join(" | ") : ""));
-          var vpDevam = await uiConfirm(
-            "“Tofi Moni video modu” isteklerinin bir kısmı başarısız oldu:\n\n" + vpMsg +
-            "\n\nYine de timeline'a ekleyeyim mi?\n" +
-            "(Hayır dersen altyazılar panelde kalır — internetin düzelince modu kapatıp " +
-            "tekrar açman yeter, GPU işi tekrarlanmaz.)", "Vurucu mod");
-          if (!vpDevam) { progressFail("İptal edildi — vurucu mod istekleri yarım kaldı", "warn"); return null; }
-        }
-        /* ⚠⚠ SEYRELTME GERÇEKTEN OLDU MU? ÖLÇ VE SÖYLE — SESSİZ KALMA.
-           Vurucu mod cue SİLMEZ, cümle SEÇER; seçim `cumleId` ile gruplanıyor. Cümle sayısı
-           pencere sayısından AZSA (ör. 623 sn'lik videoda 120 sn sonrası için 41 pencere ama
-           yalnız 21 cümle) her cümle seçilir ve seyreltme SIFIR olur — hata da vermez.
-           Bunun ölçülmüş sebebi motorun az ve devasa segment üretmesiydi (Hızlı mod). O kutu
-           kaldırıldı ama sebep tek değil: çok az konuşulan bir video ya da başka bir motor
-           ayarı aynı sonucu verebilir. Panel bunu FARK EDİP SÖYLEMELİ; kullanıcının bunu
-           Premiere'de keşfetmesi 20-30 dakikalık GPU işinden sonra oluyor. */
-        var vSonraToplam = 0;
-        for (vi2 = 0; vi2 < isler.length; vi2++) vSonraToplam += isler[vi2].cues.length;
-        var vOran = vOnceToplam ? (vSonraToplam / vOnceToplam) : 0;
-        var vSegYogun = vSegToplam ? (vOnceToplam / vSegToplam) : 0;   // cümle başına cue
-        logLine("Vurucu mod: " + vOnceToplam + " → " + vSonraToplam + " altyazı (%" +
-                Math.round(vOran * 100) + " kaldı) · " + vSegToplam + " cümle · cümle başına " +
-                vSegYogun.toFixed(1) + " altyazı.");
-        /* Eşik %60: gerçek bir seyreltmede oran tipik olarak %15-35 arasında kalıyor.
-           %60'ın üstü "mod açıktı ama işe yaramadı" demektir. */
-        if (vOran > 0.6) {
-          var vNeden = (vSegYogun > 10)
-            ? ("Sebep ölçüldü: motor cümleleri çok BÜYÜK parçalar hâlinde döndürmüş " +
-               "(cümle başına " + vSegYogun.toFixed(0) + " altyazı; normali 2-4). Panel cümle " +
-               "sınırlarını göremediği için seçecek cümle bulamıyor.")
-            : ("Sebep: videoda seyreltilecek kadar çok ayrı cümle yok (" + vSegToplam +
-               " cümle bulundu).");
-          logLine("⚠ VURUCU MOD SEYRELTEMEDİ. " + vNeden);
-          var vDevam = await uiConfirm(
-            "“Tofi Moni video modu” açık ama altyazıyı SEYRELTEMEDİ:\n\n" +
-            vOnceToplam + " altyazının " + vSonraToplam + " tanesi kalıyor (%" +
-            Math.round(vOran * 100) + ").\n\n" + vNeden + "\n\n" +
-            "Böyle devam edersen video baştan sona altyazılı olur.\n\n" +
-            "Yine de timeline'a ekleyeyim mi?", "Vurucu mod");
-          if (!vDevam) { progressFail("İptal edildi — vurucu mod seyreltemedi", "warn"); return null; }
         }
       } catch (eVur) {
         logLine("Vurucu mod atlandı: " + (eVur.message || eVur));
@@ -6847,18 +4197,8 @@
             ekrana çıkacak komşuya kurulur.
          3) Cue KOPYASI üzerinde çalışıyoruz (yukarıdaki kopya bloğu) — panelin listesi,
             oturum dosyası ve emoji süreleri hiç etkilenmez. */
-    /* ⚠ SAYAÇ SONUÇ MESAJINA TAŞINDI (ParsMazi, 11 Ağustos 2026: "kelimeler arası boşluk
-       kalmış ama aynı cümlede"). Köprü sayaçları bugüne kadar YALNIZ log'a yazılıyordu;
-       kullanıcı "boşluk kaldı" diyor ama panel neden kurulmadığını söylemiyordu — üç ayrı
-       sebep var ve üçünün çaresi bambaşka:
-         · uzakBosluk   → boşluk 0.15 sn'den büyük, yani GERÇEK duraklama (doğru davranış)
-         · farkliCumle  → cümle sınırı, bilerek bırakılıyor
-         · kanalEngeli  → o anda başka kanalda altyazı var; köprü kurulsa üst üste binerdi
-       ⚠ Çok karakterli videoda (ParsMazi'de 5 kanal) `kanalEngeli` baskın olabilir ve
-       bu YAPISAL — MAX_KOPRU'yu büyütmek çözmez, yalnız gerçek duraklamaları da kapatır. */
-    var koprü = null;
     if (pipeline && typeof pipeline.cumleBirlestir === "function") {
-      try { koprü = pipeline.cumleBirlestir(isler, {}, logLine); }
+      try { pipeline.cumleBirlestir(isler, {}, logLine); }
       catch (eKp) { logLine("Cümle birleştirme yapılamadı: " + (eKp.message || eKp)); }
     } else logLine("UYARI: cümle birleştirici yok (pipeline.js eski) — altyazılar arasında boşluk kalır.");
 
@@ -6909,18 +4249,6 @@
        Bu yüzden hangi track'in kimin olduğunu yukarıda yazmak ŞART: 4-5 track hepsi "C1, C2…"
        diye görünüyor ve isim olmadan hangisine hangi stili vereceği bilinemez. */
     if (basarili.length > 1) msg += " | Stilleri Premiere'de ver: altyazıya tıkla → Track Style";
-    /* ⚠ KÖPRÜ SAYAÇLARI MESAJDA (ParsMazi: "kelimeler arası boşluk kalmış ama aynı cümlede").
-       Sayaçlar bugüne kadar yalnız log'daydı; kullanıcı boşluk görüyor ama sebebini
-       bilmiyordu. Üç sebebin çaresi bambaşka olduğu için AYRI AYRI yazılıyor. */
-    if (koprü && (koprü.koprulen || koprü.uzakBosluk || koprü.kanalEngeli || koprü.farkliCumle)) {
-      var kp = [];
-      if (koprü.koprulen) kp.push(koprü.koprulen + " boşluk kapatıldı");
-      if (koprü.kanalEngeli) kp.push(koprü.kanalEngeli + " tanesi kapatılamadı (o anda BAŞKA " +
-                                     "kanalda altyazı var, kapatılsa üst üste binerdi)");
-      if (koprü.uzakBosluk) kp.push(koprü.uzakBosluk + " tanesi 0.15 sn'den uzun (gerçek duraklama)");
-      if (koprü.farkliCumle) kp.push(koprü.farkliCumle + " tanesi cümle sınırı");
-      msg += " | kelime arası: " + kp.join(" · ");
-    }
     /* GİZLENEN / ÜST ÜSTE KALAN SAYISI MESAJA GİRER — sessiz geçmek yasak. Gizleme metin
        kaybıdır ve kullanıcı ekranda olmayan bir repliğin panelde BİLEREK düşürüldüğünü ancak
        buradan öğrenir. Kırılım da yazılıyor ("Sage 3 · Mimi 4"): öncelik sabit olduğu için
@@ -7021,27 +4349,10 @@
     try {
       // Yerleştirmeden önce kaydet (Geri Al için). Sonuç log'lanır: kaydetme başarısızsa
       // "Geri Al" bu ana DEĞİL daha eski bir sürüme döner — sebebi Ayrıntılar'da görünsün.
-      /* ⚠ NÖBETÇİ + ÇUBUK ÖNCE. Eski sırada bu satır progressBusy()'den ÖNCE ve nöbetçisiz
-         çalışıyordu: ekranda henüz hiçbir şey değişmemiş oluyor (çubuk ya gizli ya bir
-         önceki işin son hâlinde) ve Premiere bir "Save Project" penceresi açarsa panel
-         hiçbir belirti vermeden donuyordu — ParsMazi'de ölçülen kilitlenmenin birebir
-         senaryosu. Artık önce çubuk açılıyor, sonra nöbetçili kaydetme yapılıyor. */
-      progressBusy("Proje kaydediliyor…");
-      logLine("Kaydet: " + (await evalES('saveProject()', function (sn) {
-        if (sn >= 20) progressBusy("Proje kaydediliyor… (" + sn + " sn) — Premiere'de açık bir " +
-                                   "kaydetme penceresi var mı? Kapatınca devam eder.");
-      })));
+      logLine("Kaydet: " + (await evalES('saveProject()')));
       progressBusy("Timeline'a ekleniyor…");
       var r = await placeCurrent();
-      /* ⚠ İPTALDE GÖRÜNEN PANELİ KAPAT — `$("progressBox").hidden = true` ARTIK İŞLEVSİZ.
-         O kutu css/style.css'te `display: none !important`; kullanıcının gördüğü panel
-         #altyaziIler. placeCaptions null döndüğü DÖRT yolda da (bayat cue onayı, ikinci
-         basış onayı, iş yok, vurucu hiç cümle seçmedi) progressBusy'nin açtığı panel açık
-         kalıyor, saniyede bir artan "geçen 1:20" sayacıyla birlikte dönmeye devam ediyordu:
-         kullanıcı İPTAL ettiği hâlde panelin çalıştığını ya da donduğunu sanıyordu.
-         Sayaç yalnız bitir()/gizle() ile duruyor — başka hiçbir yerde durdurulmuyor. */
-      if (r != null) showResult(r);
-      else { try { altyaziIler().gizle(); } catch (eGz) {} }
+      if (r != null) showResult(r); else $("progressBox").hidden = true;
     }
     catch (e) { progressFail("❌ " + friendlyError(e), "bad"); logLine("HATA: " + (e.message || e)); uiAlert(friendlyError(e), "Hata"); }
     finally { btn.disabled = false; }
@@ -7090,14 +4401,15 @@
     if (!exportCues().length) { uiAlert("Önce altyazı oluştur."); return; }
     saveAs("transkript.txt", ["txt"], pipeline.cuesToTxt(exportCues()));
   });
-  /* ⚠ "Bölümler" (YouTube bölüm zaman damgası) DÜĞMESİ VE "30 sn'de bir / 1 dk'da bir"
-     ARALIK MENÜSÜ KALDIRILDI (kullanıcı isteği, 12 Ağustos 2026: "o butonla işimiz yok").
-     Dinleyici burada duruyordu ve düğmeyi KORUMASIZ arıyordu (null kontrolü yoktu) — index.html'den
-     düğmeyi silip bu satırı bırakmak paneli açılışta TypeError ile düşürürdü (o noktadan
-     sonraki hiçbir düğme bağlanmaz; bu projede "panel açılıyor ama hiçbir şey çalışmıyor"
-     belirtisinin bilinen sebebi tam olarak budur).
-     `pipeline.cuesToChapters` SİLİNMEDİ: çalışan ve testli bir fonksiyon, geri istenirse
-     tek bir HTML düğmesiyle yeniden bağlanır. */
+  $("btnExportChapters").addEventListener("click", function () {
+    if (!CEP) { uiAlert("Önizleme modu."); return; }
+    if (!exportCues().length) { uiAlert("Önce altyazı oluştur."); return; }
+    var iv = parseInt($("chapInterval").value, 10) || 60;
+    var txt = pipeline.cuesToChapters(exportCues(), { interval: iv });
+    var n = (txt.match(/\n/g) || []).length;
+    if (n < 3) { uiAlert("Sadece " + n + " bölüm çıktı. YouTube bölümleri için en az 3 gerekir (aralığı küçült veya daha uzun video).", "Bölümler"); }
+    saveAs("bolumler.txt", ["txt"], txt);
+  });
 
   // ---------- İPTAL ----------
   /* İPTAL — iki işin AYRI bayrağı var. Eskiden tek `state.cancelled` paylaşılıyordu:
@@ -7162,11 +4474,6 @@
     var ta = $("snkKisiText");
     if (ta && KISI) { ta.value = KISI.toText(state.kisiler); _kisiSonMetin = ta.value; }
     var b = $("snkKisiBadge"); if (b) b.textContent = (state.kisiler || []).length;
-    /* "Videoyu kim çekiyor?" seçicisi KADRODAN üretiliyor — liste her değiştiğinde birlikte
-       tazelenmeli, yoksa kullanıcı kendini listeye ekler ama seçicide göremez (ve panelin
-       neden hâlâ yanlış kişiyi A1 saydığını anlayamaz). Kendi try'ında: bu satırın patlaması
-       kişi listesini doldurmayı engellemesin. */
-    try { snkCekenDoldur(); } catch (e) { logLine("Çeken seçicisi çizilemedi: " + (e.message || e)); }
   }
   function snkKisiKaydet() {
     if (!KISI) return;
@@ -7225,102 +4532,9 @@
   }
 
   // ---------- 2) kişileri eşle + plan kur ----------
-  /* Ad normalleştirme — senkron tarafının HER YERİNDE aynı kural olmak ZORUNDA.
-     İki farklı kural bu kartta bir kez gerçek bir hataya yol açtı: sıra listesi filtresi
-     bir kuralla, dosya eşleştirmesi başka bir kuralla karşılaştırıyordu; kullanıcı çekenin
-     adını "Tofı" (noktasız ı) yazınca çekenin KENDİ kaydı bilinmeyenlere düşüp timeline'a
-     konuyor ve ses ÇİFT çıkıyordu. Tek tanım = bir daha ayrışamaz.
-     ⚠ trLower DEĞİL: o I'yı "ı"ya çeviriyor, burada I ve İ'nin İKİSİ de "i" olmalı
-     (kullanıcı Discord adını her iki türlü de yazabiliyor). */
-  /* ⚠ KURAL `js/kisiler.js` İÇİNDEKİ `_norm` İLE BİREBİR AYNI OLMAK ZORUNDA.
-     Dosya→karakter eşleştirmesini `KISI.bul` yapıyor ve o `_norm` kullanıyor; bu fonksiyon
-     ise seçiciyi, sıra listesini ve `dosyaOf` anahtarlarını üretiyor. İki kural ayrışırsa
-     panel bir adı "eşleşti" sayıp ötekinde "eşleşmedi" der — bu kartta tam olarak bu
-     yaşandı ve çekenin KENDİ kaydı bilinmeyenlere düşüp timeline'a konarak sesi ÇİFT
-     çıkarmıştı.
-     İlk yazımda buradaki gövde `İ,I → i` + toLowerCase idi; `_norm` ise ayrıca noktasız
-     `ı`'yı da katlıyor ve `. - _ boşluk` karakterlerini atıyor. Yani yorumdaki "Tofı"
-     örneği gerçekte ÇÖZÜLMÜYORDU. Artık gövde birebir aynı.
-     ⚠ `trLower` DEĞİL: o `I`'yı `ı` yapıyor; burada `I`, `İ` ve `ı`'nın ÜÇÜ de `i` olmalı. */
-  function _snkAdNorm(s) {
-    s = String(s == null ? "" : s).replace(/[İIı]/g, "i").toLowerCase();
-    return s.replace(/[.\-_\s]/g, "");
-  }
-  /* Kadrodaki karakter adları, kişi listesi SIRASIYLA ve tekilleştirilmiş.
-     Sıra önemli: bu listenin sırası ses kanallarının sırasını belirliyor. */
-  function snkKarakterAdlari() {
-    var out = [], gor = {};
-    (state.kisiler || []).forEach(function (k) {
-      if (!k || !k.karakter) return;
-      var n = _snkAdNorm(k.karakter);
-      if (!n || gor[n]) return;
-      gor[n] = 1; out.push(k.karakter);
-    });
-    return out;
-  }
-  /* ⚠ "VİDEOYU KİM ÇEKİYOR?" SEÇİCİSİ KADRODAN ÜRETİLİR — HTML'DE SABİT DEĞİL.
-     GERÇEKTEN OLDU (ParsMazi, 12 Ağustos 2026 denetiminde yakalandı): düğmeler
-     index.html'de `data-ceken="Tofi"` / `data-ceken="Moni"` diye SABİT yazılıydı. Kadrosunda
-     Tofi de Moni de olmayan bir kullanıcı KENDİNİ SEÇEMİYORDU; panel A1'i "Tofi" adına
-     kilitliyor, kullanıcının KENDİ Craig kaydını hiçbir karaktere eşleyemeyip A2+'ya
-     yerleştiriyordu → sesi hem OBS mikrofonundan (A1) hem Craig kaydından çıkıyor,
-     videoda ÇİFT/YANKILI oluyordu. Üstelik bunu yakalaması gereken uyarı
-     ("⚠ <çeken> adına kayıtlı dosya bulunamadı") ancak `!snk.cekenDosya && bilinmeyen.length`
-     iken çıkıyor; kullanıcının kaydı "bilinmeyen" değil, listedeki başka bir karaktere
-     eşleşmiş olabildiği için o kapı da açılmıyordu. Yani hata SESSİZDİ.
-     Kişi listesi boşsa HTML'deki Tofi/Moni düğmeleri olduğu gibi kalır (tarayıcı
-     önizlemesi ve bozuk kisiler.json için güvenli taban). */
-  function snkCekenDoldur() {
-    var kutu = $("snkCeken"); if (!kutu) return;
-    var adlar = snkKarakterAdlari();
-    if (!adlar.length) return;                 // liste yok/bozuk → HTML'deki taban kalsın
-    var kayitli = String(lsGet("snkCeken", "") || "").trim();
-    var secili = "";
-    for (var i = 0; i < adlar.length; i++) {
-      if (_snkAdNorm(adlar[i]) === _snkAdNorm(kayitli)) { secili = adlar[i]; break; }
-    }
-    /* ⚠ SESSİZ DÜŞÜŞ YOK. Kayıtlı seçim kadroda yoksa ilkine düşülür ama kullanıcıya
-       SÖYLENİR: yanlış "çeken" bütün kanal düzenini kaydırıyor ve bedeli ancak videoyu
-       izlerken (çift ses) fark ediliyor. Aynı ders "Kaynak Ses" seçiminde alınmıştı.
-       ⚠ DİSKE YAZMA — KULLANICI HENÜZ SEÇİM YAPMADI. Eskiden burada `lsSet` çağrılıyordu:
-       panel açılışta kullanıcının ESKİ seçimini sessizce siliyor ve kendi tahminini kalıcı
-       hâle getiriyordu. Kullanıcı kişi listesini geçici olarak bozmuş ya da düzenliyor
-       olabilir; listeyi düzeltince eski seçimi geri gelmeliydi, gelmiyordu.
-       Kayıt yalnız kullanıcı GERÇEKTEN tıklayınca yazılır (delegasyon dinleyicisi).
-       ⚠ UYARI GÖRÜNÜR YERE DE GİDER: `snkLog` varsayılan KAPALI bir kutuya yazıyor
-       (#snkLog, "Ayrıntılar" ile açılıyor), yani tek başına kullanıcıya ULAŞMIYOR. */
-    if (!secili) {
-      secili = adlar[0];
-      if (kayitli) {
-        var uy = "Kayıtlı “videoyu çeken” seçimin (" + kayitli + ") kişi listesinde yok — " +
-                 secili + " seçildi. Doğru değilse yukarıdan değiştir.";
-        snkLog(uy);
-        logLine("Senkron: " + uy);
-        hataBandiGoster("“Videoyu kim çekiyor?” seçimin bulunamadı", uy, "uyari");
-      }
-    }
-    /* ⚠ innerHTML DEĞİL createElement: karakter adını KULLANICI yazıyor (kisiler.json,
-       panelden düzenlenebilir). İçinde tırnak ya da "<" olan bir ad innerHTML ile
-       işaretlemeyi bozar ve seçici sessizce boş kalırdı — kaçış yazmak yerine kaçış
-       GEREKTİRMEYEN yolu seçiyoruz. */
-    kutu.textContent = "";
-    for (var j = 0; j < adlar.length; j++) {
-      var ad = adlar[j];
-      var btn = document.createElement("button");
-      btn.className = "seg-btn" + (ad === secili ? " active" : "");
-      btn.type = "button";
-      btn.setAttribute("data-ceken", ad);
-      btn.textContent = ad;
-      kutu.appendChild(btn);
-    }
-  }
   function snkCekenKim() {
     var b = document.querySelector("#snkCeken .seg-btn.active");
-    if (b) return b.dataset.ceken;
-    /* Taban artık "Tofi" DEĞİL kadrodaki ilk karakter — sabit ad ikinci kullanıcıda
-       her zaman yanlış cevap veriyordu. Kadro da yoksa en son çare olarak "Tofi". */
-    var adlar = snkKarakterAdlari();
-    return adlar.length ? adlar[0] : "Tofi";
+    return b ? b.dataset.ceken : "Tofi";
   }
   function snkEslestir() {
     if (!snk.dosyalar.length) return;
@@ -7328,23 +4542,7 @@
     // referans tutuyor, yeniden kurulursa yerleştirme eski plana göre yapılır.
     if (snk.calisiyor) { snkLog("İşlem sürerken liste yenilenmez."); return; }
     var ceken = snkCekenKim();
-    /* ⚠ A2 = "kadrodaki, çeken OLMAYAN İLK karakter" — eskiden `ceken === "Tofi" ? "Moni" : "Tofi"`
-       diye SABİTTİ. Kadrosunda bu iki ad bulunmayan kullanıcıda karsi her zaman "Tofi" çıkıyor,
-       dosyaOf["tofi"] hiç dolmadığı için A2 boş geçiliyor ve log'a "Tofi bu videoda yok" diye
-       yanıltıcı bir satır düşüyordu.
-       ⚠ SENİN KADRONDA DAVRANIŞ BİREBİR AYNI: varsayılan liste sırası Tofi, Moni, Dora, Mimi…
-       yani çeken Tofi iken ilk çeken-olmayan "Moni", çeken Moni iken "Tofi" — eski sabitin
-       verdiği cevabın aynısı. Testi var (tumtest 12b), ama o test bu SATIRI çağırmıyor:
-       kuralın kisiler.js varsayılan sırasına uygulanmış hâlini sınıyor (DENKLİK kanıtı).
-       Bu fonksiyon DOM'a bağlı olduğu için dışarıdan çağrılamıyor.
-       Zaten aşağıdaki `siraListesi` ceken ve karsi DIŞINDAKİLERİ liste sırasıyla alıyor;
-       yani toplam düzen "kişi listesi sırası, çeken A1'e çekilmiş" oluyor — kartta yazan
-       kural da tam olarak bu. */
-    var _kadro = snkKarakterAdlari(), karsi = "";
-    for (var _ki = 0; _ki < _kadro.length; _ki++) {
-      if (_snkAdNorm(_kadro[_ki]) !== _snkAdNorm(ceken)) { karsi = _kadro[_ki]; break; }
-    }
-    if (!karsi) karsi = (ceken === "Tofi") ? "Moni" : "Tofi";   // kadro boş/tek kişi → eski taban
+    var karsi = (ceken === "Tofi") ? "Moni" : "Tofi";
     var eslesen = [], bilinmeyen = [];
     snk.dosyalar.forEach(function (d) {
       var k = KISI.bul(state.kisiler, d.ad);
@@ -7382,11 +4580,8 @@
        Karşılaştırma KISI._norm ile aynı kuralda olmalı: dosya eşleşmesi de öyle yapılıyor,
        yoksa "mimi" ile "Mimi" ayrı sanılır. */
     var siraListesi = [], gorulenKarakter = {};
-    /* NOT: _kn bu fonksiyonun her yerinde ayni kurali uygulamali (dosyaOf anahtari dahil).
-       Artık modül düzeyindeki _snkAdNorm'a bağlı: seçici (snkCekenDoldur) ve eşleştirme
-       AYNI kuralı kullanmak zorunda, yoksa "seçtiğim kişi eşleşmiyor" sınıfı sessiz hata
-       geri gelir. İki ayrı kopya olduğu sürece bir gün ayrışırlar. Gövde birebir aynı. */
-    var _kn = _snkAdNorm;
+    // NOT: _kn bu fonksiyonun her yerinde ayni kurali uygulamali (dosyaOf anahtari dahil).
+    var _kn = function (s) { return String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase(); };
     (state.kisiler || []).forEach(function (k) {
       if (!k || !k.karakter) return;
       if (_kn(k.karakter) === _kn(ceken) || _kn(k.karakter) === _kn(karsi)) return;
@@ -7987,13 +5182,7 @@
       });
       var planDosya = path.join(cfg.workDir, "snkplan_" + Date.now() + ".txt");
       fs.writeFileSync(planDosya, satirlar.join("\n"), "utf8");
-      /* NÖBETÇİ: senkronUygula içinde importFiles + kanal başına overwriteClip var, yani
-         Premiere pencere açabilen bir iş. Nöbetçisiz hâlinde çubuk %92'de donuyordu. */
-      var sonuc = await evalES('senkronUygula("' + esPath(planDosya) + '")', function (sn) {
-        var m = "Premiere'e yerleştiriliyor… (" + _sure(sn) + ")";
-        if (sn >= 45) m += " — açık bir Import penceresi var mı? Kapatınca devam eder.";
-        snkProgress(-1, m);
-      });
+      var sonuc = await evalES('senkronUygula("' + esPath(planDosya) + '")');
       try { fs.unlinkSync(planDosya); } catch (e4) {}
       snkLog("Sonuç: " + sonuc);
 
@@ -8106,21 +5295,15 @@
   if ($("snkLogToggle")) $("snkLogToggle").addEventListener("click", function () {
     var l = $("snkLog"); l.hidden = !l.hidden; this.textContent = l.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴";
   });
-  /* ⚠ OLAY DELEGASYONU — düğmelere TEK TEK bağlanmaz.
-     Sebep: "Videoyu kim çekiyor?" düğmeleri artık kadrodan üretiliyor (snkCekenDoldur) ve
-     kişi listesi her kaydedildiğinde YENİDEN ÇİZİLİYOR. Tek tek bağlanan dinleyiciler o anda
-     eski düğme nesneleriyle birlikte çöpe gider: seçici ekranda görünür ama TIKLANMAZ olur —
-     bu projenin en pahalı sınıfı olan "hata vermeyen ölü düğme". Kapsayıcıya bir kez
-     bağlanmak bu ihtimali tümden kaldırıyor. */
-  if ($("snkCeken")) $("snkCeken").addEventListener("click", function (ev) {
-    var t = ev.target;
-    while (t && t !== this && !(t.classList && t.classList.contains("seg-btn"))) t = t.parentNode;
-    if (!t || t === this) return;
-    var a = this.querySelector(".seg-btn.active"); if (a) a.classList.remove("active");
-    t.classList.add("active");
-    lsSet("snkCeken", t.getAttribute("data-ceken"));
-    if (snk.dosyalar.length) snkEslestir();
-  });
+  (function () {
+    var btns = document.querySelectorAll("#snkCeken .seg-btn");
+    for (var i = 0; i < btns.length; i++) btns[i].addEventListener("click", function () {
+      var a = document.querySelector("#snkCeken .seg-btn.active"); if (a) a.classList.remove("active");
+      this.classList.add("active");
+      lsSet("snkCeken", this.dataset.ceken);
+      if (snk.dosyalar.length) snkEslestir();
+    });
+  })();
   if ($("snkKisiSave")) $("snkKisiSave").addEventListener("click", snkKisiKaydet);
   // "Kaydet"e basmayı unutursan kaybolmasın — Karakter İsimleri kutusunda zaten var olan koruma.
   // İki kutu birebir aynı göründüğü için kullanıcı ikisinin de aynı davrandığını varsayıyor.
@@ -8392,11 +5575,7 @@
          tarafından kilitliyse saveProject "err:" dönüyor ve panel hiç uyarmadan yüzlerce
          ripple-delete uyguluyor; kullanıcı sonucu beğenmeyip projeyi kapatınca kaydedilmemiş
          son duruma değil çok daha eski bir sürüme dönüyordu. */
-      /* NÖBETÇİ: kaydetme Premiere'de pencere açabiliyor ve panel donuk kalıyordu. */
-      var sv = String(await evalES('saveProject()', function (sn) {
-        if (sn >= 20) acSetProgress(-1, "Proje kaydediliyor… (" + sn + " sn) — Premiere'de açık " +
-                                        "bir kaydetme penceresi var mı?");
-      }));
+      var sv = String(await evalES('saveProject()'));
       acLogLine("Kaydet: " + sv);
       if (sv.indexOf("ok:") !== 0) {
         if (!(await uiConfirm("Proje kaydedilemedi: " + hostMesaj(sv) +
@@ -8407,17 +5586,7 @@
       var file = path.join(cfg.workDir, "cuts_" + Date.now() + ".txt");
       fs.writeFileSync(file, body, "utf8");
       acSetProgress(50, "Kesiliyor… (başladıktan sonra durdurulamaz)"); $("acLabel").style.color = "";
-      /* ⚠ NÖBETÇİ EKLENDİ. Bu, panelin "durdurulamaz" diye açıkça uyardığı tek adım ve
-         nöbetçisizdi: çubuk %50'de, yazı sabit, hiçbir geri bildirim yok. Kesim maliyeti
-         boşluk SAYISIYLA büyüyor (panelin kendi uyarısı: 0.1 sn eşikte binlerce kesim,
-         saatler sürebilir), yani burası panelin en uzun süren tek çağrısı olabiliyor.
-         Geçen süreyi göstermek "dondu mu, çalışıyor mu" sorusunu tek başına çözüyor. */
-      var _acKesimSay = acCuts.length;
-      var r = await evalES('autoCut("' + esPath(file) + '")', function (sn) {
-        var m = "Kesiliyor… " + _acKesimSay + " boşluk · " + _sure(sn) + " geçti";
-        if (sn >= 120) m += " — çok kesim var, bu normal. Premiere'e dokunma.";
-        acSetProgress(-1, m);
-      });
+      var r = await evalES('autoCut("' + esPath(file) + '")');
       acLogLine("Sonuç: " + r);
       var msg = String(r).replace(/^[a-z_]+:/, "");
       if (String(r).indexOf("ok:") === 0) {
@@ -8685,48 +5854,9 @@
        sonuç mesajına yazılır (sessiz düşüş yok). Saf dosya işi, Premiere'e dokunmaz. */
     try { AYNA = require(path.join(extRoot, "js", "pngayna.js")); }
     catch (eAyna) { AYNA = null; logLine("PNG aynalama modülü yüklenemedi: " + (eAyna.message || eAyna)); }
-    /* Emoji konumu/ölçeği — saf hesap. ⚠ AYNA'dan FARKLI: bu yüklenemezse emoji özelliği
-       DURUR (emojiKonum throw eder). Sebep: konum hesabı olmadan emoji "biraz eksik" değil,
-       YANLIŞ YERE konur ve kullanıcı ancak videoyu izlerken fark eder. */
-    try { KONUM = require(path.join(extRoot, "js", "emojikonum.js")); }
-    catch (eKon) { KONUM = null; logLine("Emoji konum modülü yüklenemedi: " + (eKon.message || eKon)); }
-    /* Shorts modulleri — saf hesap + AI secimi. Yuklenemezse yalniz Shorts karti durur. */
-    try { SHORTS = require(path.join(extRoot, "js", "shorts.js")); }
-    catch (eSh) { SHORTS = null; logLine("Shorts modülü yüklenemedi: " + (eSh.message || eSh)); }
-    try { SZAMAN = require(path.join(extRoot, "js", "shortszaman.js")); }
-    catch (eSz) { SZAMAN = null; logLine("Shorts zaman modülü yüklenemedi: " + (eSz.message || eSz)); }
-    setPill("pillHost", true);
-    /* "Motor" rozeti: motor exe'si yerinde mi. ⚠ GPU'YU ÖLÇMEZ — eskiden etiketi "GPU"ydu ve
-       NVIDIA kartı olmayan makinede yeşil yanıp kullanıcıyı yanlış yola sokuyordu (bkz.
-       index.html'deki not). İpucu metnine gerçek yolu ve ayarlı cihazı yazıyoruz ki
-       "motor bulunamadı" / "CUDA hatası" sorularının ikisi de tek bakışta ayrılabilsin. */
-    var _motorVar = false;
-    try { _motorVar = fs.existsSync(cfg.engineExe); } catch (eMv) {}
-    setPill("pillGpu", _motorVar);
-    try {
-      var _mp = $("pillGpu");
-      if (_mp) _mp.title = (_motorVar ? "Motor kurulu: " : "MOTOR BULUNAMADI: ") + cfg.engineExe +
-                           "\nİşlemci ayarı: " + String(cfg.device).toUpperCase() +
-                           (String(cfg.device).toLowerCase() === "cuda"
-                             ? " (NVIDIA ekran kartı gerekir — yoksa panel kendiliğinden CPU'ya düşer, çok daha yavaş olur)"
-                             : "");
-    } catch (eMt) {}
-    if (!_motorVar) logLine("UYARI: motor bulunamadı → " + cfg.engineExe +
-                            " — altyazı üretilemez. Motoru kur ya da Ayarlar'dan yolunu düzelt.");
+    setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
-    /* ⚠ PAKETTEKİ YENİ VARYANTLAR ÖNCE BİRLEŞTİRİLİR, load()'DAN ÖNCE.
-       load() kullanıcının sozluk.json'ı varsa VARSAYILAN'a hiç bakmıyor; yani pakete eklenen
-       bir düzeltme ("Tobi" → "Tofi", ParsMazi 11 Ağustos 2026) sözlüğü bir kez kaydetmiş
-       kullanıcıya asla ulaşmıyordu. paketBirlestir yalnız EKLER, PAKET_SURUM damgasıyla bir
-       kez çalışır ve kullanıcı sözlüğü bilerek boşalttıysa dokunmaz. */
-    try {
-      var _szB = SZ.paketBirlestir(extRoot);
-      if (_szB.eklenen && _szB.eklenen.length)
-        logLine("Sözlük güncellendi (pakete eklenen " + _szB.eklenen.length + " yeni yazım): " +
-                _szB.eklenen.join(" · "));
-      else if (_szB.hata) logLine("Sözlük paket birleştirmesi yapılamadı: " + _szB.hata);
-    } catch (eSzB) { logLine("Sözlük paket birleştirmesi atlandı: " + (eSzB.message || eSzB)); }
     state.dict = SZ.load(extRoot);
     // Senkron kartı modülleri (Craig kayıtlarını hizalama ve yerleştirme)
     try {
@@ -8734,14 +5864,9 @@
       HIZ = require(path.join(extRoot, "js", "hizala.js"));
       state.kisiler = KISI.load(extRoot);
       snkKisiDoldur();
-      /* snkKisiDoldur → snkCekenDoldur: "Videoyu kim çekiyor?" düğmelerini kadrodan üretir VE
-         kayıtlı seçimi geri yükler. Buradaki elle geri yükleme bloğu KALDIRILDI, iki sebeple:
-         (1) Artık gereksiz — aynı işi snkCekenDoldur yapıyor ve kayıtlı seçim kadroda YOKSA
-             kullanıcıya söylüyor; buradaki blok ise sessizce hiçbir şey yapmıyordu.
-         (2) Kırılgandı: `[data-ceken="' + ck + '"]` seçicisine kullanıcının yazdığı karakter
-             adı ham gömülüyordu. İçinde tırnak olan bir ad (kisiler.json elle düzenlenebiliyor)
-             querySelector'ı SyntaxError ile düşürür, o da bu try'ı yakalatıp "Senkron modülü
-             yüklenemedi" gibi tamamen yanıltıcı bir satır yazdırırdı — KISI/HIZ zaten yüklüyken. */
+      var ck = lsGet("snkCeken", "Tofi");
+      var ckBtn = document.querySelector('#snkCeken .seg-btn[data-ceken="' + ck + '"]');
+      if (ckBtn) { var akt = document.querySelector("#snkCeken .seg-btn.active"); if (akt) akt.classList.remove("active"); ckBtn.classList.add("active"); }
     } catch (eKisi) { logLine("Senkron modülü yüklenemedi: " + (eKisi.message || eKisi)); }
     dictFill();
     if (state.dict.length) logLine("Sözlük: " + SZ.hotwords(state.dict));
@@ -8834,204 +5959,15 @@
      yapmıyor. Kullanıcı "panel bozuldu" diyor, tek iz gizli log'daki bir satır oluyordu.
      Aynı sebeple adımlar birbirinden de yalıtıldı: erken bir wire* hatası kendinden
      SONRAKİLERİ de öldürüyordu. */
-  /* ================= TANILAMA DÖKÜMÜ =================
-     "Sürekli bir hata veriyor" diyen ama hangisi olduğunu söyleyemeyen kullanıcı için.
-     Panel günlüğünün ÜSTÜNE, sorunun sebebini bulmak için gereken bağlamı yazar: hangi
-     sürüm, hangi klasör, motor var mı, hangi modüller yüklendi, kadro kim.
-     ⚠ HER ALAN KENDİ try'INDA: bu fonksiyon tam da bir şeyler bozukken çağrılıyor. Tek bir
-     okunamayan alan bütün dökümü düşürseydi, en çok ihtiyaç duyulduğu anda işe yaramazdı. */
-  function tanilamaMetni() {
-    var L = [];
-    function ekle(ad, fn) {
-      try { L.push(ad + ": " + fn()); }
-      catch (e) { L.push(ad + ": (okunamadı — " + (e.message || e) + ")"); }
-    }
-    function varYok(p) {
-      try { return fs.existsSync(p) ? ("VAR   " + p) : ("YOK!  " + p); }
-      catch (e) { return "okunamadı  " + p; }
-    }
-    L.push("=== YUSUFWRL PANEL TANILAMA ===");
-    ekle("tarih", function () { return new Date().toLocaleString(); });
-    ekle("panel sürümü", function () {
-      return JSON.parse(fs.readFileSync(path.join(extRoot, "version.json"), "utf8")).version;
-    });
-    ekle("panel klasörü", function () { return extRoot; });
-    ekle("CEP", function () { return CEP ? "var (Premiere içinde)" : "YOK (tarayıcı önizlemesi)"; });
-    ekle("Premiere", function () {
-      var h = cs && cs.getHostEnvironment ? cs.getHostEnvironment() : null;
-      return h ? (h.appName + " " + h.appVersion) : "okunamadı";
-    });
-    ekle("Node", function () { return (typeof process !== "undefined" && process.version) || "?"; });
-    L.push("");
-    L.push("--- MOTOR ---");
-    ekle("motor kökü", function () { return (cfg && cfg._engineRoot) || "(ayarsız)"; });
-    ekle("motor exe", function () { return varYok(cfg.engineExe); });
-    ekle("ffmpeg", function () { return varYok(cfg.ffmpegExe); });
-    ekle("work klasörü", function () { return varYok(cfg.workDir); });
-    /* ⚠ device SORUNUN EN SIK KAYNAĞI: "cuda" yazıp NVIDIA kartı olmayan makinede motor
-       her seferinde çöküyor. Dökümde açıkça görünsün. */
-    ekle("device (cuda/cpu)", function () { return String(cfg.device); });
-    ekle("model", function () { return String(cfg.model); });
-    L.push("");
-    L.push("--- MODÜLLER (yüklenemeyen = o özellik çalışmaz) ---");
-    ekle("vurucu.js", function () { return VUR ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("emoji.js", function () { return EMJ ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("pngayna.js", function () { return AYNA ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("emojikonum.js", function () { return KONUM ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("shorts.js", function () { return SHORTS ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("shortszaman.js", function () { return SZAMAN ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("kisiler.js", function () { return KISI ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("hizala.js", function () { return HIZ ? "yüklü" : "YÜKLENEMEDİ"; });
-    ekle("ilerleme.js", function () { return (typeof ILER !== "undefined" && ILER) ? "yüklü" : "YÜKLENEMEDİ"; });
-    L.push("");
-    L.push("--- KADRO / İÇERİK ---");
-    ekle("kişi listesi", function () {
-      return (state.kisiler || []).map(function (k) { return k.karakter; }).join(", ") || "(boş)";
-    });
-    ekle("videoyu çeken", function () { return snkCekenKim(); });
-    ekle("sözlük girdisi", function () { return String((state.dict || []).length); });
-    ekle("emoji klasörü", function () {
-      var k = String(($("emojiKlasor") || {}).value || "").trim();
-      return k ? varYok(k) : "(ayarsız)";
-    });
-    /* Emoji havuzu kapsamı: "hep şaşırmış koyuyor" şikâyetinin ölçülmüş sebebi bir KOD hatası
-       değil, o karakterde o duygunun HİÇ OLMAMASI. Dökümde görünsün ki yanlış kol aranmasın. */
-    ekle("emoji havuzu", function () {
-      if (!EMJ) return "emoji.js yok";
-      var k = String(($("emojiKlasor") || {}).value || "").trim();
-      if (!k) return "(klasör ayarsız)";
-      var t = EMJ.tara(k);
-      if (!t || t.hata) return "taranamadı: " + ((t && t.hata) || "?");
-      return t.dosyalar.length + " resim · " + t.karakterler.map(function (c) {
-        var v = t.duygular.filter(function (d) { return t.matris[(d.key || d) + "|" + (c.key || c)]; }).length;
-        return (c.ad || c.key) + " " + v + "/" + t.duygular.length;
-      }).join(" · ");
-    });
-    ekle("yapay zekâ anahtarı", function () {
-      return (VUR && VUR.anahtarVarMi && VUR.anahtarVarMi(extRoot)) ? "var" : "YOK";
-    });
-    L.push("");
-    L.push("--- KULLANICI DOSYALARI ---");
-    ["engine-root.txt", "sozluk.json", "kisiler.json", "anthropic-key.txt",
-     "presetler.json", "lisans.json", "config.json"].forEach(function (f) {
-      ekle("  " + f, function () { return fs.existsSync(path.join(extRoot, f)) ? "var" : "yok"; });
-    });
-    L.push("");
-    L.push("--- PANEL GÜNLÜĞÜ (son " + _logBuf.length + " satır) ---");
-    L.push(logMetni() || "(boş)");
-    return L.join("\n");
-  }
-  function wireTanilama() {
-    var cik = $("tanilamaCikti"), dur = $("tanilamaDurum");
-    function yaz(m, renk) { if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; } }
-    function tazele() {
-      if (!cik) return;
-      /* CEP yokken (tarayıcı önizlemesi) fs/path/cfg tanımsız — döküm yerine açıklama yaz. */
-      if (!CEP) { cik.value = "Tarayıcı önizlemesi — tanılama yalnız Premiere içinde çalışır.\n\n" + logMetni(); return; }
-      try { cik.value = tanilamaMetni(); }
-      catch (e) { cik.value = "Tanılama üretilemedi: " + (e.message || e) + "\n\n" + logMetni(); }
-    }
-    if ($("tanilamaYenile")) $("tanilamaYenile").addEventListener("click", function () {
-      tazele(); yaz("✓ yenilendi", "var(--good)");
-    });
-    /* ⚠ execCommand DÖNÜŞ DEĞERİ OKUNUR. `false` döndüğünde İSTİSNA FIRLATMIYOR — yalnız
-       try/catch'e güvenmek "✓ kopyalandı" yazıp panoya hiçbir şey koymamak demekti.
-       Bu kart tam da bir şeyler ters gittiğinde kullanılıyor; orada yalan söylemek en
-       zararlı yer. */
-    if ($("tanilamaKopyala")) $("tanilamaKopyala").addEventListener("click", function () {
-      tazele();
-      if (!cik) return;
-      var ok = false;
-      try { cik.select(); ok = document.execCommand("copy"); } catch (e) { ok = false; }
-      if (ok) yaz("✓ panoya kopyalandı — mesaj olarak yapıştır", "var(--good)");
-      else yaz("kopyalanamadı — aşağıdaki metni elle seçip kopyala (Ctrl+A, Ctrl+C)", "var(--warn)");
-    });
-    if ($("tanilamaTemizle")) $("tanilamaTemizle").addEventListener("click", function () {
-      _logBuf.length = 0; tazele(); yaz("günlük temizlendi", "var(--muted)");
-    });
-    /* Hata bandı düğmeleri. "Kopyala" bandın metnini DEĞİL tam dökümü alır: sebebi bulmak
-       için tek satırlık mesaj neredeyse hiç yetmiyor, bağlam gerekiyor.
-       ⚠ GEÇİCİ, EKRAN DIŞI textarea KULLANILIR — #tanilamaCikti'dan kopyalanamaz.
-       O eleman Ayarlar görünümünün içinde ve bant başka bir ekrandayken o görünüm `hidden`;
-       gizli bir öğede `select()` seçim yapmaz, `execCommand("copy")` de sessizce `false`
-       döner. Eski hâli bunu kontrol bile etmeden "✓ Kopyalandı" yazıyordu: kullanıcı
-       yapıştırmaya çalışıyor, pano boş ya da alakasız — ve panelin ona yalan söylediğini
-       ancak o an anlıyor. Bu düğme tam da bir şeyler ters gittiğinde kullanılıyor. */
-    if ($("hataBandiKopyala")) $("hataBandiKopyala").addEventListener("click", function () {
-      var b = $("hataBandiKopyala");
-      tazele();
-      var metin = (cik && cik.value) || logMetni();
-      var ok = false, ge = null;
-      try {
-        ge = document.createElement("textarea");
-        ge.value = metin;
-        ge.setAttribute("readonly", "");
-        ge.style.position = "fixed"; ge.style.left = "-9999px"; ge.style.top = "0";
-        document.body.appendChild(ge);
-        ge.select();
-        ok = document.execCommand("copy");
-      } catch (e) { ok = false; }
-      try { if (ge && ge.parentNode) ge.parentNode.removeChild(ge); } catch (e2) {}
-      b.textContent = ok ? "✓ Kopyalandı" : "Ayarlar → Panel Günlüğü";
-      setTimeout(function () { b.textContent = "Kopyala"; }, 2500);
-    });
-    if ($("hataBandiKapat")) $("hataBandiKapat").addEventListener("click", function () {
-      var b = $("hataBandi"); if (b) b.hidden = true;
-    });
-    tazele();
-  }
-
-  /* ================= PREMIERE'İ ÖNE AL =================
-     ⚠ NEDEN ÇALIŞABİLİYOR: uzun bir `evalScript` sırasında bloke olan şey Premiere'in
-     ExtendScript motoru; PANEL ayrı bir CEF sürecinde ve TAMAMEN serbest. Yani panel,
-     Premiere'e komut gönderemese bile İŞLETİM SİSTEMİ üzerinden penceresini öne getirebilir.
-     Bu, ölçülmüş takılma senaryosunun tam çaresi: Premiere kendi açtığı bir pencereyi
-     (Auto Save · Save Project · Import · medya hatası) bekliyor, o pencere başka
-     pencerelerin ARKASINDA kalıyor ve kullanıcı "panel dondu" sanıp Premiere'i öldürüyor —
-     oysa tek yapması gereken o pencereyi kapatmak. Panel artık onu kendisi gösteriyor.
-     ⚠ SÜREÇ ADI SABİT DEĞİL: sürüme/dile göre "Adobe Premiere Pro", "Adobe Premiere Pro
-     2026" gibi değişiyor. Bu yüzden ada göre GENİŞ eşleşme + pencere başlığı yedeği var ve
-     hiçbiri tutmazsa sessizce vazgeçiyor (bu bir kolaylık, iş değil — asla akışı durdurmaz).
-     ⚠ Dizge içinde ASCII-DIŞI karakter YOK: komut PowerShell'e -Command ile geçiyor. */
-  function premiereOneAl() {
-    if (!CEP) return false;
-    try {
-      var cp = require("child_process");
-      var ps =
-        "$ErrorActionPreference='SilentlyContinue';" +
-        "$p = Get-Process | Where-Object { ($_.ProcessName -like '*Premiere*') -and ($_.MainWindowHandle -ne 0) } | Select-Object -First 1;" +
-        "if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -like '*Premiere*' } | Select-Object -First 1 }" +
-        "if ($p) {" +
-        " Add-Type -Name Fg -Namespace Yw -MemberDefinition '" +
-        "[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);" +
-        "[DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr h, int n);';" +
-        " [Yw.Fg]::ShowWindowAsync($p.MainWindowHandle, 9);" +      // 9 = SW_RESTORE (simge durumundaysa aç)
-        " [Yw.Fg]::SetForegroundWindow($p.MainWindowHandle);" +
-        "}";
-      /* Ateşle-unut: çıktısını beklemiyoruz ve hata dinleyicisi ŞART — spawn edilemezse
-         yakalanmayan bir "error" olayı paneli düşürürdü (bu tuzak pipeline.js'te ölçüldü). */
-      var pr = cp.spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
-                        { windowsHide: true, stdio: "ignore" });
-      pr.on("error", function () {});
-      return true;
-    } catch (e) { return false; }
-  }
-
   function _wire(ad, fn) {
     try { fn(); }
     catch (e) { if ($("log")) logLine("Bağlantı kurulamadı (" + ad + "): " + (e.message || e)); }
   }
   function wirePersistence() {
-    // "chapInterval" listeden ÇIKARILDI: Bölümler düğmesiyle birlikte kaldırıldı
-    // (12 Ağustos 2026). restoreSelect/persistSelect kendi içinde null kontrolü yapıyor,
-    // yani bırakmak çökertmezdi — ama olmayan bir öğeyi her açılışta aramak yanıltıcı.
+    // chapInterval artık gerçek bir <select> (index.html): YouTube bölüm aralığı da hatırlansın —
+    // her panel açılışında varsayılana dönüp kullanıcıya tekrar seçtiriyordu.
     _wire("ayar hafızası", function () {
-      /* ⚠ "selStyleSingle", "selStyleA1", "selIstif" LİSTEDEN ÇIKARILDI — üçü de
-         index.html'de ARTIK YOK (stil seçicileri ve istif/lane mantığı v1.8.0'da caption
-         track'e geçilirken kaldırıldı). restoreSelect/persistSelect kendi içinde null
-         kontrolü yaptığı için çökertmiyorlardı, ama her açılışta olmayan üç öğe aranıyor ve
-         kodu okuyan "bu seçiciler hâlâ var" sanıyordu. Aşağıdaki acIds zaten bu ikisi. */
-      var ids = ["acSens", "acMin"];
+      var ids = ["acSens", "acMin", "selStyleSingle", "selStyleA1", "selIstif", "chapInterval"];
       for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
       // AutoCut ayarları değişince ekranda duran analiz sonucu artık o ayara ait değil — sıfırla
       var acIds = ["acSens", "acMin"];
@@ -9052,17 +5988,9 @@
     _wire("preset kartı", wirePreset);
     _wire("stil aktarma", wireStilProje);
     _wire("emoji testi", wireEmojiTest);
-    /* ⚠ `wireShorts` DEĞİL `wireShortsSekans` — ikisi ayrı ekranı bağlıyor ve bir zamanlar
-       İKİSİ DE "wireShorts" adını taşıyordu (ikincisi birincisini eziyordu). Ayrıntı için
-       wireShortsSekans'ın başındaki nota bak. */
-    _wire("Shorts sekansı", wireShortsSekans);
     _wire("kanal tarama", function () {
       if ($("btnKanalTara")) $("btnKanalTara").addEventListener("click", function () { scanChannels(); });
     });
-    /* Tanılama EN SONA: dökümü üretirken bütün modüllerin yüklenme durumunu okuyor, yani
-       ondan önceki adımların çalışmış olması işine yarar. Kendi _wire'ında olduğu için
-       patlarsa öteki bağlantıları etkilemez. */
-    _wire("tanılama kartı", wireTanilama);
   }
 
   try { if (CEP) initCEP(); else initMock(); }

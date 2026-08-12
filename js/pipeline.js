@@ -1344,56 +1344,6 @@ function _hotwordsTaninmadi(e) {
   return /(unrecognized argument|unknown option|no such option|unexpected argument|invalid option|not recognized)/i.test(cikti);
 }
 
-/* ================= GPU/CUDA HATASI MI? =================
-   ⚠ NEDEN VAR: config.json `"device": "cuda"` ile geliyor ve kod tabanında GPU tespiti
-   ya da CPU'ya geri düşüş HİÇ YOKTU. NVIDIA kartı olmayan (ya da sürücüsü eski/bozuk olan)
-   bir makinede motor HER çalıştırmada çöküyor, panel "faster-whisper-xxl.exe çıkış kodu 1"
-   diyor ve kullanıcı hiçbir şey üretemiyordu — "sürekli bir hata veriyor" tarifine birebir
-   uyan senaryo. Üstelik başlıktaki "GPU" rozeti YEŞİL yanıyordu (o rozet aslında motor
-   dosyası var mı diye bakıyor, GPU'ya değil), yani kullanıcı doğru yerde arayamıyordu.
-
-   ⚠ SADECE GPU HATALARINDA GERİ DÜŞÜLÜR. Her başarısızlıkta CPU'ya düşmek kullanıcıyı
-   bozuk bir WAV ya da dolu bir disk yüzünden 5-15 KAT daha yavaş bir koşuya sokup ikinci
-   kez aynı hataya çarptırırdı. Kalıp listesi motorun (CTranslate2 + cuDNN + PyTorch)
-   gerçekte ürettiği mesajlardan: kütüphane yüklenemedi, sürücü eski, kart yok, mimari
-   desteklenmiyor, GPU belleği yetmedi. */
-function _gpuHatasi(e) {
-  var cikti = String((e && e.cikti) || (e && e.message) || "");
-  if (!cikti) return false;
-
-  /* ⚠⚠ EŞLEŞME SATIR BAZINDA — TÜM ÇIKTI ÜZERİNDE DEĞİL. ÖLÇÜLDÜ VE GEREKLİ.
-     İlk yazımda iki koşul BAĞIMSIZ olarak tüm metinde aranıyordu:
-       /(cuda|...)/.test(cikti) && /(error|fail|...)/.test(cikti)
-     Motorun çıktısının 2. SATIRI HER ZAMAN şu (gerçek engine_last.log'dan doğrulandı):
-       "Standalone Faster-Whisper-XXL r245.4 running on: CUDA"
-     Yani birinci koşul HER KOŞUDA true; ikinci koşul da herhangi bir hata olduğunda true.
-     Sonuç: fonksiyon HER başarısızlıkta "GPU hatası" diyordu — bozuk WAV, dolu disk, izin
-     hatası, hepsinde. Tam da önlemek için yazıldığı zarara yol açıyordu: kullanıcı 5-15 kat
-     yavaş bir CPU koşusunun sonunda AYNI hataya çarpardı.
-     ⚠ İlk negatif testler bunu kaçırdı çünkü onlara banner'SIZ, yalıtılmış hata dizgileri
-     verilmişti. Testlerde artık gerçek banner de var — test verisi gerçeğe benzemezse
-     test hiçbir şey kanıtlamaz. */
-  var satirlar = String(cikti).split(/\r?\n/);
-  var GPU = /(cuda|cudnn|cublas|cudart|nvidia)/i;
-  var HATA = /(error|fail|not found|could not|unable|insufficient|no kernel|out of memory|invalid device|no such|cannot)/i;
-  /* Bilgi satırları: motorun kendi banner'ı ve "hangi cihazda çalışıyorum" bildirimleri.
-     Bunlar CUDA geçer ama hata DEĞİL — ölçüme hiç girmemeliler. */
-  var BILGI = /(running on:|Standalone Faster-Whisper|^\s*Device\s*:|using device)/i;
-
-  for (var i = 0; i < satirlar.length; i++) {
-    var s = satirlar[i];
-    if (!s || BILGI.test(s)) continue;
-    if (GPU.test(s) && HATA.test(s)) return true;
-    /* Spesifik kalıplar: bunlar tek başına kesin GPU arızası — aynı satırda "error"
-       sözcüğü geçmese bile sayılır. */
-    if (/no CUDA-capable device/i.test(s)) return true;
-    if (/no kernel image is available/i.test(s)) return true;
-    if (/CUDA driver version is insufficient/i.test(s)) return true;
-    if (/Library (cublas64|cudnn|cudart)[^\s]* is not found/i.test(s)) return true;
-  }
-  return false;
-}
-
 /*
  * Ses -> cue nesneleri. opts = { model, language, diarize, maxWords, hotwords, dictMap }
  * diarize true ise cue'lar .speaker (SPEAKER_00...) taşır.
@@ -1654,13 +1604,7 @@ async function transcribe(cfg, wavPath, onLog, opts) {
   const jsonPath = path.join(outDir, base + ".json");
   const srtPath = path.join(outDir, base + ".srt");
 
-  /* ⚠ "(GPU)" SABİT YAZIYORDU — cihaz "cpu" iken bile. Kullanıcı GPU'da çalıştığını sanıp
-     yavaşlığın sebebini başka yerde arıyordu. Artık gerçek cihaz yazılıyor.
-     sonCihaz her çalıştırmada sıfırlanır: bayat bir değer, bir sonraki koşuda "CPU'ya
-     düşüldü" uyarısını haksız yere gösterirdi. */
-  transcribe.sonCihaz = String(cfg.device || "").toLowerCase() === "cpu" ? "cpu" : "gpu";
-  if (onLog) onLog("[whisper] " + (opts.diarize ? "konuşmacı ayırma + " : "") + "yazıya dökülüyor (" +
-                   (transcribe.sonCihaz === "cpu" ? "CPU" : "GPU") + ")...\n");
+  if (onLog) onLog("[whisper] " + (opts.diarize ? "konuşmacı ayırma + " : "") + "yazıya dökülüyor (GPU)...\n");
   const runOpts = { cwd: engDir, pathDirs: pathDirs, logFile: logFile };
   const damga = iptalDamgasi();   // bu çalıştırma başlarken iptal sayacı kaçtı
   try {
@@ -1680,48 +1624,10 @@ async function transcribe(cfg, wavPath, onLog, opts) {
        Çıktı dolu ama argüman hatası yoksa sebep başkadır (CUDA belleği, bozuk WAV, disk dolu) ve
        tekrar denemek kullanıcıyı aynı hataya tam süre bekleterek ikinci kez sokar. */
     var ciktiYok = !String((e && e.cikti) || "").trim();
-    /* ⚠ "İPUCUSUZ YOL DENENDİ Mİ" AYRI BİR BAYRAKTA TUTULUR — `e`'den TÜRETİLEMEZ.
-       Aşağıdaki CPU dalı hangi argüman setini kullanacağına karar verirken bunu soruyor.
-       Bayrak yerine `_hotwordsTaninmadi(e)` sorulsaydı YANLIŞ cevap alınırdı: bu blok
-       çalıştıysa `e` artık İKİNCİ hatayı tutuyor ve ikinci koşuda `--hotwords` zaten YOKTU,
-       yani hata ondan hiç bahsetmez → kontrol false döner → CPU denemesi motorun
-       TANIMADIĞI `--hotwords` ile yapılır ve o da çöker. Bir değişkeni hem "hangi hata"
-       hem "hangi yolu denedik" için kullanmak tam olarak bu sınıf hatayı üretiyor. */
-    var ipucusuzDenendi = false;
     if (!fs.existsSync(jsonPath) && hot && (_hotwordsTaninmadi(e) || ciktiYok)) {
       if (onLog) onLog("[whisper] motor isim ipucunu (--hotwords) tanımadı, ipucusuz tekrar deneniyor...\n");
-      ipucusuzDenendi = true;
-      /* e2 SAKLANIR: CPU dalı ve en sondaki `throw e` en SON başarısızlığı görmeli —
-         ilk hatayı fırlatmak "ipucusuz deneme de neden düştü" sorusunu cevapsız bırakır. */
-      try { await run(cfg.engineExe, argsNoHot, onLog, runOpts); } catch (e2) { e = e2; }
+      try { await run(cfg.engineExe, argsNoHot, onLog, runOpts); } catch (e2) {}
       if (iptalEdildiMi(damga)) throw new Error("İptal edildi");
-    }
-    /* 3) GPU YOK / CUDA BOZUK → CPU'YA GERİ DÜŞ.
-       ⚠ Bu dal olmadan NVIDIA kartı olmayan bir makinede panel HİÇBİR ŞEY üretemiyordu:
-       config.json `device: "cuda"` diyor, motor çöküyor, kullanıcı "sürekli hata veriyor"
-       diyor ve sebebi hiçbir yerde yazmıyordu. Artık iş TAMAMLANIYOR — yalnız yavaş.
-       ⚠ compute_type DA DEĞİŞMEK ZORUNDA: float16 CPU'da desteklenmiyor, cihazı çevirip
-       compute_type'ı bırakmak ikinci bir çökme üretirdi. int8 CPU'nun standart/en hızlı tipi.
-       ⚠ SESSİZ DEĞİL: kullanıcıya CPU'ya düşüldüğü ve işin çok daha uzun süreceği AÇIKÇA
-       söyleniyor. Sessiz bir geri düşüş "neden 20 dakika sürüyordu, şimdi 3 saat?" sorusunu
-       cevapsız bırakırdı. transcribe.sonCihaz'ı panel okuyup kullanıcıya da gösteriyor. */
-    if (!fs.existsSync(jsonPath) && _gpuHatasi(e) && String(cfg.device || "").toLowerCase() !== "cpu") {
-      /* İpucusuz yol denendiyse motor `--hotwords`'ü tanımıyor demektir — CPU koşusu da
-         onsuz yapılmalı, yoksa aynı argüman hatasına ikinci kez çarpılır. */
-      var cpuArgs = (ipucusuzDenendi ? argsNoHot : args).slice();
-      var iD = cpuArgs.indexOf("--device");
-      if (iD >= 0) cpuArgs[iD + 1] = "cpu";
-      var iC = cpuArgs.indexOf("--compute_type");
-      if (iC >= 0) cpuArgs[iC + 1] = "int8";
-      /* Konuşmacı ayırma zaten CPU'da; bir şey yapmaya gerek yok. */
-      if (onLog) onLog("[whisper] ⚠ GPU (CUDA) kullanılamadı — CPU ile TEKRAR deneniyor.\n" +
-                       "[whisper] ⚠ CPU'da yazıya dökme 5-15 KAT daha yavaştır; lütfen bekle.\n" +
-                       "[whisper] ⚠ Kalıcı çözüm: NVIDIA sürücünü güncelle, ya da Ayarlar'dan cihazı 'cpu' yap.\n");
-      transcribe.sonCihaz = "cpu";
-      try { await run(cfg.engineExe, cpuArgs, onLog, runOpts); }
-      catch (e3) { if (iptalEdildiMi(damga)) throw new Error("İptal edildi"); e = e3; }
-      if (iptalEdildiMi(damga)) throw new Error("İptal edildi");
-      if (fs.existsSync(jsonPath) && onLog) onLog("[whisper] ✓ CPU ile tamamlandı.\n");
     }
     if (!fs.existsSync(jsonPath)) throw e;
     if (onLog) onLog("[whisper] çıkışta uyardı ama transkript hazır.\n");
@@ -1901,10 +1807,4 @@ module.exports = {
   // İptal damgası: uzun bir döngü (ör. kanal kanal üretim) adımlar arasında
   // "kullanıcı iptal etti mi?" diye sorabilsin diye dışa açıldı.
   iptalDamgasi, iptalEdildiMi,
-  /* _gpuHatasi TEST İÇİN dışa açık — panel onu çağırmıyor. Bu ayrım pahalı: kalıp fazla
-     GENİŞ olursa bozuk WAV/dolu disk gibi hatalarda da CPU'ya düşülür ve kullanıcı 5-15 kat
-     yavaş bir koşunun sonunda aynı hataya çarpar; fazla DAR olursa NVIDIA'sız makinede geri
-     düşüş hiç tetiklenmez ve panel hiçbir şey üretemez. İki yön de testle kilitli.
-     (Aynı desen js/lisans.js kayitYaz'da da var: testler ölçebilsin diye dışa açık.) */
-  _gpuHatasi,
 };
