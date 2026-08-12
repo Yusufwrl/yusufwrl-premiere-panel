@@ -103,6 +103,36 @@ function download(url, dest, onLog) {
         /* Kısa bekleme: anlık ağ dalgalanması geçsin. Artan bekleme (1.5 sn, 4 sn). */
         return new Promise(function (r) { setTimeout(r, deneme === 1 ? 1500 : 4000); }).then(birKez);
       }
+      /* ⚠⚠ NODE PES ETTİYSE İŞLETİM SİSTEMİNİN AĞ YIĞININI DENE — SON ÇARE.
+         GERÇEK VAKA (ParsMazi, 12 Ağustos 2026): "socket hang up (3 deneme yapıldı)".
+         Üç denemenin de aynı hatayla düşmesi, sorunun GEÇİCİ olmadığını gösteriyor: panelin
+         Node'u CEP'in içindeki ESKİ sürüm ve GitHub'ın CDN'iyle (TLS/bağlantı yönetimi)
+         anlaşamıyor. Aynı dosya aynı ağdan tarayıcıyla sorunsuz iniyor — yani sorun ağ
+         değil, TAŞIMA KATMANI.
+         Panel zaten unzip için Windows'un PowerShell'ini kullanıyor; indirmeyi de OS'a
+         devretmek yeni bir bağımlılık getirmiyor. `curl.exe` Windows 10 1803'ten beri
+         yerleşik; yoksa PowerShell'in Invoke-WebRequest'ine düşüyoruz.
+         ⚠ Bu YALNIZCA ağ hatalarından sonra denenir: HTTP 404 gibi kalıcı cevaplarda
+         ikinci bir yolu denemek yalnızca kullanıcıyı oyalar. */
+      if (_AG_HATASI.test(m)) {
+        if (onLog) onLog("Node ile indirilemedi (" + m + ") — Windows'un indiricisi deneniyor…");
+        return _osIndir(url, dest, onLog)["catch"](function (e2) {
+          /* ⚠⚠ İKİ FARKLI TAŞIMA DA DÜŞTÜYSE SUÇLU AĞ DEĞİL, SUNUCUDUR — ÖLÇÜLDÜ
+             (12 Ağustos 2026). Panelin Node'u da, Windows'un curl'ü de aynı hatayı verdi
+             ("Empty reply from server") ama KİMLİKLİ istek (gh) aynı anda sorunsuz indirdi.
+             Sebep: GitHub, release varlıklarının ANONİM indirmesine API'den AYRI bir
+             kötüye-kullanım sınırı uyguluyor ve o gün depoya çok sayıda sürüm çıkarılmıştı.
+             Bu, kullanıcının ağıyla ilgili DEĞİL ve kendiliğinden geçer — mesaj bunu
+             söylemezse kullanıcı boş yere modem/güvenlik duvarı kurcalar. */
+          var m2 = String((e2 && e2.message) || e2);
+          var sunucuRed = /Empty reply|52|socket hang up|ECONNRESET/i.test(m2) || _AG_HATASI.test(m2);
+          throw new Error(sunucuRed
+            ? ("GitHub şu an indirmeyi reddediyor (iki farklı yöntem de denendi). " +
+               "Bu geçicidir ve senin internetinle ilgili değil — 15-30 dakika sonra paneli " +
+               "kapatıp aç, kendiliğinden güncellenir.")
+            : (m + " (" + deneme + " deneme + Windows indiricisi: " + m2 + ")"));
+        });
+      }
       /* Son deneme de düştüyse kaç kez denendiğini SÖYLE — "bir kez denedi ve pes etti"
          izlenimi kullanıcıyı ağ sorununu araştırmaktan alıkoyuyordu. */
       if (deneme > 1) e = new Error(m + " (" + deneme + " deneme yapıldı)");
@@ -110,6 +140,46 @@ function download(url, dest, onLog) {
     });
   }
   return birKez();
+}
+
+/* İŞLETİM SİSTEMİNİN İNDİRİCİSİ — Node'un https'i düştüğünde son çare.
+   Önce `curl.exe` (Windows 10 1803+ yerleşik, -L yönlendirmeyi izler), o yoksa PowerShell.
+   ⚠ Dosya boyutu SONRADAN doğrulanır: curl 0 baytlık bir dosya bırakıp 0 ile çıkabiliyor.
+   ⚠ Yol tırnak içinde ve PowerShell tarafında ' ikiye katlanıyor — kullanıcı yollarında
+   boşluk ve Türkçe karakter var (bu projenin bilinen tuzağı). */
+function _osIndir(url, dest, onLog) {
+  return new Promise(function (resolve, reject) {
+    try { fs.unlinkSync(dest); } catch (_) {}
+    function dogrula() {
+      var n = 0;
+      try { n = fs.statSync(dest).size; } catch (e) { return reject(new Error("dosya oluşmadı")); }
+      if (n < 1024) return reject(new Error("indirilen paket çok küçük (" + n + " bayt)"));
+      if (onLog) onLog("Windows indiricisi başardı: " + Math.round(n / 1048576) + " MB");
+      resolve();
+    }
+    function psIle() {
+      var ps = "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '" +
+               String(url).replace(/'/g, "''") + "' -OutFile '" +
+               String(dest).replace(/'/g, "''") + "' -UseBasicParsing";
+      var p2 = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], { windowsHide: true });
+      p2.on("error", function (e) { reject(new Error("PowerShell çalıştırılamadı: " + (e.message || e))); });
+      p2.on("close", function (k) {
+        if (k !== 0) return reject(new Error("PowerShell indirme kodu " + k));
+        dogrula();
+      });
+    }
+    var c = spawn("curl.exe", ["-L", "--fail", "--silent", "--show-error",
+                               "--retry", "2", "--connect-timeout", "20",
+                               "-o", dest, url], { windowsHide: true });
+    var curlHata = "";
+    try { c.stderr.on("data", function (d) { curlHata += String(d); }); } catch (_) {}
+    c.on("error", function () { psIle(); });          // curl yok → PowerShell
+    c.on("close", function (kod) {
+      if (kod === 0) return dogrula();
+      if (onLog) onLog("curl başarısız (kod " + kod + (curlHata ? ": " + curlHata.trim().slice(0, 120) : "") + ") — PowerShell deneniyor…");
+      psIle();
+    });
+  });
 }
 
 function _downloadBir(url, dest) {
