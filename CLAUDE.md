@@ -1,5 +1,13 @@
 # PremiereExtension — Yusufwrl Altyazı Paneli
 
+## ⚠⚠ SÜRÜM NUMARASI 1.15.0 AMA KOD v1.9.21 — KARIŞTIRMA
+`version.json` / `manifest.xml` / `installer.iss` **1.15.0** diyor; içindeki kod **v1.9.21**.
+Sebep mekanik: oto-güncelleme (`js/updater.js`) sürümleri **sayısal** karşılaştırıyor ve
+"uzak ≤ yerel" ise güncelleme TEKLİF ETMİYOR. Yayındaki son sürüm 1.14.1 olduğu için
+1.9.21 etiketli bir paket ikinci kullanıcıya **asla ulaşmazdı** — geri dönüş sessizce
+teslim edilmemiş olurdu. Numara ileri, kod geri.
+⚠ Bir sonraki yayında numara **1.15.0'dan büyük** olmalı.
+
 ## ⚠⚠ BU SÜRÜM BİLEREK GERİ ALINDI — v1.14.1 → v1.9.21 (13 Ağustos 2026)
 **Kullanıcının açık isteği:** *"1.9.21'e geri döndür, her şeyi full o haline al · tekli shorts çoklu shorts falan kaldır."*
 Sebep: emoji yerleştirme yavaşlamıştı (155 emoji, ~4,4 sn/emoji, parça başına ~109 sn) ve kullanıcı eskiden çok daha hızlı olduğunu söyledi.
