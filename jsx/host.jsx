@@ -15,6 +15,19 @@ function _jsonEsc(s) {
     return s;
 }
 
+/* ⚠⚠ HOST SÜRÜMÜ — PANELİNKİYLE AYNI OLMAK ZORUNDA, DEĞİLSE PREMIERE YENİDEN BAŞLATILMALI.
+   Bu dosya YALNIZ Premiere açılırken belleğe yükleniyor: paneli kapat-aç, hatta paneli
+   yeniden kurmak bile host.jsx'i tazelemiyor. Panelin başlığındaki sürüm ise version.json'dan
+   okunuyor, yani PANEL yeni görünürken HOST eski olabiliyor.
+   Bu, projenin en sık tekrar eden kafa karışıklığı: "düzeltmeyi kurdum ama hâlâ aynı" —
+   çünkü düzeltme host tarafındaysa hiç yüklenmemiş oluyor. Artık ölçülebilir.
+   ⚠ HOST.JSX'İ HER DEĞİŞTİRDİĞİNDE BU SAYIYI DA ARTIR (version.json ile aynı tut). */
+var HOST_SURUM = "1.13.1";
+
+/* Panelin host sürümünü okuması için. app.js emoji/preset işlerinden önce çağırıp
+   panelinkiyle karşılaştırıyor ve tutmuyorsa kullanıcıyı uyarıyor. */
+function hostSurum() { return HOST_SURUM; }
+
 // Bağlantı testi
 function ping() {
     return "Premiere bağlı: " + app.appName + " " + app.version;
@@ -1034,6 +1047,7 @@ function emojiKlipTani() {
         if (!seq) return "HATA: aktif sekans yok";
         var W = 0, H = 0;
         try { W = seq.frameSizeHorizontal; H = seq.frameSizeVertical; } catch (eF) {}
+        y("host.jsx surumu: " + HOST_SURUM + "   (panelinkiyle ayni degilse Premiere'i TAM kapat-ac)");
         y("Sekans: " + W + "x" + H);
         var sec = null;
         try { sec = seq.getSelection(); } catch (eS) {}
@@ -1064,9 +1078,17 @@ function emojiKlipTani() {
                 ps = c[i].properties;
                 for (j = 0; j < ps.numItems; j++) {
                     dn = ""; try { dn = String(ps[j].displayName || ""); } catch (e5) { continue; }
-                    /* Yalniz kirpmayla/konumla ilgili olanlari yaz — tam dokum 60+ satir olur
-                       ve panelde okunmaz. */
-                    if (!/Position|Scale|Uniform|Anchor|Crop|Opacity|Konum|Ölçek/i.test(dn)) continue;
+                    /* ⚠ SUZGEC GENISLETILDI (12 Agustos 2026). Eski hali yalniz
+                       Position|Scale|Uniform|Anchor|Crop|Opacity yaziyordu ve "emojinin solu
+                       kesiliyor" arastirmasinda TAM DA GEREKEN alanlari eliyordu: Camera
+                       Shake'in "Edge Behavior", "Master", "Stabilize" ve "_ Sequence Width"
+                       gibi ic alanlari suzgece takiliyordu. Artik ICSEL bilesenlerde
+                       (Motion/Opacity) eski dar suzgec surer — orasi 12 parametre ve hepsi
+                       bilinen — ama GERCEK EFEKTLERDE (Camera Shake, Transform…) TAM dokum
+                       alinir. Tanilama ciktisi zaten dosyaya yaziliyor, uzunluk sorun degil;
+                       eksik veri ise iki tur yanlis teshise mal oldu. */
+                    if (_icselMi(c[i]) &&
+                        !/Position|Scale|Uniform|Anchor|Crop|Opacity|Konum|Ölçek/i.test(dn)) continue;
                     dv = "?";
                     try { dv = JSON.stringify(ps[j].getValue()); } catch (e6) { dv = "okunamadi"; }
                     var kf = "";
@@ -2788,7 +2810,27 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
                 var sv = kayit.v;
                 var tv0 = _dizimi(sv) ? (typeof sv[0]) : (typeof sv);
                 var sayisal = (tv0 === "number" || tv0 === "boolean");
-                if (!sayisal) {
+                /* ⚠⚠ ALT ÇİZGİ İLE BAŞLAYAN PARAMETRELER YAZILMAZ — EFEKTİN İÇ DEFTERİ.
+                   ÖLÇÜLDÜ (kullanıcı bildirdi, 12 Ağustos 2026: "emojinin saçının solu
+                   kesiliyor, camera shake efektinden"). Kullanıcının "Emoji Sağ Taraf"
+                   preset'indeki Camera Shake bileşeni şunları taşıyor:
+                       _ Sequence Width  = 0
+                       _ Sequence Height = 0
+                       _ Sequence Pixel Ratio = 0
+                       _ Applied Version = 260200
+                       _ Overlay Mode = 0
+                   Bunlar kullanıcı ayarı DEĞİL: efektin kompozisyon ölçüsünü sakladığı iç
+                   alanlar. Premiere onları efekti uygularken KENDİ dolduruyor. Panel okuyup
+                   hedefe 0 yazınca efekt kendini 0x0 bir karede sanıyor ve kenar hesabı
+                   bozuluyor — belirtisi görüntünün kenarından kırpılması.
+                   ⚠ Bu, "sayı mı metin mi" kapısına takılmıyor çünkü hepsi SAYI; ayrı bir
+                   kapı gerekiyor. Ölçüt AD: Adobe bu iç alanları "_ " önekiyle işaretliyor.
+                   ⚠ Kullanıcının kendi elle uyguladığı preset'te sorun ÇIKMIYOR, çünkü orada
+                   değerleri Premiere yazıyor — hata yalnız PANEL uygulayınca görünüyordu. */
+                var icDefter = /^_/.test(String(kayit.ad || ""));
+                if (icDefter) {
+                    if (rapor) rapor.push(kayit.ad + " (efektin ic alani, atlandi)");
+                } else if (!sayisal) {
                     if (rapor) rapor.push(kayit.ad + " (metin/liste ayari, atlandi)");
                 } else {
                     try {

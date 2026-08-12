@@ -62,8 +62,23 @@ function cueHarita(kesitler, cues, opts) {
   opts = opts || {};
   var minGor = (typeof opts.minGorunur === "number") ? opts.minGorunur : MIN_GORUNUR;
   var cikti = [], sayac = { disarida: 0, kirpilan: 0, gizlenen: 0, tasinan: 0 };
+  /* ⚠⚠ OFSET, VARSA HOST'UN GERİ OKUDUĞU GERÇEK SHORTS-EKSENİ BAŞLANGICIDIR.
+     ÖLÇÜLMÜŞ HATA (kullanıcı bildirdi, 12 Ağustos 2026: "çoklu Shorts'ta altyazı tam
+     oturmamış, yazı kayıyo").
+     Eski hâl ofsetleri KAYNAK sürelerini toplayarak kuruyordu (`ofs += bit - bas`). Ama
+     videodaki kesitler `overwriteClip` ile konuyor ve Premiere her yerleştirmeyi KAREYE
+     yuvarlıyor; host tam bu yüzden gerçekleşen sınırları geri okuyup döndürüyor
+     (host.jsx: "panel kendi varsayimini DEGIL bunu kullanir"). Panel o değeri kullanmayınca
+     video yuvarlanmış yerde, altyazı ham toplamda kalıyor ve fark kesit başına ~0.03 sn
+     BİRİKİYOR — 5 kesitte 0.15 sn, yani gözle görülen kayma.
+     ⚠ `hedefBas` verilmemişse eski davranış birebir sürer: tekli Shorts, testler ve
+     host'un eski sürümü (kesitleri geri okumayan) etkilenmez. */
   var ofsler = [], ofs = 0, i, j;
-  for (i = 0; i < kesitler.length; i++) { ofsler.push(ofs); ofs += (kesitler[i].bit - kesitler[i].bas); }
+  for (i = 0; i < kesitler.length; i++) {
+    var hb = kesitler[i].hedefBas;
+    ofsler.push((typeof hb === "number" && isFinite(hb)) ? hb : ofs);
+    ofs += (kesitler[i].bit - kesitler[i].bas);
+  }
 
   for (j = 0; j < (cues || []).length; j++) {
     var c = cues[j];
@@ -89,6 +104,15 @@ function cueHarita(kesitler, cues, opts) {
     for (var alan in c) { if (Object.prototype.hasOwnProperty.call(c, alan)) yeni[alan] = c[alan]; }
     yeni.start = ofsler[enIyi] + (ys - k.bas);
     yeni.end = ofsler[enIyi] + (ye - k.bas);
+    /* ⚠ GERÇEK KESİT SONUNU AŞMA. Kareye yuvarlama yüzünden Shorts eksenindeki kesit,
+       kaynak kesitten birkaç kare KISA olabiliyor; o durumda son cue bir sonraki kesitin
+       görüntüsünün üstünde kalırdı (yanlış sahnede duran altyazı). `hedefBit` verilmemişse
+       hiçbir şey değişmez. */
+    var hbit = kesitler[enIyi].hedefBit;
+    if (typeof hbit === "number" && isFinite(hbit)) {
+      if (yeni.end > hbit) yeni.end = hbit;
+      if (yeni.start > hbit) yeni.start = hbit;
+    }
     yeni.kesitNo = enIyi;
     yeni.kaynakBas = s;
     yeni.kirpildi = kirpildi;

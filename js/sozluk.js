@@ -26,14 +26,22 @@ var DOSYA = "sozluk.json";
    eklenen bir varyant, sözlüğü bir kez kaydetmiş kullanıcıya ASLA ulaşmaz. Bu tuzağa bu
    projede iki kez düşüldü (emoji PNG'lerinin üzerine yazma kuralı, preset.secili birleştirmesi).
    `paketBirlestir` bu sayıya bakıp eksik varyantları bir kez ekliyor — bkz. aşağısı. */
-var PAKET_SURUM = 2;
+/* 2 → 3: Tofi'ye "tuffy" varyantı eklendi (12 Ağustos 2026). Bu artış OLMADAN, sözlüğünü
+   bir kez kaydetmiş hiç kimseye (ParsMazi dahil) yeni varyant ULAŞMAZ — load() kullanıcının
+   kendi sozluk.json'ı varsa VARSAYILAN'a hiç bakmıyor. */
+var PAKET_SURUM = 3;
 
 var VARSAYILAN = [
   /* ⚠ "tobi" ParsMazi'nin gerçek kaydından geldi (11 Ağustos 2026): "10'da 9'a Tofi değil
      TOBİ yazıyor". Motor Türkçe dinlerken f/b'yi karıştırıyor ve bu kullanıcıya özel değil —
      ölçüm yerine tahminle uzatmıyoruz, gerçek transkriptte GÖRÜLEN yazımlar ekleniyor. */
+  /* ⚠ "tuffy" kullanıcının bildirdiği gerçek yazım (12 Ağustos 2026). Aynı ailedeki
+     "toffy" zaten listedeydi; motor o/u sesini de karıştırabiliyor. Tahminle
+     uzatılmadı — "tufi", "taffy" gibi GÖRÜLMEMİŞ yazımlar bilerek eklenmedi.
+     ⚠ Aynı istekte gelen "Tobi" ve "Toby" ZATEN listedeydi ve ölçüldü: "Tobi gel" →
+     "Tofi gel", "Tobiler" → "Tofiler", "Tobi'nin" → "Tofi'nin" hepsi çalışıyor. */
   { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi",
-                          "tobi", "tobby", "toby", "tobe", "to bi"] },
+                          "tobi", "tobby", "toby", "tobe", "to bi", "tuffy"] },
   { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni"] },
   { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra"] },
   { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi"] },

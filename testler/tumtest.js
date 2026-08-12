@@ -374,7 +374,11 @@ function bitir() {
                  "halk", "tor", "kısa", "ilişki", "imkân", "ithal", "iyi", "ısı", "için",
                  /* "tobi" varyantı eklendikten sonra (11 Ağustos 2026) bu üçü nöbetçi:
                     tobra bir merhem markası, tobik/otobüs gerçek kelimeler. */
-                 "tobra", "tobik", "otobüs", "otobüsü"];
+                 "tobra", "tobik", "otobüs", "otobüsü",
+                 /* "tuffy" varyantı eklendikten sonra (12 Ağustos 2026) bunlar nöbetçi:
+                    tufan bir isim, tuğla/tuz/tüf gerçek kelimeler, stuffy İngilizce bir
+                    kelime ve "tuffy"yi İÇERİYOR — parça eşleşme olmadığını kanıtlıyor. */
+                 "tuff", "tufan", "tuğla", "tuz", "tüf", "stuffy"];
     var bozulan = masum.filter(function (k) { return SZ.fixToken(k, harita) !== null; });
     esit("masum Türkçe kelimeler bozulmuyor", bozulan, []);
 
@@ -385,6 +389,19 @@ function bitir() {
     esit("Tobi'ye → Tofi'ye", SZ.fixToken("Tobi'ye", harita), "Tofi'ye");
     esit("tobilerden → Tofilerden", SZ.fixToken("tobilerden", harita), "Tofilerden");
     esit("cümle içinde", SZ.fixText("Ya Tobi ne yaptın", harita), "Ya Tofi ne yaptın");
+
+    /* ── "TUFFY" → "TOFİ" (kullanıcı isteği, 12 Ağustos 2026) ──
+       Aynı istekte gelen "Tobi" ve "Toby" ZATEN listedeydi ve çalışıyordu (yukarıdaki
+       testler); eksik olan tek yazım "tuffy" idi. Ölçüm önce yapıldı, sonra eklendi. */
+    esit("tuffy → Tofi", SZ.fixToken("tuffy", harita), "Tofi");
+    esit("Tuffy (büyük harf) → Tofi", SZ.fixToken("Tuffy", harita), "Tofi");
+    esit("tuffyler → Tofiler (Türkçe ek)", SZ.fixToken("tuffyler", harita), "Tofiler");
+    esit("toby → Tofi (zaten vardı)", SZ.fixToken("toby", harita), "Tofi");
+    /* ⚠ PAKET_SURUM ARTIRILMADAN yeni varyant, sözlüğünü bir kez kaydetmiş kullanıcıya
+       ULAŞMAZ (load() kendi dosyası varsa VARSAYILAN'a hiç bakmıyor). Bu satır o
+       artışı kilitliyor: varyant eklenip sürüm unutulursa test kırmızı verir. */
+    dogru("PAKET_SURUM 'tuffy' eklemesiyle artırıldı (>=3)", SZ.PAKET_SURUM >= 3,
+          "artırılmazsa yeni varyant mevcut kullanıcıya hiç ulaşmaz");
 
     /* ── PAKETTEKİ YENİ VARYANT MEVCUT KULLANICIYA ULAŞIYOR MU ──
        ⚠ Bu testin sebebi: VARSAYILAN'a varyant eklemek TEK BAŞINA yetmiyor. load() kullanıcının
@@ -1081,17 +1098,54 @@ function bitir() {
     /* ⚠ EMOJİ KONUŞMANIN BAŞINDA (kullanıcı, 11 Ağustos 2026: "cümle başlıyo emoji ne zaman
        geliyo, ses dalgasına bak"). Ölçülen: ses 02:11'de, emoji 02:13'te — 5 kelime filtresi
        kısa açılış cümlelerini elediği için emoji geç görünüyordu. */
-    /* ⚠ HIZLI MOD (--batched): destek pipeline.js'te yazılıydı ama hiçbir yerden AÇILMIYORDU
-       (kullanıcı sordu, 11 Ağustos 2026: "altyazıyı hızlandıramaz mıyız"). Artık trOpts'tan
-       geçiyor. VARSAYILAN KAPALI olmak ZORUNDA: batched modun word_timestamps ile uyumu bu
-       motor sürümünde ölçülmedi, bozuksa altyazı zamanları kayar. */
-    dogru("hızlı mod trOpts'tan motora geçiyor", /batched:\s*\(function/.test(a));
-    dogru("hızlı mod kutusu HTML'de var",
-          fs.readFileSync(path.join(KOK, "index.html"), "utf8").indexOf("id=\"chkBatched\"") !== -1);
-    dogru("hızlı mod VARSAYILAN KAPALI", /lsGet\("batchedMod", "0"\)/.test(a),
-          "varsayılan açık olursa ölçülmemiş bir kip sessizce devreye girer");
-    dogru("pipeline --batched argümanını gerçekten gönderiyor",
+    /* ⚠⚠ HIZLI MOD (--batched) KALDIRILDI — ÖLÇÜLDÜ VE BOZUK ÇIKTI (12 Ağustos 2026).
+       Bu testler eskiden özelliğin VARLIĞINI kilitliyordu; artık YOKLUĞUNU kilitliyor.
+       Ölçüm: batched, Whisper segmentlerini 7 KAT seyreltiyor (dakikada 17.8 → 2.5;
+       segment başına 4.5 kelime → ~32 cue). `cumleId` doğrudan segment sırasından türediği
+       için "Tofi Moni video modu" seçecek cümle bulamıyor ve seyreltme SIFIR oluyor —
+       kullanıcının "7. dakikada altyazı hâlâ dolu" şikâyetinin ölçülmüş sebebi budur.
+       ⚠ SESSİZ BOZULMA: hata yok, panel yeşil, yanlışlık ancak Premiere'de görünüyor —
+       bu yüzden geri gelmemesi TEST ile kilitleniyor. */
+    dogru("hızlı mod trOpts'ta SABİT KAPALI (kutudan/localStorage'dan okunmuyor)",
+          /batched:\s*false/.test(a) && !/batched:\s*\(function/.test(a),
+          "batched yeniden bir kutuya bağlanırsa vurucu mod sessizce devre dışı kalır");
+    dogru("hızlı mod kutusu HTML'den KALDIRILDI",
+          fs.readFileSync(path.join(KOK, "index.html"), "utf8").indexOf("id=\"chkBatched\"") === -1);
+    dogru("kayıtlı batched seçimi TEMİZLENİYOR (görünmez açık kalmasın)",
+          /lsSet\("batchedMod", "0"\)/.test(a),
+          "kutuyu silmek yetmez: localStorage'da 1 kalırsa ileride biri okuyup açabilir");
+    /* pipeline'daki destek DURUYOR — motor sürümü düzelirse yeniden bağlanabilsin diye. */
+    dogru("pipeline --batched desteği duruyor (ileride yeniden ölçmek için)",
           /opts\.batched[\s\S]{0,60}"--batched"/.test(fs.readFileSync(path.join(KOK, "js", "pipeline.js"), "utf8")));
+
+    /* ⚠ VURUCU MOD SEYRELTEMEZSE PANEL SUSMAZ. 12 Ağustos'ta gerçekten şu oldu: mod açık,
+       hata yok, panel yeşil — ama video baştan sona altyazılı ve kullanıcı bunu ancak
+       Premiere'de gördü. Artık seyreltme oranı ÖLÇÜLÜP eşiğin üstündeyse ONAY soruluyor. */
+    dogru("vurucu mod seyreltme oranını ÖLÇÜYOR", /vOnceToplam[\s\S]{0,600}vSonraToplam/.test(a));
+    dogru("seyreltemezse kullanıcıya SORUYOR",
+          /vOran > 0\.6[\s\S]{0,700}uiConfirm/.test(a),
+          "sessizce tam altyazılı video üretmek en pahalı hata");
+    dogru("seyreltememe sebebi (devasa segment) ayrıca söyleniyor",
+          /vSegYogun > 10/.test(a));
+
+    /* ⚠ SHORTS FULL ALTYAZI OLMAK ZORUNDA — kullanıcı isteği (12 Ağustos 2026):
+       "shorts oluştururken tam tersi full + full altyazılı olacak". Yani vurucu modun
+       seyreltmesi Shorts'a SIZMAMALI. Shorts kendi cue kopyasını `SZAMAN.cueHarita` ile
+       üretiyor ve `vurucuGoster` alanını taşıyor ama ONA GÖRE SÜZMÜYOR — bu testler o
+       davranışı kilitliyor. */
+    (function () {
+      var sh = fs.readFileSync(path.join(KOK, "js", "shorts.js"), "utf8");
+      var sz = fs.readFileSync(path.join(KOK, "js", "shortszaman.js"), "utf8");
+      dogru("Shorts vurucu filtresini UYGULAMIYOR (full altyazı)",
+            sh.indexOf("gosterilenler") === -1 && sz.indexOf("gosterilenler") === -1,
+            "Shorts full altyazılı olmalı; seyreltme yalnız uzun videoda");
+      /* app.js tarafında da Shorts yolunda filtre olmamalı: `gosterilenler` yalnız
+         placeCaptions'ın vurucu bloğunda (uzun video) çağrılabilir. */
+      var shortsBlok = a.slice(a.indexOf("async function shortsKurVeDoldur"));
+      shortsBlok = shortsBlok.slice(0, shortsBlok.indexOf("async function cokluUret"));
+      dogru("shortsKurVeDoldur içinde vurucu süzme YOK",
+            shortsBlok.indexOf("gosterilenler") === -1 && shortsBlok.indexOf("vurucuGoster") === -1);
+    })();
 
     dogru("emoji öne çekme sabitleri tanımlı",
           /var EMOJI_ONE_CEK = [\d.]+/.test(a) && /var EMOJI_KESINTI = [\d.]+/.test(a));
@@ -1380,8 +1434,40 @@ function bitir() {
             cokluBlok.indexOf("activeSequence.name") !== -1);
       dogru("dönülemezse döngü DURUYOR (sessizce yanlış sekanstan kesmiyor)",
             /geri !== kaynakAd[\s\S]{0,400}?break;/.test(cokluBlok));
-      dogru("kaynak sekans adı BAŞTA okunuyor (ad karşılaştırması için)",
-            a.indexOf("kaynakAd = String(await evalES") !== -1);
+      /* ⚠ TEST GÜÇLENDİRİLDİ (12 Ağustos 2026 denetimi). Eskiden yalnız
+         `kaynakAd = String(await evalES` dizgesini arıyordu — yani BİÇİMİ kilitliyordu,
+         değişmezi değil. Bulunan gerçek hata şuydu: `kaynakId` yalnızca `r.hs.kaynakId`
+         üzerinden, yani ancak bir Shorts BAŞARIYLA kurulduktan sonra doluyordu. Geri-dönüş
+         bloğunun tamamı `if (kaynakId && …)` kapısının arkasında olduğu için İLK TUR
+         DÜŞERSE koruma tümden devre dışı kalıyor ve kalan bütün turlar yanlış sekanstan
+         kesiyordu — sebebi gizleyen bir zincirleme çökme.
+         Artık ikisi de DÖNGÜDEN ÖNCE okunuyor; test o değişmezi doğruluyor. */
+      var _dgIx = cokluBlok.indexOf("for (i = 0; i < bol.shortslar.length");
+      var _basBlok = _dgIx > 0 ? cokluBlok.slice(0, _dgIx) : cokluBlok;
+      dogru("kaynak sekansın ADI döngüden ÖNCE okunuyor (ad karşılaştırması için)",
+            /kaynakAd\s*=/.test(_basBlok) && _basBlok.indexOf("activeSequence") !== -1);
+      dogru("kaynak sekansın KİMLİĞİ de döngüden ÖNCE okunuyor (ilk tur düşse de geri dönüş çalışsın)",
+            _basBlok.indexOf("sequenceID") !== -1);
+      /* ⚠ HATA DALINDA DA GERİ DÖNÜLMELİ. `if (r.hata) { … continue; }` bloğu geri dönüş
+         kodunun ÜSTÜNDEYDİ, yani başarısız bir tur dönüşü tamamen atlıyordu — oysa geri
+         dönüşe en çok ihtiyaç duyulan an tam olarak odur. */
+      dogru("başarısız turda da kaynak sekansa dönülüyor (continue ÖNCESİ)",
+            /r\.hata[\s\S]{0,400}?_kaynagaDon\(\)[\s\S]{0,300}?continue;/.test(cokluBlok));
+      /* ⚠ SON TURDAN SONRA DA DÖNÜLMELİ. Eskiden `i + 1 < uzunluk` şartı son turu dışarıda
+         bırakıyor, hemen ardından `kaynakId = ""` yazıldığı için `finally` de geri açmıyordu:
+         akış bitince aktif sekans SON SHORTS kalıyordu ve kullanıcının bir sonraki
+         "Timeline'a Ekle" / "Emoji Ekle" işlemi sessizce oraya yazıyordu. */
+      /* ⚠ ARAMA YALNIZ BAŞARI YOLUNDA. İlk yazdığım hâli bütün fonksiyonda arıyordu ve
+         `catch (eKa) { kaynakAd = ""; kaynakId = ""; }` (kimlik hiç okunamadıysa geçerli
+         bir sıfırlama) yüzünden hep kırmızı veriyordu — nöbetçi testi kendisi kararsız
+         olmamalı. Pencere: sonuç özetinin başlangıcından `catch`'e kadar. */
+      var _sonIx = cokluBlok.indexOf("var basarili = sonuclar.filter");
+      var _catchIx = cokluBlok.indexOf("} catch (e3)");
+      var _sonBlok = (_sonIx > 0 && _catchIx > _sonIx) ? cokluBlok.slice(_sonIx, _catchIx) : "";
+      dogru("başarı yolunda kaynak kimliği SIFIRLANMIYOR (finally kaynağa dönebilsin)",
+            _sonBlok.length > 0 && !/kaynakId\s*=\s*""/.test(_sonBlok));
+      dogru("sonuç mesajı hangi sekansta kalındığını söylüyor",
+            /Kaynak sekans[ıi]na geri dönüldü/.test(cokluBlok));
     })();
 
     /* --- YATAY: DEĞİŞMEMELİ (regresyon kilidi) --- */
@@ -1660,20 +1746,31 @@ function bitir() {
       { bas: 50, bit: 52, puan: 10 },   // 2 sn — kesitMin(4) altında
       { bas: 60, bit: 90, puan: 10 },   // 30 sn — kesitMax(14) üstünde
       { bas: 100, bit: 112, puan: 6 },  // 12 sn
-      { bas: 200, bit: 212, puan: 5 }   // 12 sn — bütçeyi aşar (10+10+12=32, +12=44 > 42)
+      { bas: 200, bit: 212, puan: 5 },  // 12 sn — bölge kuralı sayesinde SEÇİLİR
+      /* ⚠ BU ADAY 12 Ağustos 2026'da EKLENDİ. Kullanıcı üst sınırı 42 → 45 sn'ye çekince
+         eski fixture'daki son aday (44 sn'ye çıkaran) artık bütçeye SIĞIYOR ve "bütçeyi
+         aşan elendi" testi kendi kontrol ettiği şeyi test etmez hâle geliyordu — sınır
+         değişince fixture da güncellenmeli, yoksa test yeşil ama kör kalır. */
+      { bas: 300, bit: 314, puan: 3 }   // 14 sn — 34+14=48 > 45, bütçeyi AŞAR
     ];
     var b = SH._butceUygula(ad, {}, s4);
     esit("çakışan elendi", s4.cakismaElenen, 1);
     esit("kısa elendi", s4.kisaElenen, 1);
     esit("uzun elendi", s4.uzunElenen, 1);
     esit("bütçeyi aşan elendi", s4.sureElenen, 1);
-    esit("seçilen kesit sayısı", b.kesitler.length, 3);
+    /* ⚠ 3 → 4 (12 Ağustos 2026): üst sınır 42 → 45 sn'ye çıkınca aynı fixture'a BİR KESİT
+       DAHA sığıyor (10+10+12+12 = 44). Bu bir gerileme değil, sınır değişikliğinin doğrudan
+       ve istenen sonucu — kullanıcı "en fazla 45 saniye" dedi. */
+    esit("seçilen kesit sayısı", b.kesitler.length, 4);
     /* ⚠ 32 DEĞİL 34 — zaman dağılımı eklendikten sonra bilerek değişti (11 Ağustos 2026).
        Eski kod bölge kuralı olmadığı için 30. saniyedeki adayı (videonun başı) alıyordu;
        artık 200. saniyedeki aday kendi bölgesinden geldiği için tercih ediliyor. Yani
        toplam süre 2 sn arttı ama seçim videonun tamamına yayıldı — istenen tam buydu. */
-    esit("toplam süre bütçe içinde", b.toplam, 34);
-    dogru("toplam 42 sn tavanını aşmıyor", b.toplam <= 42);
+    esit("toplam süre bütçe içinde", b.toplam, 44);
+    /* Tavan MODÜLDEN okunuyor — elle yazılırsa kullanıcı sınırı değiştirince test
+       kodun doğru olduğu hâlde kırmızı verir (bu bir kez oldu). */
+    var _UST = SH.VARSAYILAN_OPTS ? SH.VARSAYILAN_OPTS.maxSure : 45;
+    dogru("toplam " + _UST + " sn tavanını aşmıyor", b.toplam <= _UST);
     dogru("videonun SONUNDAKİ aday da seçildi (dağılım çalışıyor)",
           b.kesitler.some(function (k) { return k.bas === 200; }),
           "seçilenler: " + b.kesitler.map(function (k) { return k.bas; }).join(", "));
@@ -1971,6 +2068,512 @@ function bitir() {
     dogru("nöbetçi kasıtlı bozmayı yakalıyor", yakalandi, "bozuk örnek: " + sahte);
     dogru("temiz Türkçe metni yanlışlıkla işaretlemiyor",
           !IMZA.some(function (im) { return im.re.test("Sürüm aralığı geniş — ığşçöü ⚠ “tırnak”"); }));
+
+    /* ⚠ GÖRÜNMEZ KONTROL KARAKTERİ — 12 Ağustos 2026'da İKİ KEZ oldu (js/app.js ve CLAUDE.md).
+       Bir ayraç olarak U+0001 kullanılırken kaçış dizisi yerine karakterin KENDİSİ dosyaya
+       yazıldı. Kod çalışıyordu ve mojibake nöbetçisi de yakalamıyor (o, bayt bozulması
+       imzalarına bakıyor — kontrol karakteri bozulma değil, kasıtsız bir düz yazım).
+       Neden tehlikeli: dosyada görünmüyor, diff'te görünmüyor, kopyala-yapıştır'da kayboluyor
+       ve bir gün "neden bu split çalışmıyor" diye saatler harcatıyor. Ayraçlar HER ZAMAN
+       kaçış dizisiyle yazılmalı (String.fromCharCode(1) ya da \\uXXXX).
+       ⚠ TAB (U+0009), LF (U+000A) ve CR (U+000D) hariç — onlar normal metin karakterleri. */
+    var kontrolBulgu = [];
+    (function tara(dizin, derinlik) {
+      if (derinlik > 3) return;
+      var ogeler; try { ogeler = fs.readdirSync(dizin); } catch (e) { return; }
+      ogeler.forEach(function (ad) {
+        if (ad === "node_modules" || ad === ".git" || ad === "varsayilan") return;
+        var tam = path.join(dizin, ad), st;
+        try { st = fs.statSync(tam); } catch (e2) { return; }
+        if (st.isDirectory()) { tara(tam, derinlik + 1); return; }
+        if (!/\.(js|jsx|html|css|json|md)$/i.test(ad)) return;
+        var icerik; try { icerik = fs.readFileSync(tam, "utf8"); } catch (e3) { return; }
+        var bulunan = icerik.match(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g);
+        if (bulunan) {
+          kontrolBulgu.push(path.relative(KOK, tam) + " (" + bulunan.length + " tane, ilki U+" +
+                            bulunan[0].charCodeAt(0).toString(16) + ")");
+        }
+      });
+    })(KOK, 0);
+    esit("hiçbir kaynak dosyada görünmez kontrol karakteri YOK", kontrolBulgu, []);
+    dogru("nöbetçi kontrol karakterini yakalıyor",
+          /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test("a" + String.fromCharCode(1) + "b"));
+    dogru("tab ve satır sonunu yanlışlıkla işaretlemiyor",
+          !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test("a\tb\r\nc"));
+  })();
+
+  /* ================================================================
+     21. ARAYÜZ BÜTÜNLÜĞÜ — 12 Ağustos 2026 denetiminden doğdu.
+     Üçü de GERÇEKTEN OLDU ve hiçbiri mevcut testlerle yakalanmıyordu; ortak noktaları
+     SESSİZ olmaları: ne tarayıcı ne Node hata veriyor, panel açılıyor, testler geçiyordu.
+     ================================================================ */
+  baslik("Arayüz bütünlüğü (CSS sınıfı · yinelenen id · yinelenen fonksiyon)");
+  (function () {
+    var html = fs.readFileSync(path.join(KOK, "index.html"), "utf8");
+    var css = fs.readFileSync(path.join(KOK, "css", "style.css"), "utf8");
+    var app = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+
+    /* ---- (a) HTML'de kullanılan her sınıf CSS'te tanımlı mı? ----
+       GERÇEK HATA: Shorts ekranları 11 Ağustos'ta eklendi, style.css 9 Ağustos'ta kalmıştı.
+       `.btn`, `.chk` ve `.kanal-liste` sınıfları HİÇ tanımlı değildi — "Shorts Oluştur"
+       düğmesi koyu mor panelin ortasında sistem fontlu, açık gri bir Windows düğmesi olarak
+       çıkıyordu ("saçma garip bi buton"). Tanımsız CSS sınıfı sessizdir: tarayıcı hata
+       vermez, öğe kendi varsayılan görünümünde kalır. */
+    var kullanilan = {}, m, reCls = /class="([^"]+)"/g;
+    while ((m = reCls.exec(html)) !== null) {
+      m[1].split(/\s+/).forEach(function (c) { if (c) kullanilan[c] = 1; });
+    }
+    /* app.js de sınıf atıyor (className = "…"), onlar da sayılmalı. */
+    var reJs = /className\s*=\s*"([^"]+)"/g;
+    while ((m = reJs.exec(app)) !== null) {
+      m[1].split(/\s+/).forEach(function (c) { if (c) kullanilan[c] = 1; });
+    }
+    /* Durum sınıfları (JS'in ekleyip çıkardığı) CSS'te birleşik seçicilerde geçiyor —
+       ".iler.done" gibi. Basit ".ad" araması onları bulamaz, o yüzden sınıf adının
+       CSS metninde HERHANGİ bir yerde nokta ile geçmesi yeterli sayılıyor. */
+    var eksik = [];
+    Object.keys(kullanilan).forEach(function (c) {
+      if (/^(active|hidden|busy|done|error)$/.test(c)) return;   // salt durum sınıfları
+      var re = new RegExp("\\." + c.replace(/[-[\]{}()*+?.,\\^$|#]/g, "\\$&") + "(?![\\w-])");
+      if (!re.test(css)) eksik.push(c);
+    });
+    dogru("HTML'de sınıf kullanımı bulundu (" + Object.keys(kullanilan).length + ")",
+          Object.keys(kullanilan).length > 20);
+    esit("HTML'de geçen her sınıf style.css'te TANIMLI", eksik, []);
+    /* Nöbetçinin kendisi çalışıyor mu */
+    dogru("nöbetçi tanımsız sınıfı yakalıyor",
+          !(new RegExp("\\.yw-olmayan-sinif(?![\\w-])")).test(css));
+
+    /* ---- (b) Yinelenen id ----
+       GERÇEK HATA: `id="shortsAyar"` hem Altyazı ekranında hem Tekli Shorts ekranında
+       vardı. getElementById HER ZAMAN ilkini döndürür, yani ikinci blok app.js'ten
+       erişilemez durumdaydı — bugün zararsızdı ama onu gizlemeye/göstermeye kalkan ilk
+       satır sessizce YANLIŞ bloğu gizlerdi. */
+    var idler = {}, cift = [], reId = /\sid="([^"]+)"/g;
+    while ((m = reId.exec(html)) !== null) {
+      if (idler[m[1]]) { if (cift.indexOf(m[1]) < 0) cift.push(m[1]); }
+      idler[m[1]] = 1;
+    }
+    esit("index.html'de yinelenen id YOK", cift, []);
+
+    /* ---- (c) app.js'te aynı kapsamda yinelenen fonksiyon adı ----
+       ⚠ BU OTURUMUN EN PAHALI HATASI. `function wireShorts()` İKİ kez tanımlıydı:
+       satır ~856 (Altyazı ekranındaki Shorts kutusu) ve ~4251 (Shorts/Çoklu düğmeleri).
+       JS aynı kapsamdaki ikinci bildirim için HATA VERMEZ, sessizce birinciyi ezer. İki
+       sonucu vardı: (1) Altyazı ekranındaki Shorts kutusunun dinleyicisi HİÇ bağlanmıyordu
+       (uzun video tarafında ölü bir kutu), (2) `wire()` aynı adı iki kez çağırdığı için
+       Shorts düğmelerine İKİ dinleyici bağlanıyor ve tek tık İKİ paralel üretim
+       başlatıyordu — çift yapay zekâ ücreti ve aynı projede birbiriyle yarışan iki akış.
+       ⚠ YALNIZ 2 BOŞLUKLU (modül kapsamı) bildirimler sayılır: daha derin girintili
+       fonksiyonlar (`yaz`, `gorunum`, `opt`) farklı fonksiyonların içinde ve aynı adı
+       taşımaları tamamen normaldir. */
+    var sayac = {}, satirlar = app.split(/\r?\n/), yinelenen = [];
+    satirlar.forEach(function (s) {
+      var mm = /^ {2}(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/.exec(s);
+      if (!mm) return;
+      sayac[mm[1]] = (sayac[mm[1]] || 0) + 1;
+      if (sayac[mm[1]] === 2) yinelenen.push(mm[1]);
+    });
+    dogru("modül kapsamında fonksiyon bulundu (" + Object.keys(sayac).length + ")",
+          Object.keys(sayac).length > 40);
+    esit("app.js'te aynı kapsamda YİNELENEN fonksiyon adı YOK", yinelenen, []);
+
+    /* ---- (d) UYARI ≠ HATA ----
+       GERÇEK HATA (kullanıcı bildirdi, 12 Ağustos 2026: "neden çarpı var, sorun ne?").
+       `progressFail(msg, "warn")` çağrılıyordu ve fonksiyon "warn" bilgisini ALIYORDU ama
+       yalnız yazı rengine uyguluyordu: rozet koşulsuz "✕", rozet sınıfı koşulsuz "bad",
+       kutu sınıfı koşulsuz "error". Yani başarıyla biten ama not düşülen bir iş
+       ("414 altyazı kondu, 14 tanesi gizlendi") ekranda BAŞARISIZ görünüyordu.
+       Panelin "kısmi başarı YEŞİL değil SARI" kuralının eksik yarısı buydu: sarı,
+       KIRMIZIDAN da ayrılmalı. */
+    var pfBlok = app.slice(app.indexOf("function progressFail("));
+    pfBlok = pfBlok.slice(0, 900);
+    dogru("progressFail uyarıyı hatadan AYIRIYOR (rozet)",
+          /uyari \? "⚠" : "✕"/.test(pfBlok),
+          "uyarı ✕ ile gösterilirse kullanıcı başarılı işi başarısız sanıyor");
+    dogru("progressFail uyarıda 'error' sınıfı VERMİYOR",
+          /classList\.add\(uyari \? "warn" : "error"\)/.test(pfBlok));
+    dogru("uyarı rozeti CSS'te tanımlı", css.indexOf(".prog-badge.warn") !== -1);
+    dogru("uyarı çubuğu CSS'te tanımlı", css.indexOf(".progress-box.warn") !== -1);
+    /* Yeni ilerleme panelinde de aynı üç durum ayrı olmalı. */
+    dogru("ilerleme paneli üç durumu AYIRIYOR (✓ / ⚠ / ✕)",
+          /kind === "bad" \? "✕" : kind === "warn" \? "⚠" : "✓"/.test(app));
+
+    /* ---- (d2) EFEKTİN İÇ ALANLARI ("_ " önekli) PRESETLE YAZILMAZ ----
+       GERÇEK HATA (kullanıcı bildirdi, 12 Ağustos 2026: "emojinin saçının solu kesiliyor").
+       "Emoji Sağ Taraf" preset'indeki Camera Shake bileşeni `_ Sequence Width = 0`,
+       `_ Sequence Height = 0`, `_ Sequence Pixel Ratio = 0` taşıyor. Bunlar kullanıcı ayarı
+       değil, efektin kompozisyon ölçüsünü sakladığı iç alanlar — Premiere onları kendi
+       dolduruyor. Panel 0 yazınca efekt kendini 0x0 karede sanıp görüntüyü kenardan kırpıyor.
+       Hepsi SAYI olduğu için mevcut "metin/enum yazma" kapısına takılmıyordu; ayrı kapı şart. */
+    var hostSrc = fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8");
+    dogru("preset yazımı '_' önekli iç alanları ATLIYOR",
+          /icDefter\s*=\s*\/\^_\/\.test/.test(hostSrc),
+          "iç alanlar yazılırsa efektler bozuk kompozisyon ölçüsüyle çalışır");
+    /* Kapı, tip kontrolünden ÖNCE gelmeli: iç alanların hepsi sayı olduğu için tip kapısı
+       onları geçiriyor. */
+    var kIx = hostSrc.indexOf("var icDefter"), tIx = hostSrc.indexOf("var sayisal =");
+    dogru("iç alan kapısı tip kapısından SONRA ama yazımdan ÖNCE",
+          kIx > 0 && tIx > 0 && kIx > tIx && hostSrc.indexOf("if (icDefter)") > kIx);
+
+    /* ---- (d3) HOST SÜRÜMÜ version.json İLE AYNI OLMALI ----
+       `jsx/host.jsx` yalnız Premiere AÇILIRKEN yükleniyor; paneli kapat-aç onu tazelemiyor.
+       Panelin başlığındaki sürüm ise version.json'dan okunuyor — yani panel YENİ görünürken
+       host ESKİ olabiliyor ve host tarafındaki bir düzeltme hiç devreye girmemiş oluyor.
+       Bu, 12 Ağustos 2026'da iki tur boyunca yanlış yerde hata aranmasına yol açtı.
+       Panel bunu artık ölçüp uyarıyor; bu test de sürümlerin senkron kalmasını kilitliyor. */
+    var hsM = hostSrc.match(/var HOST_SURUM\s*=\s*"([^"]+)"/);
+    var pjV = JSON.parse(fs.readFileSync(path.join(KOK, "version.json"), "utf8")).version;
+    dogru("host.jsx'te HOST_SURUM tanımlı", !!hsM);
+    if (hsM) esit("HOST_SURUM = version.json sürümü", hsM[1], pjV);
+    dogru("host sürüm okuma fonksiyonu var", /function hostSurum\(\)/.test(hostSrc));
+    dogru("panel host sürümünü KONTROL EDİYOR", /hostSurumUyari/.test(app));
+    dogru("kontrol emoji akışında, para harcanmadan ÖNCE",
+          /_hsUyari = await hostSurumUyari\(\)[\s\S]{0,400}uiConfirm/.test(app));
+
+    /* ---- (e) BAŞLATILAN HER AŞAMA KAPATILMALI ----
+       GERÇEK HATA (kullanıcı bildirdi, 12 Ağustos 2026): "animasyonlar geldi ve sorunsuz
+       çalıştı ama panelde gri eksi oldu". `adim("Animasyon uygulanıyor")` ile başlatılan
+       adım için `adimBitir` çağrısı yoktu; iş biterken `kalanlariIptal` onu "atlandı"
+       işaretliyordu. Sonuç: panel KENDİ KENDİSİYLE çelişiyordu — özet tablosu
+       "Animasyon: preset: Emoji Sağ Taraf" derken aşama listesi "yapılmadı" diyordu.
+       Bu test, adı geçen her adımın en az bir kapanış çağrısı olduğunu doğruluyor. */
+    var acilan = {}, kapanan = {}, mm2;
+    var reAc = /\.adim\("([^"]+)"\)/g;
+    while ((mm2 = reAc.exec(app)) !== null) acilan[mm2[1]] = 1;
+    var reKap = /\.(?:adimBitir|adimHata|adimAtla)\("([^"]+)"/g;
+    while ((mm2 = reKap.exec(app)) !== null) kapanan[mm2[1]] = 1;
+    var kapanmayan = Object.keys(acilan).filter(function (ad) { return !kapanan[ad]; });
+    dogru("aşama adı bulundu (" + Object.keys(acilan).length + ")", Object.keys(acilan).length >= 5);
+    esit("başlatılan her aşamanın KAPANIŞ çağrısı var", kapanmayan, []);
+  })();
+
+  /* ================================================================
+     22. İLERLEME / KALAN SÜRE HESABI (js/ilerleme.js)
+     Panelde "kalan süre" bugüne kadar tek yerde ve ham doğrusal hesaplanıyordu; emoji ve
+     Shorts gibi en uzun işlerde hiç yoktu. Bu modül saf matematik olduğu için Premiere'siz
+     ve beklemesiz sınanabiliyor — saat dışarıdan veriliyor.
+     ================================================================ */
+  baslik("İlerleme ve kalan süre hesabı");
+  (function () {
+    var I = require(path.join(KOK, "js", "ilerleme.js"));
+
+    esit("60 sn altı saniye yazılır", I.sureMetni(45), "45 sn");
+    esit("dakika dk:sn biçiminde", I.sureMetni(134), "2:14");
+    /* ⚠ SAAT AÇIK YAZILIR: "1:05" bir saat beş dakikayı bir dakika beş saniye sanmaya çok
+       müsait ve altyazı üretimi gerçekten saatlerce sürebiliyor. */
+    esit("saat açıkça yazılır", I.sureMetni(3900), "1 sa 5 dk");
+    esit("negatif/geçersiz süre boş döner", I.sureMetni(-5), "");
+
+    /* ⚠ TİTREME ÖNLEYİCİ YUVARLAMA. Saniyede bir güncellenen ham bir sayı ("~2:14 → ~2:09
+       → ~2:17") ortalaması doğru olsa bile kullanıcıya "bu panel bilmiyor" dedirtiyor.
+       10 sn ALTINDA yuvarlama YOK — orada her saniye gerçekten anlamlı. */
+    esit("10 sn altı yuvarlanmaz", I.yuvarlaEta(7), 7);
+    esit("1 dk altı 5'e yuvarlanır", I.yuvarlaEta(43), 45);
+    esit("10 dk altı 10'a yuvarlanır", I.yuvarlaEta(137), 140);
+    esit("uzun süre 30'a yuvarlanır", I.yuvarlaEta(1400), 1410);
+
+    /* ---- SAYAÇ: gerçek bir emoji koşusunun zamanlaması ---- */
+    var t = 100000, s = I.olustur({ toplam: 172, birim: "emoji", simdi: t });
+    esit("başlangıçta sayaç metni doğru", s.durum(t).sayacMetin, "0 / 172 emoji");
+    /* ⚠ TEK ÖRNEKLE ETA VERİLMEZ: ilk parça (proje içine resim import'u yüzünden) hep
+       yavaş ve tek başına tahmini şişiriyor. "hesaplanıyor…" demek yanlış sayıdan iyidir. */
+    t += 20000; s.ilerle(25, t);
+    dogru("tek örnekten sonra ETA GÜVENİLİR SAYILMAZ", s.durum(t).guvenilir === false);
+    esit("tek örnekten sonra ETA metni boş", s.durum(t).etaMetin, "");
+    /* 25 emoji / 20 sn = 1.25 emoji/sn. İkinci örnekten sonra tahmin açılır. */
+    t += 20000; s.ilerle(50, t);
+    var d2 = s.durum(t);
+    dogru("iki örnekten sonra ETA güvenilir", d2.guvenilir === true);
+    esit("kalan iş doğru", d2.kalanIs, 122);
+    /* 122 kalan / 1.25 = 97.6 sn → yuvarlanınca 100 sn → "1:40" */
+    esit("kalan süre doğru hesaplanıyor", d2.etaMetin, "1:40");
+    esit("yüzde doğru", Math.round(d2.yuzde), 29);
+
+    /* ⚠ GERİ GİDEN / TAŞAN SAYAÇ. `kondu` host'un döndürdüğü sayıdan geliyor; bozuk bir
+       cevap ETA'yı negatife çevirip "-3:12 kaldı" yazdırabilirdi. */
+    t += 10000; s.ilerle(40, t);
+    esit("sayaç GERİ GİTMEZ", s.durum(t).biten, 50);
+    t += 10000; s.ilerle(9999, t);
+    esit("sayaç toplamı AŞMAZ", s.durum(t).biten, 172);
+    s.bitir(t);
+    var d3 = s.durum(t);
+    esit("bitince yüzde 100", d3.yuzde, 100);
+    esit("bitince ETA gösterilmez", d3.etaMetin, "");
+
+    /* Toplamı bilinmeyen iş: yüzde ve ETA yok, sayaç yine çalışır. */
+    var s2 = I.olustur({ birim: "klip", simdi: 0 });
+    s2.ilerle(7, 1000);
+    esit("toplam bilinmiyorsa yüzde -1", s2.durum(1000).yuzde, -1);
+    esit("toplam bilinmiyorsa sayaç yine yazılır", s2.durum(1000).sayacMetin, "7 klip");
+
+    /* ---- AŞAMA LİSTESİ ---- */
+    var A = I.asamalar(["Bir", "İki", "Üç"]);
+    A.basla("Bir", 0);
+    esit("başlayan adım çalışıyor", A.liste()[0].durum, "calisiyor");
+    /* ⚠ ÖNCEKİ ADIM KENDİLİĞİNDEN KAPANIR. Çağıran her adımı ayrıca kapatmak zorunda
+       kalırsa bir dalda unutulur ve listede sonsuza kadar dönen bir spinner kalır —
+       panelde "takıldı mı?" izlenimi veren tam olarak budur. */
+    A.basla("İki", 5000);
+    esit("önceki adım kendiliğinden bitti", A.liste()[0].durum, "bitti");
+    esit("biten adımın süresi ölçüldü", A.liste()[0].sure, 5);
+    A.atla("Üç", "kapalı");
+    esit("atlanan adım işaretlendi", A.liste()[2].durum, "atlandi");
+    esit("atlama sebebi yazıldı", A.liste()[2].not, "kapalı");
+    /* ⚠ HATA SONRASI KALAN ADIMLAR KAPATILIR: geride "bekliyor" durumunda adım kalırsa
+       kullanıcı hâlâ bir şey olacağını sanıyor. */
+    var B = I.asamalar(["A", "B", "C"]);
+    B.basla("A", 0); B.hata("A", "patladı"); B.kalanlariIptal("yapılmadı");
+    esit("hatalı adım işaretli", B.liste()[0].durum, "hata");
+    esit("kalan adımlar iptal edildi", B.liste()[1].durum + "|" + B.liste()[2].durum,
+         "atlandi|atlandi");
+    /* Aşama bazlı kaba yüzde: çalışan adım YARIM sayılır — çubuğun adım boyunca tamamen
+       durması "dondu" hissi veriyordu. */
+    var C = I.asamalar(["x", "y"]);
+    C.basla("x", 0);
+    esit("çalışan adım yarım sayılır", C.yuzde(), 25);
+  })();
+
+  /* ================================================================
+     23. NÖBETÇİSİZ UZUN ÇAĞRI KALMASIN
+     ParsMazi'de iki kez yaşandı: Premiere uzun bir işlem sırasında kendi penceresini
+     (Auto Save / Save Project / Import) açıyor, evalScript geri çağrısı gelmiyor ve panel
+     son yazdığı metinde SONSUZA KADAR donuyor. Nöbetçi promise'i terk etmez, yalnız
+     "kaç saniyedir bekliyoruz" bilgisini dışarı verir — kullanıcı donmuş Premiere ile
+     çalışan Premiere'i ancak böyle ayırt edebiliyor.
+     ================================================================ */
+  baslik("Uzun Premiere çağrılarında nöbetçi");
+  (function () {
+    var app = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+    /* Panelin en uzun ve en çok kilitlenen çağrıları. Hepsinin ikinci parametresi
+       (izle geri çağrısı) OLMAK ZORUNDA. */
+    var izlenmesiSart = ["emojiResimYukle", "presetYaz", "saveProject", "autoCut", "senkronUygula"];
+    var nobetcisiz = [];
+    /* ⚠ DESEN "İKİ KAPANIŞ PARANTEZİNE KADAR" DİYE YAZILAMAZ — ilk hâli öyleydi ve
+       `evalES('autoCut("' + esPath(file) + '")', function (sn) {…})` biçimini hiç
+       bulamıyordu (aradaki dizge birleştirmesi yüzünden ardışık `))` oluşmuyor).
+       Bunun yerine: çağrının başlangıcından SONRAKİ evalES çağrısına kadar olan pencerede
+       nöbetçi geri çağrısı aranıyor. Böylece bir sonraki çağrının nöbetçisi yanlışlıkla
+       bu çağrıya sayılmıyor. */
+    izlenmesiSart.forEach(function (fn) {
+      var ara = "evalES('" + fn, from = 0, bulundu = 0, izlenen = 0, ix;
+      while ((ix = app.indexOf(ara, from)) !== -1) {
+        bulundu++;
+        var sonraki = app.indexOf("evalES(", ix + ara.length);
+        var son = (sonraki === -1) ? Math.min(app.length, ix + 700) : Math.min(sonraki, ix + 700);
+        var pencere = app.slice(ix, son);
+        if (/function\s*\(sn\)|_presetIzle/.test(pencere)) izlenen++;
+        from = ix + ara.length;
+      }
+      if (bulundu === 0) nobetcisiz.push(fn + " (çağrı bulunamadı)");
+      else if (izlenen < bulundu) nobetcisiz.push(fn + " (" + (bulundu - izlenen) + "/" + bulundu + " nöbetçisiz)");
+    });
+    esit("uzun Premiere çağrılarının hepsinde nöbetçi VAR", nobetcisiz, []);
+  })();
+
+  /* ================================================================
+     24. ÇOKLU SHORTS — ALTYAZI KAYMASI ve SÜRE HEDEFİ (12 Ağustos 2026)
+     İkisi de kullanıcının gerçek koşusundan geldi: "altyazı tam oturmamış, yazı kayıyo" ve
+     "30-40 saniye olmuyor, 2 tanesi 18 saniye çıktı".
+     ================================================================ */
+  baslik("Çoklu Shorts (altyazı hizası · süre hedefi)");
+  (function () {
+    var SZt, SHt, P2;
+    try {
+      SZt = require(path.join(KOK, "js", "shortszaman.js"));
+      SHt = require(path.join(KOK, "js", "shorts.js"));
+      P2  = require(path.join(KOK, "js", "pipeline.js"));
+    } catch (e) { hata("Shorts modülleri yüklenemedi", e.message); return; }
+    var app = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+
+    /* ---- ALTYAZI HİZASI ----
+       Kesitler `overwriteClip` ile konuyor ve Premiere KAREYE yuvarlıyor; host gerçekleşen
+       sınırları geri okuyup döndürüyor. Panel eskiden onları ATIYOR ve ofsetleri KAYNAK
+       sürelerini toplayarak kuruyordu → kesit başına ~0.02 sn BİRİKEN kayma. */
+    var KAY = 0.02, kesit = [], hb = 0, ix;
+    for (ix = 0; ix < 5; ix++) {
+      kesit.push({ bas: 100 + ix * 20, bit: 107 + ix * 20, hedefBas: hb, hedefBit: hb + 7 - KAY });
+      hb += 7 - KAY;
+    }
+    var cueler = kesit.map(function (k, i2) {
+      return { start: k.bas + 0.5, end: k.bas + 2.0, text: "c" + i2, cumleId: "z-" + i2 };
+    });
+    var yeni = SZt.cueHarita(kesit, cueler);
+    var yListe = yeni.cues || yeni;
+    var enBuyukSapma = 0;
+    yListe.forEach(function (c, i3) {
+      var bekl = kesit[i3].hedefBas + 0.5;
+      var s = Math.abs(c.start - bekl);
+      if (s > enBuyukSapma) enBuyukSapma = s;
+    });
+    dogru("altyazı GERÇEK kesit sınırına oturuyor (sapma < 1 ms)", enBuyukSapma < 0.001,
+          "en büyük sapma: " + enBuyukSapma.toFixed(4) + " sn");
+
+    /* hedefBas VERİLMEZSE eski davranış birebir sürmeli — tekli Shorts ve eski host bozulmasın. */
+    var eskiKesit = kesit.map(function (k) { return { bas: k.bas, bit: k.bit }; });
+    var eskiR = SZt.cueHarita(eskiKesit, cueler);
+    var eListe = eskiR.cues || eskiR;
+    esit("hedefBas yoksa ilk kesit yine 0'dan başlar (geriye uyumlu)",
+         Number(eListe[0].start.toFixed(3)), 0.5);
+    dogru("hedefBas yokken eski (biriken) davranış korunuyor",
+          Math.abs(eListe[4].start - 28.5) < 0.001,
+          "geriye uyumluluk kırılırsa eski host'la çalışan kurulumlar bozulur");
+
+    /* ---- SÜRE HEDEFİ ----
+       Bir anlatı bölümü kısa atışmalardan oluşuyorsa adayların çoğu `kesitMin` (4 sn)
+       altında kalıp eleniyordu ve Shorts 18 saniyede takılıyordu. 4. geçiş `kesitMin`'i
+       2.5'e çekiyor — YALNIZ hedef tutmadığında. */
+    function kisaAdaylar() {
+      var a = [], t = 200;
+      [6, 3, 2.5, 7, 2.8, 3.2, 5, 2.6, 3.4, 2.9].forEach(function (s, i4) {
+        a.push({ bas: t, bit: t + s, puan: 100 - i4 }); t += s + 5;
+      });
+      return a;
+    }
+    /* ⚠ SINIRLAR MODÜLDEN OKUNUYOR, ELLE YAZILMIYOR. Bir tur 28/42 sabit yazılmıştı;
+       kullanıcı sınırları 27/45'e çekince test kodu doğru olduğu hâlde kırmızı verirdi.
+       Nöbetçi test, koruduğu değerin kendisini kaynaktan almalı. */
+    /* ⚠ shorts.js kaynağı BURADA okunuyor — aşağıda değil. Bir tur bildirimden ÖNCE
+       kullanıldı ve `var` hoisting yüzünden `undefined` geçti; bu projede aynı tuzak
+       emoji özelliğini bir kez tümden çökertmişti. */
+    var shSrc = fs.readFileSync(path.join(KOK, "js", "shorts.js"), "utf8");
+    var ALT = SHt.VARSAYILAN_OPTS ? SHt.VARSAYILAN_OPTS.minSure : 27;
+    var UST = SHt.VARSAYILAN_OPTS ? SHt.VARSAYILAN_OPTS.maxSure : 45;
+    esit("SERT ALT SINIR kullanıcının istediği gibi (27 sn)", ALT, 27);
+    esit("SERT ÜST SINIR kullanıcının istediği gibi (45 sn)", UST, 45);
+    var sy = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var sonuc = SHt._butceUygula(kisaAdaylar(), {}, sy);
+    dogru("kısa adaylı bölümde alt sınıra ULAŞILIYOR (>=" + ALT + " sn)", sonuc.toplam >= ALT,
+          "çıkan süre: " + sonuc.toplam.toFixed(1) + " sn");
+    dogru("üst sınır AŞILMIYOR (<=" + UST + " sn)", sonuc.toplam <= UST);
+    dogru("gevşetme raporlanıyor", !!sy.kesitMinGevsetildi);
+    /* ⚠ ALT SINIR ARTIK SERT: altında kalınırsa bayrak kalkmalı ki coklukSec bölümü atsın. */
+    var azSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var azSonuc = SHt._butceUygula([{ bas: 10, bit: 16, puan: 9 }], {}, azSay);
+    dogru("alt sınırın altında kalınca BAYRAK kalkıyor", azSay.altSinirAltinda === true,
+          "çıkan süre: " + azSonuc.toplam.toFixed(1) + " sn");
+    dogru("coklukSec bayrağa bakıp bölümü ATLIYOR",
+          /bSay\.altSinirAltinda[\s\S]{0,300}continue;/.test(shSrc),
+          "atlamazsa 27 sn altı Shorts üretilir — kullanıcının açık isteğine aykırı");
+
+    /* ⚠ REGRESYON KİLİDİ: bol ve uzun aday varken 4. geçiş HİÇ çalışmamalı, yani seçim
+       davranışı eskisiyle birebir kalmalı. Aksi hâlde iyi çalışan Shorts'lar da kırpıntı
+       kesitlerle dolardı. */
+    var bol = [], tb = 300;
+    [8, 9, 7, 10, 6, 8, 9].forEach(function (s, i5) { bol.push({ bas: tb, bit: tb + s, puan: 100 - i5 }); tb += s + 6; });
+    var sy2 = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var r2 = SHt._butceUygula(bol, {}, sy2);
+    dogru("bol malzemede 4. geçiş ÇALIŞMIYOR (davranış değişmedi)", !sy2.kesitMinGevsetildi);
+    var enKisa = Math.min.apply(null, r2.kesitler.map(function (k) { return k.bit - k.bas; }));
+    dogru("bol malzemede kesitler kısalmıyor (>=4 sn)", enKisa >= 4,
+          "en kısa kesit: " + enKisa.toFixed(1) + " sn");
+    dogru("hedef tutunca 'hedefTutmadi' 0 kalıyor", !sy2.hedefTutmadi);
+
+    /* ---- KELİME ARASI BOŞLUK: SHORTS'TA DA KAPANMALI ----
+       GERÇEK HATA (kullanıcı, 12 Ağustos 2026: "çoklu Shorts'ta kelimeler arasında neden
+       boşluklar var"). `pipeline.cumleBirlestir` YALNIZ uzun video yolunda çağrılıyordu;
+       Shorts kendi SRT'sini yazarken hiç çağırmıyordu, dolayısıyla `buildCues`'un bıraktığı
+       2 karelik boşluklar Shorts'ta olduğu gibi kalıp yazıyı yanıp söndürüyordu. */
+    var oCue = [], ct = 100, ci;
+    for (ci = 0; ci < 8; ci++) { oCue.push({ start: ct, end: ct + 0.62, text: "k" + ci, cumleId: "c1" }); ct += 0.70; }
+    oCue.push({ start: ct + 1.5, end: ct + 2.1, text: "yeni", cumleId: "c2" });
+    var oYedek = JSON.parse(JSON.stringify(oCue));
+    var hmk = SZt.cueHarita([{ bas: 99, bit: 112, hedefBas: 0, hedefBit: 13 }], oCue);
+    var sCue = hmk.cues.filter(function (c) { return !c.gizliKesit; });
+    function _bosSay(l, altSinir, ustSinir) {
+      var n = 0;
+      for (var q = 0; q + 1 < l.length; q++) {
+        if (l[q].cumleId !== l[q + 1].cumleId) continue;
+        var d = l[q + 1].start - l[q].end;
+        if (d > altSinir && d <= ustSinir) n++;
+      }
+      return n;
+    }
+    var oncekiKucuk = _bosSay(sCue, 0.001, 0.15);
+    dogru("Shorts'a haritalanan cue'larda kelime arası boşluk VAR (köprü öncesi)", oncekiKucuk > 0);
+    var kSayac = P2.cumleBirlestir([{ ad: "A1", cues: sCue }], {}, function () {});
+    esit("Shorts'ta kelime arası boşluklar KAPANDI", _bosSay(sCue, 0.001, 0.15), 0);
+    dogru("köprü sayacı çalıştığını bildiriyor", kSayac.koprulen === oncekiKucuk);
+    /* ⚠ FARKLI CÜMLE ARASI BOŞLUK KORUNMALI — orası bilgi taşıyor. */
+    dogru("farklı cümle arası boşluk KORUNDU",
+          (sCue[sCue.length - 1].start - sCue[sCue.length - 2].end) > 0.5);
+    var tersS = 0, cakS = 0;
+    for (ci = 0; ci + 1 < sCue.length; ci++) {
+      if (sCue[ci].end < sCue[ci].start) tersS++;
+      if (sCue[ci + 1].start < sCue[ci].end - 1e-9) cakS++;
+    }
+    esit("köprü ters cue üretmedi", tersS, 0);
+    esit("köprü çakışma üretmedi", cakS, 0);
+    /* ⚠⚠ EN ÖNEMLİSİ: özgün (uzun video) cue nesneleri DEĞİŞMEMELİ. cueHarita kopya
+       üretiyor; köprü o kopyaların üzerinde çalışıyor. Bu kırılırsa Shorts üretmek
+       uzun videonun altyazısını bozar — kullanıcının en çok vurguladığı şart. */
+    var degisen = 0;
+    for (ci = 0; ci < oCue.length; ci++) {
+      if (oCue[ci].start !== oYedek[ci].start || oCue[ci].end !== oYedek[ci].end ||
+          oCue[ci].cumleId !== oYedek[ci].cumleId) degisen++;
+    }
+    esit("Shorts köprüsü UZUN VİDEONUN cue'larına DOKUNMUYOR", degisen, 0);
+    /* Çağrı gerçekten Shorts akışında mı — yoksa test yeşil ama üretim yolu çağırmıyor olur. */
+    dogru("shortsKurVeDoldur cumleBirlestir'i ÇAĞIRIYOR",
+          /hazir\.length[\s\S]{0,200}cumleBirlestir\(hazir/.test(app));
+
+    /* ---- KANALLAR ARASI ÇAKIŞMA: SHORTS'TA DA GİDERİLMELİ ----
+       GERÇEK HATA (kullanıcı, 12 Ağustos 2026: "aynı saniyede altlı üstlü 3 kelime çıkıyor,
+       yazılar ekranı kaplıyor"). Premiere bütün caption track'lerini AYNI ANDA AYNI YERE
+       çiziyor; iki kişi aynı anda konuşunca 2+2=4 kelime üst üste biniyor. Uzun video bunu
+       `kanallarArasiCakisma` ile çözüyordu ama Shorts o fonksiyonu HİÇ çağırmıyordu. */
+    var cA = [{ start: 10, end: 12, text: "a1", cumleId: "x" }, { start: 12.1, end: 14, text: "a2", cumleId: "x" }];
+    var cB = [{ start: 11, end: 13, text: "b1", cumleId: "y" }];
+    var grp = [{ ad: "A", cues: cA }, { ad: "B", cues: cB }];
+    var kkS = P2.kanallarArasiCakisma(grp, { gizle: true }, function () {});
+    var hepsi = [];
+    grp.forEach(function (x) { x.cues.forEach(function (c) { if (!c.gizliCakisma) hepsi.push(c); }); });
+    hepsi.sort(function (a, b) { return a.start - b.start; });
+    var ustUste = 0;
+    for (ci = 0; ci + 1 < hepsi.length; ci++) if (hepsi[ci + 1].start < hepsi[ci].end - 1e-9) ustUste++;
+    esit("çakışma giderildikten sonra üst üste kalan YOK", ustUste, 0);
+    dogru("kırpma gerçekten yapıldı", (kkS.kirpilan || 0) > 0);
+    dogru("shortsKurVeDoldur kanallarArasiCakisma'yı ÇAĞIRIYOR",
+          /hazir\.length > 1[\s\S]{0,300}kanallarArasiCakisma\(hazir/.test(app),
+          "çağrılmazsa Shorts'ta yazılar üst üste biner");
+    dogru("gizlenenler SRT'den düşürülüyor",
+          /gizliCakisma[\s\S]{0,120}filter/.test(app) || /filter\([\s\S]{0,80}gizliCakisma/.test(app));
+    /* Sıra: çakışma giderme KÖPRÜDEN ÖNCE olmalı (uzun videodaki zorunlu sıra). */
+    dogru("çakışma giderme köprüden ÖNCE",
+          app.indexOf("kanallarArasiCakisma(hazir") < app.indexOf("cumleBirlestir(hazir"));
+
+    /* ---- ADET GARANTİSİ ----
+       "Kaç Shorts seçtiysem o kadar yapmalı." Modelden TAM `adet` bölüm isteniyordu; bir
+       bölümden kesit çıkmazsa slot telafisiz kayboluyordu. Artık yedek bölüm isteniyor. */
+    dogru("coklukSec modelden YEDEK bölüm istiyor", /istemAdet\s*=\s*adet\s*\+\s*2/.test(shSrc));
+    dogru("istem metninde yedek sayısı kullanılıyor", /istemAdet\s*\+\s*" anlatı bölümüne/.test(shSrc));
+    dogru("döngü istenen adette DURUYOR", /shortslar\.length < adet/.test(shSrc));
+    /* Payda kullanıcının istediği sayı olmalı — "2/2" diyerek kaybı gizlemesin. */
+    dogru("sonuç paydası kullanıcının istediği ADET", /var istenen = adet;/.test(app),
+          "bol.shortslar.length kullanılırsa eksik üretim '2/2' diye gizlenir");
+
+    /* ---- SAHNE SEÇİMİ İSTEMİ ----
+       Modele "iyi an seç" demek yetmiyor; NEYİ ALMAYACAĞINI söylemek seçimi düzeltiyor
+       (emoji isteminde ölçülmüştü). */
+    dogru("istem OLUMSUZ örnek veriyor (ne alınmayacak)", /ŞUNLARI ALMA/.test(shSrc));
+    dogru("istem OLUMLU örnek veriyor (ne tercih edilecek)", /ŞUNLARI TERCİH ET/.test(shSrc));
+    dogru("hazırlık/kurulum konuşması açıkça eleniyor", /Hazırlık\/kurulum konuşması/.test(shSrc));
+
+    /* ⚠ UZUN VİDEO YOLUNA DOKUNULMADI — kullanıcının en çok vurguladığı şart.
+       Shorts düzeltmeleri yalnız shorts.js / shortszaman.js ve app.js'in Shorts dalında. */
+    var pipe = fs.readFileSync(path.join(KOK, "js", "pipeline.js"), "utf8");
+    /* ⚠ Eşik `opts.maxKopru` ile ezilebiliyor, varsayılanı 0.15. Desen ilk yazımda
+       `MAX_KOPRU = 0.15` diye aranıyordu ve gerçek satırı (`= (opts.maxKopru > 0) ? … : 0.15`)
+       bulamayıp kod HİÇ değişmediği hâlde kırmızı veriyordu — nöbetçi testin kendisi
+       kararsız olmamalı. */
+    dogru("pipeline.cumleBirlestir'in köprü eşiği DEĞİŞMEDİ (varsayılan 0.15)",
+          /MAX_KOPRU\s*=[\s\S]{0,60}0\.15/.test(pipe),
+          "uzun videonun altyazı köprüsü dondurulmuş bir ayar");
+    /* Uzun videonun diğer dondurulmuş sayıları da yerinde mi (Shorts değişikliği sızmasın). */
+    var vur = fs.readFileSync(path.join(KOK, "js", "vurucu.js"), "utf8");
+    dogru("vurucu mod: ilk 120 sn tam · ~12 sn'de bir",
+          /tamSaniye:\s*120/.test(vur) && /aralikSn:\s*12/.test(vur),
+          "bu iki sayı kullanıcı tarafından DONDURULDU");
   })();
 
   /* ---- ÖZET ---- */

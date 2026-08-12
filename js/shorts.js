@@ -34,9 +34,15 @@
 var MODEL = "claude-sonnet-5";
 
 var VARSAYILAN = {
-  hedefSure: 35,        // kullanıcı: "30-40 saniye"
-  minSure: 28,
-  maxSure: 42,
+  /* ⚠ SÜRE KURALI SERT (kullanıcı isteği, 12 Ağustos 2026: "en az 27 saniye en fazla 45
+     saniye kuralı getir, daha kısa ya da daha uzun Shorts istemiyorum").
+     ÖNCEKİ: hedef 35 · min 28 · max 42 — ve min YUMUŞAK bir hedefti: kod ona ulaşmaya
+     çalışıyor, ulaşamazsa kısa Shorts'u YİNE DE üretiyordu. Kullanıcının "yine kısa olmuş"
+     şikâyetinin sebebi buydu. Artık min de SERT: altında kalan bölüm Shorts'a çevrilmiyor,
+     sıradaki yedek bölüme geçiliyor (bkz. coklukSec). */
+  hedefSure: 36,        // 27-45 aralığının ortası
+  minSure: 27,          // SERT ALT SINIR — altında Shorts üretilmez
+  maxSure: 45,          // SERT ÜST SINIR — hiçbir zaman aşılmaz
   adetMin: 3,           // kullanıcı: "3-5 kısa kesit"
   adetMax: 5,
   kesitMin: 4,          // bir kesit en az bu kadar sürsün (daha kısası "an" değil, kırpıntı)
@@ -76,7 +82,7 @@ var SISTEM_ELEME =
 var SISTEM_FINAL =
   "Sen Minecraft/Roblox içerikleri kurgulayan deneyimli bir YouTube kurgucususun. " +
   "Sana bir videodan seçilmiş aday anlar veriliyor.\n\n" +
-  "GÖREV: bunlardan 30-40 saniyelik bir Shorts kurmak. Anlar arka arkaya eklenecek.\n\n" +
+  "GÖREV: bunlardan 27-45 saniyelik (ideal 36 sn) bir Shorts kurmak. Anlar arka arkaya eklenecek.\n\n" +
   "SHORTS'UN GERÇEĞİ — puanlarken bunları düşün:\n" +
   "1. İzleyici videoyu GÖRMEDİ ve tanımıyor. Her an kendi başına anlaşılmalı.\n" +
   "2. İlk 2 saniyede kaçıyor. EN GÜÇLÜ an, listedeki en yüksek puanı almalı — panel onu " +
@@ -85,6 +91,21 @@ var SISTEM_FINAL =
   "4. Çeşitlilik: hepsi aynı kişiden veya aynı tipten olmasın. Farklı karakterlerin " +
   "   birbirine tepki verdiği anlar en iyisidir.\n" +
   "5. Bir an tek başına komik/şaşırtıcı değilse, ne kadar önemli olursa olsun ALMA.\n" +
+  /* ⚠ SOMUT OLUMSUZ ÖRNEKLER (kullanıcı isteği, 12 Ağustos 2026: "sahneleri daha akıllıca
+     seçsin, daha izlenilebilecek olanları almalı"). Emoji isteminde ölçülmüştü: modele
+     "iyi an seç" demek yetmiyor, NEYİ ALMAYACAĞINI söylemek seçimi belirgin düzeltiyor.
+     Bu maddeler kullanıcının şikâyet ettiği tipteki anları adıyla eliyor. */
+  "5b. ŞUNLARI ALMA — Shorts'ta izleyici kaçar:\n" +
+  "   · Hazırlık/kurulum konuşması: “şimdi şunu yapacağız”, “bekle”, “bir saniye”, “geldim”\n" +
+  "   · Oyun mekaniği anlatımı, envanter/eşya sayma, koordinat okuma\n" +
+  "   · Tek kişinin kesintisiz uzun anlatımı — tepki veren kimse yoksa düz kalır\n" +
+  "   · Bağlam gerektiren şaka: önceki 5 dakikayı bilmeyen anlamıyorsa ALMA\n" +
+  "   · Sessizlik/dolgu: “eee”, “hı”, “tamam tamam” gibi içeriksiz alışverişler\n" +
+  "6b. ŞUNLARI TERCİH ET — izlenirliği yüksek:\n" +
+  "   · Beklenmedik dönüş: biri bir şey yapar, öteki şaşırır/bağırır/güler\n" +
+  "   · Kısa atışma, laf sokma, karşılıklı tepki (en az iki farklı karakter konuşur)\n" +
+  "   · Bir şeyin ters gitmesi: ölüm, kayıp, patlama, plan bozulması — ve ARDINDAN gelen tepki\n" +
+  "   · Kendi başına anlaşılan tek cümlelik vurucu replikler\n" +
   "6. VİDEONUN HER YERİNDEN seç — başı, ortası, sonu. Shorts izleyiciyi asıl videoya " +
   "   yönlendirmeli, yani videonun tamamından bir tat vermeli. Hepsini videonun ilk " +
   "   dakikalarından seçme; sonlara doğru olan güçlü anları özellikle ara.\n\n" +
@@ -293,6 +314,34 @@ function _butceUygula(adaylar, opts, sayac) {
     }
     if (secili.length > eskiTavan) sayac.adetGevsetildi = secili.length;
   }
+
+  /* ⚠ 4. GEÇİŞ — EN KISA KESİT SINIRINI GEVŞET (kullanıcı, 12 Ağustos 2026: "çoklu Shorts'ta
+     30-40 saniye olmuyor, 2 tanesi 18 saniye çıktı").
+     3. geçiş yalnız ADET tavanını gevşetiyordu; ama asıl darboğaz oradaki değil `kesitMin`
+     (4 sn) idi. Çoklu Shorts'ta her sekans TEK BİR anlatı bölümünden kuruluyor ve bir bölüm
+     kısa atışmalardan oluşuyorsa adayların çoğu 2-3 saniyelik oluyor, `kisaElenen`e düşüyor
+     ve elde 18 saniye kalıyordu — adet tavanını gevşetmek işe yaramıyor çünkü alınacak
+     aday zaten elenmiş durumda.
+     ⚠ TABAN 2.5 sn: bunun altı "an" değil kırpıntı, üst üste dizilince Shorts zıplıyor.
+     ⚠ SIRA ÖNEMLİ — bu geçiş EN SONDA: normal koşulda hiç çalışmıyor, yani bölümde yeterli
+     uzun aday varsa seçim BİREBİR eskisi gibi. Yalnız hedefe ulaşılamadığında devreye giriyor.
+     ⚠ `maxSure` HÂLÂ SERT: Shorts asla 42 sn'yi aşmaz, bu geçiş yalnız ALT sınırı kurtarıyor. */
+  if (toplam < minSure && kesitMin > 2.5) {
+    var eskiKesitMin = kesitMin;
+    kesitMin = 2.5;
+    for (i = 0; i < sirali.length && toplam < minSure; i++) {
+      if (secili.indexOf(sirali[i]) === -1) dene(sirali[i], false, false);
+    }
+    if (toplam > 0 && kesitMin !== eskiKesitMin) sayac.kesitMinGevsetildi = eskiKesitMin + "→" + kesitMin;
+  }
+  /* Hedefe YİNE ulaşılamadıysa SESSİZ KALMA: bölümde yeterli malzeme yok demektir ve
+     kullanıcı kısa Shorts'un sebebini bilmeli (yoksa panelde hata arar). */
+  sayac.hedefTutmadi = (toplam < minSure) ? Number(toplam.toFixed(1)) : 0;
+  /* ⚠ SERT ALT SINIR BAYRAĞI. Çağıran (coklukSec) buna bakıp bölümü tümden atıyor ve
+     sıradaki YEDEK bölüme geçiyor — kullanıcı 27 sn altını istemiyor.
+     Karar burada VERİLMİYOR, yalnız bildiriliyor: tekli Shorts'ta atmak "hiç Shorts yok"
+     demek olurdu ve orada doğru davranış üretip UYARMAK. */
+  sayac.altSinirAltinda = (toplam < minSure);
 
   /* Timeline sırasına diz — Shorts kronolojik akmalı, puan sırasına değil. */
   secili.sort(function (a, b) { return a.bas - b.bas; });
@@ -511,7 +560,17 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
   var log = opts.onLog || function () {};
   var damga = opts.damga;
   var adet = _sayi(_ayar(opts, "shortsAdet"));
-  var sayac = { siraDisi: 0, bolumElenen: 0 };
+  /* ⚠⚠ YEDEK BÖLÜM İSTE — "kaç tane seçtiysem o kadar olsun" (kullanıcı, 12 Ağustos 2026:
+     3 seçti, 2 Shorts çıktı).
+     Eskiden modelden TAM `adet` bölüm isteniyordu ve bir bölümden geçerli kesit çıkmazsa
+     (`bolumElenen`) o slot telafisiz kayboluyordu — 3 istenip 2 üretiliyordu. Model tek
+     istekte fazladan bölüm vermek için ek ücret istemiyor; döngü zaten `shortslar.length <
+     adet` şartıyla duruyor, yani fazlalar KULLANILMIYOR, yalnız yedek duruyorlar.
+     ⚠ YEDEK SAYISI ILIMLI (+2): bölüm sayısı arttıkça her bölüm KISALIYOR ve içinden
+     30-40 sn çıkarmak zorlaşıyor. +2, "bir-iki bölüm düşerse kurtar" için yeterli; daha
+     fazlası asıl sorunu (kısa bölüm) büyütürdü. */
+  var istemAdet = adet + 2;
+  var sayac = { siraDisi: 0, bolumElenen: 0, istenenAdet: adet };
 
   var cumleler = cumleleriTopla(VUR, gruplar, opts);
   if (!cumleler.length) return { hata: "Cümle bulunamadı — önce altyazı üret.", shortslar: [] };
@@ -530,9 +589,13 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
     kabaDilim = seyrek;
     log("Çoklu Shorts: " + cumleler.length + " cümle " + KABA_TAVAN + "'e seyreltildi (bölümleme için).");
   }
-  var icerik = "Bu videoyu " + adet + " anlatı bölümüne ayır. Her bölüm 30-40 saniyelik bir " +
+  /* İstenen `adet` değil `istemAdet` — fazlası YEDEK (bkz. yukarıdaki not). Modele de
+     hangisinin asıl olduğu söyleniyor ki en güçlü bölümleri öne koysun. */
+  var icerik = "Bu videoyu " + istemAdet + " anlatı bölümüne ayır (en güçlü " + adet +
+               " tanesi kullanılacak, kalanı yedek). Her bölüm 27-45 saniyelik bir " +
                "Shorts'a kaynak olacak, yani içinde en az bir dakikalık konuşma bulunsun.\n" +
-               "puan: bölümün Shorts potansiyeli, 1-10.\n\n" + _dilimMetni(kabaDilim, metinSiniri);
+               "puan: bölümün Shorts potansiyeli, 1-10. En güçlü bölümlere en yüksek puanı ver.\n\n" +
+               _dilimMetni(kabaDilim, metinSiniri);
   var cevap;
   try {
     cevap = await VUR.istekGonder(anahtar, _govde(SISTEM_BOLUM, icerik, opts, SEMA_BOLUM), opts, damga, log);
@@ -575,9 +638,21 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
     }
     var adaylar = _cevapCoz(VUR, bCevap, yerel, sayac);
     if (!adaylar.length) { sayac.bolumElenen++; log("Bölüm '" + b.baslik + "' → geçerli aday yok."); continue; }
-    var bSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0 };
+    var bSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0, altSinirAltinda: false };
     var son = _butceUygula(adaylar, opts, bSay);
     if (!son.kesitler.length) { sayac.bolumElenen++; continue; }
+    /* ⚠⚠ SERT ALT SINIR — 27 sn'nin altındaki bölüm SHORTS'A ÇEVRİLMEZ (kullanıcı isteği,
+       12 Ağustos 2026: "daha kısa Shorts istemiyorum").
+       Bölüm atlanıyor ve döngü sıradaki YEDEK bölüme geçiyor; bu yüzden modelden `adet + 2`
+       bölüm isteniyor (yukarıdaki nota bak). Yedekler de yetmezse panel eksik üretimi
+       sonuç mesajında AÇIKÇA söylüyor — sessizce kısa Shorts vermektense az Shorts vermek
+       kullanıcının açık tercihi. */
+    if (bSay.altSinirAltinda) {
+      sayac.kisaElendi = (sayac.kisaElendi || 0) + 1;
+      log("Bölüm '" + b.baslik + "' ATLANDI: yalnız " + son.toplam.toFixed(1) +
+          " sn çıktı, alt sınır " + _sayi(_ayar(opts, "minSure")) + " sn.");
+      continue;
+    }
     shortslar.push({
       baslik: b.baslik, kesitler: son.kesitler, toplamSure: son.toplam,
       bolumBas: b.bas, bolumBit: b.bit, puan: b.puan, sayac: bSay
