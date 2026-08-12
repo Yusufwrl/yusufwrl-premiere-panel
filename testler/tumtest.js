@@ -2452,9 +2452,36 @@ function bitir() {
     var azSonuc = SHt._butceUygula([{ bas: 10, bit: 16, puan: 9 }], {}, azSay);
     dogru("alt sınırın altında kalınca BAYRAK kalkıyor", azSay.altSinirAltinda === true,
           "çıkan süre: " + azSonuc.toplam.toFixed(1) + " sn");
-    dogru("coklukSec bayrağa bakıp bölümü ATLIYOR",
-          /bSay\.altSinirAltinda[\s\S]{0,300}continue;/.test(shSrc),
-          "atlamazsa 27 sn altı Shorts üretilir — kullanıcının açık isteğine aykırı");
+    /* ⚠ TEST GÜNCELLENDİ (ParsMazi geri bildirimi): "atla" tek başına yanlıştı — kullanıcı
+       adedin PAZARLIKSIZ olduğunu söyledi. Doğru sıra: ÖNCE kesitleri komşu cümlelere uzat,
+       ancak o da yetmezse atla. Test artık bu sırayı kilitliyor. */
+    dogru("alt sınır altındayken ÖNCE uzatma deneniyor",
+          /bSay\.altSinirAltinda[\s\S]{0,200}_kesitleriUzat/.test(shSrc),
+          "doğrudan atlamak istenen adede ulaşmayı imkânsız kılıyordu");
+    dogru("uzatma da yetmezse bölüm ATLANIYOR",
+          /_kesitleriUzat[\s\S]{0,700}continue;/.test(shSrc),
+          "27 sn altı Shorts üretilmemeli");
+    dogru("adet tutmazsa SON EMNİYET devrede (bölüm sınırı gözetilmeden doldur)",
+          /shortslar\.length < adet && tumAdaylar\.length/.test(shSrc),
+          "kullanıcı: 'kaç seçildiyse KESİNLİKLE o kadar üretmeli'");
+    dogru("son emniyet kullanılmış zaman aralıklarını DIŞLIYOR",
+          /kullanilan[\s\S]{0,220}a\.bas < kullanilan\[u\]\.bit/.test(shSrc),
+          "dışlanmazsa iki Shorts aynı anı gösterir");
+
+    /* ---- KESİT UZATMA ÖLÇÜMÜ ---- */
+    var uzKesit = [{ bas: 100, bit: 106, puan: 9 }, { bas: 120, bit: 126, puan: 8 }, { bas: 140, bit: 146, puan: 7 }];
+    var uzCumle = [];
+    [100, 106, 110, 120, 126, 130, 140, 146, 150, 156].forEach(function (tt2) { uzCumle.push({ bas: tt2, bit: tt2 + 5 }); });
+    var uzR = SHt._kesitleriUzat(uzKesit, uzCumle, {});
+    dogru("uzatma alt sınıra ULAŞTIRIYOR (18 sn → >=27)", uzR.toplam >= 27,
+          "çıkan: " + uzR.toplam.toFixed(1) + " sn");
+    esit("uzatma kesit SAYISINI değiştirmiyor", uzR.kesitler.length, 3);
+    var uzS = uzR.kesitler.slice().sort(function (a, b) { return a.bas - b.bas; }), uzCak = 0;
+    for (ci = 0; ci + 1 < uzS.length; ci++) if (uzS[ci + 1].bas < uzS[ci].bit - 1e-9) uzCak++;
+    esit("uzatma çakışma üretmiyor", uzCak, 0);
+    /* ⚠ ÖZGÜN ADAY NESNELERİ DEĞİŞMEMELİ — aday listesi çağıranda başka amaçla kullanılıyor. */
+    esit("uzatma girdi nesnelerine DOKUNMUYOR", uzKesit[0].bit, 106);
+    dogru("uzatma üst sınırı aşmıyor", uzR.toplam <= UST);
 
     /* ⚠ REGRESYON KİLİDİ: bol ve uzun aday varken 4. geçiş HİÇ çalışmamalı, yani seçim
        davranışı eskisiyle birebir kalmalı. Aksi hâlde iyi çalışan Shorts'lar da kırpıntı

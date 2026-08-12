@@ -351,6 +351,66 @@ function _butceUygula(adaylar, opts, sayac) {
   return { kesitler: secili, toplam: toplam };
 }
 
+/* ⚠⚠ KESİTLERİ KOMŞU CÜMLELERE UZAT — ADET GARANTİSİNİN ANAHTARI.
+   GERÇEK HATA (ParsMazi, 12 Ağustos 2026: "3 Shorts seçtik, 1 tane oluşturdu").
+   Sert alt sınır (27 sn) eklendikten sonra, o süreyi dolduramayan bölüm tümden atılıyordu;
+   bölümlerin çoğu kısaysa istenen adede hiç ulaşılamıyordu. Kullanıcının iki isteği
+   ("27 sn altı olmasın" + "kaç seçtiysem o kadar olsun") ancak üçüncü bir yolla birlikte
+   sağlanabiliyor: bölümü ATMAK ya da kısa Shorts ÜRETMEK yerine, seçili kesitleri
+   BÜYÜTMEK.
+   NASIL: her kesitin bitişi, hemen ardından gelen CÜMLENİN sonuna uzatılır. Cümle
+   sınırında kalındığı için "kesitler cümle ortasından bölünmesin" kuralı korunuyor ve
+   ek bir yapay zekâ isteği GEREKMİYOR — cümle sınırlarını zaten elimizde tutuyoruz.
+   ⚠ ÜÇ FREN: (a) toplam `maxSure`'ı aşamaz, (b) tek kesit `kesitMax`'ı aşamaz (uzatma
+   fazında biraz gevşetilir, yoksa 12 sn'lik bir kesit hiç büyüyemez), (c) başka bir
+   kesitle ÇAKIŞAMAZ — yoksa aynı an iki kez gösterilir.
+   ⚠ GİRDİ NESNELERİ KOPYALANIR: aday listesi çağıranda başka amaçla da kullanılıyor. */
+function _kesitleriUzat(secili, cumleler, opts) {
+  var minSure = _sayi(_ayar(opts, "minSure"));
+  var maxSure = _sayi(_ayar(opts, "maxSure"));
+  var kesitMax = _sayi(_ayar(opts, "kesitMax"));
+  /* Uzatma fazında tek kesit tavanı gevşetilir: 27 sn'yi 2 kesitle doldurmak gerekebiliyor.
+     Yine de sınırsız değil — tek kesit Shorts'un yarısını geçmesin. */
+  var uzatmaTavan = Math.max(kesitMax, Math.floor(maxSure / 2));
+  var k = [], i, j;
+  for (i = 0; i < secili.length; i++) {
+    var o = {};
+    for (var alan in secili[i]) if (Object.prototype.hasOwnProperty.call(secili[i], alan)) o[alan] = secili[i][alan];
+    k.push(o);
+  }
+  var toplam = 0;
+  for (i = 0; i < k.length; i++) toplam += k[i].bit - k[i].bas;
+  if (toplam >= minSure) return { kesitler: k, toplam: toplam, uzatilan: 0 };
+
+  var sirali = (cumleler || []).slice().sort(function (a, b) { return a.bas - b.bas; });
+  var uzatilan = 0, ilerleme = true, tur = 0;
+  /* Tur sınırı: sonsuz döngüye karşı emniyet (her tur en az bir uzatma yapmalı). */
+  while (toplam < minSure && ilerleme && tur < 50) {
+    ilerleme = false; tur++;
+    for (i = 0; i < k.length && toplam < minSure; i++) {
+      var kk = k[i], sonraki = null;
+      for (j = 0; j < sirali.length; j++) {
+        if (sirali[j].bas >= kk.bit - 0.01) { sonraki = sirali[j]; break; }
+      }
+      if (!sonraki || !(sonraki.bit > kk.bit)) continue;
+      var eskiSure = kk.bit - kk.bas, yeniSure = sonraki.bit - kk.bas;
+      if (yeniSure > uzatmaTavan) continue;
+      if (toplam - eskiSure + yeniSure > maxSure) continue;
+      var cak = false;
+      for (j = 0; j < k.length; j++) {
+        if (j === i) continue;
+        if (sonraki.bit > k[j].bas && kk.bas < k[j].bit) { cak = true; break; }
+      }
+      if (cak) continue;
+      kk.bit = sonraki.bit;
+      toplam += (yeniSure - eskiSure);
+      uzatilan++; ilerleme = true;
+    }
+  }
+  k.sort(function (a, b) { return a.bas - b.bas; });
+  return { kesitler: k, toplam: toplam, uzatilan: uzatilan };
+}
+
 /*
  * ANA İŞ.
  *   extRoot : anthropic-key.txt'nin arandığı uzantı kökü
@@ -615,6 +675,9 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
   /* ── HER BÖLÜM İÇİN KENDİ KESİTLERİ ──
      ⚠ Bölüm İÇİNDEKİ cümlelerle çalışılır: bir bölümün Shorts'u başka bölümden kesit
      ALMAMALI, yoksa "parça parça" isteği bozulur ve tekli Shorts'a dönüşür. */
+  /* ⚠ BÜTÜN ADAYLAR BİRİKTİRİLİYOR — döngü sonundaki "adet tamamlama" emniyeti bunları
+     kullanıyor (bkz. aşağısı). Bölüm turlarında zaten alınmış adaylar; ek istek yok. */
+  var tumAdaylar = [];
   var shortslar = [], bi;
   for (bi = 0; bi < bolumler.length && shortslar.length < adet; bi++) {
     if (VUR.iptalEdildiMi && VUR.iptalEdildiMi(damga)) return { hata: "İptal edildi", shortslar: [] };
@@ -637,6 +700,11 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
       continue;
     }
     var adaylar = _cevapCoz(VUR, bCevap, yerel, sayac);
+    if (adaylar.length) {
+      /* Havuza EKLE — seçilsin seçilmesin. Bir bölümde kullanılmayan güçlü aday, adet
+         tamamlamada başka bir Shorts'un malzemesi olabiliyor. */
+      for (var ta = 0; ta < adaylar.length; ta++) tumAdaylar.push(adaylar[ta]);
+    }
     if (!adaylar.length) { sayac.bolumElenen++; log("Bölüm '" + b.baslik + "' → geçerli aday yok."); continue; }
     var bSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0, altSinirAltinda: false };
     var son = _butceUygula(adaylar, opts, bSay);
@@ -647,11 +715,25 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
        bölüm isteniyor (yukarıdaki nota bak). Yedekler de yetmezse panel eksik üretimi
        sonuç mesajında AÇIKÇA söylüyor — sessizce kısa Shorts vermektense az Shorts vermek
        kullanıcının açık tercihi. */
+    /* ⚠⚠ ATMADAN ÖNCE UZATMAYI DENE — ADET GARANTİSİ (ParsMazi, 12 Ağustos 2026:
+       "3 Shorts seçtik, 1 tane oluşturdu").
+       Bölümü doğrudan atmak, kullanıcının "kaç seçtiysem o kadar üretilsin" isteğini
+       bozuyordu. Önce kesitleri komşu CÜMLELERE uzatıp alt sınıra ulaşmayı deniyoruz;
+       cümle sınırında kalındığı için kesit ortadan bölünmüyor ve ek istek gitmiyor. */
     if (bSay.altSinirAltinda) {
-      sayac.kisaElendi = (sayac.kisaElendi || 0) + 1;
-      log("Bölüm '" + b.baslik + "' ATLANDI: yalnız " + son.toplam.toFixed(1) +
-          " sn çıktı, alt sınır " + _sayi(_ayar(opts, "minSure")) + " sn.");
-      continue;
+      var uz = _kesitleriUzat(son.kesitler, icCumle, opts);
+      if (uz.toplam >= _sayi(_ayar(opts, "minSure"))) {
+        son = { kesitler: uz.kesitler, toplam: uz.toplam };
+        bSay.altSinirAltinda = false;
+        bSay.uzatilanKesit = uz.uzatilan;
+        log("Bölüm '" + b.baslik + "': kesitler komşu cümlelere uzatıldı (" + uz.uzatilan +
+            " uzatma) → " + uz.toplam.toFixed(1) + " sn.");
+      } else {
+        sayac.kisaElendi = (sayac.kisaElendi || 0) + 1;
+        log("Bölüm '" + b.baslik + "' ATLANDI: uzatmaya rağmen yalnız " + uz.toplam.toFixed(1) +
+            " sn çıktı, alt sınır " + _sayi(_ayar(opts, "minSure")) + " sn.");
+        continue;
+      }
     }
     shortslar.push({
       baslik: b.baslik, kesitler: son.kesitler, toplamSure: son.toplam,
@@ -660,6 +742,47 @@ async function coklukSec(VUR, anahtar, gruplar, opts) {
     log("Bölüm " + shortslar.length + "/" + adet + " hazır: " + b.baslik + " · " +
         son.kesitler.length + " kesit · " + son.toplam.toFixed(1) + " sn");
   }
+  /* ⚠⚠ SON EMNİYET — İSTENEN ADEDE ULAŞ (ParsMazi, 12 Ağustos 2026: "3 seçtik, 1 oluşturdu.
+     Kaç seçildiyse KESİNLİKLE o kadar üretmeli").
+     Bölüm bazlı üretim, bölümler kısaysa adede ulaşamıyor — uzatma da her zaman yetmiyor.
+     Burada kalan slotlar, bölüm sınırı GÖZETİLMEDEN, o ana kadar TOPLANMIŞ bütün adaylardan
+     doldurulur. Ek yapay zekâ isteği YOK: adaylar zaten her bölüm turunda alınmıştı.
+     ⚠ KULLANILMIŞ ZAMAN ARALIKLARI DIŞLANIR — yoksa iki Shorts aynı anı gösterir.
+     ⚠ BEDELİ BİLİNÇLİ: bu Shorts'lar "tek bir anlatı bölümünden" olma özelliğini kaybeder,
+     tekli Shorts gibi videonun her yerinden karışık olur. Kullanıcının açık önceliği ADET;
+     sonuç mesajında bu Shorts'lar "karışık" diye işaretleniyor, sessiz kalınmıyor. */
+  if (shortslar.length < adet && tumAdaylar.length) {
+    var kullanilan = [];
+    shortslar.forEach(function (s) { s.kesitler.forEach(function (k) { kullanilan.push(k); }); });
+    while (shortslar.length < adet) {
+      var serbest = tumAdaylar.filter(function (a) {
+        for (var u = 0; u < kullanilan.length; u++) {
+          if (a.bas < kullanilan[u].bit && a.bit > kullanilan[u].bas) return false;
+        }
+        return true;
+      });
+      if (!serbest.length) break;
+      var eSay = { cakismaElenen: 0, sureElenen: 0, kisaElenen: 0, uzunElenen: 0, altSinirAltinda: false };
+      var eSon = _butceUygula(serbest, opts, eSay);
+      if (!eSon.kesitler.length) break;
+      if (eSay.altSinirAltinda) {
+        var eUz = _kesitleriUzat(eSon.kesitler, cumleler, opts);
+        if (eUz.toplam < _sayi(_ayar(opts, "minSure"))) break;   // malzeme gerçekten bitti
+        eSon = { kesitler: eUz.kesitler, toplam: eUz.toplam };
+      }
+      eSon.kesitler.forEach(function (k) { kullanilan.push(k); });
+      sayac.karisikDoldurma = (sayac.karisikDoldurma || 0) + 1;
+      shortslar.push({
+        baslik: "Karışık anlar " + (sayac.karisikDoldurma),
+        kesitler: eSon.kesitler, toplamSure: eSon.toplam,
+        bolumBas: eSon.kesitler[0].bas, bolumBit: eSon.kesitler[eSon.kesitler.length - 1].bit,
+        puan: 0, sayac: eSay, karisik: true
+      });
+      log("Adet tamamlama: bölüm sınırı gözetilmeden " + eSon.kesitler.length + " kesit · " +
+          eSon.toplam.toFixed(1) + " sn (istenen adede ulaşmak için).");
+    }
+  }
+
   if (!shortslar.length) return { hata: "Hiçbir bölümden Shorts çıkmadı.", shortslar: [], sayac: sayac };
   return { shortslar: shortslar, sayac: sayac, bolumSay: bolumler.length };
 }
@@ -792,5 +915,6 @@ module.exports = {
   _bolumCoz: _bolumCoz, _baslikCoz: _baslikCoz, SISTEM_BASLIK: SISTEM_BASLIK,
   // test edilebilirlik için iç parçalar
   cumleleriTopla: cumleleriTopla, _cevapCoz: _cevapCoz, _butceUygula: _butceUygula,
+  _kesitleriUzat: _kesitleriUzat,   /* testler icin disa acildi */
   _dilimMetni: _dilimMetni
 };

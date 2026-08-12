@@ -4836,6 +4836,14 @@
       /* ⚠ ALT SINIRIN ALTINDA KALIP ATILAN BÖLÜMLERİ SÖYLE. Kullanıcı "27 sn'den kısa Shorts
          istemiyorum" dedi ve panel artık o bölümleri Shorts'a çevirmiyor — ama bunu
          söylemezse "neden 3 yerine 2 çıktı" sorusu cevapsız kalır ve panelde hata aranır. */
+      /* ⚠ "KARIŞIK" SHORTS'LARI İŞARETLE. Adet garantisi için bölüm sınırı gözetilmeden
+         doldurulan Shorts'lar, "her Shorts tek bir olaydan" sözünü tutmuyor — kullanıcı
+         bunu bilmeli, yoksa Çoklu ile Tekli arasındaki farkın kaybolduğunu sanır. */
+      if (bol.sayac && bol.sayac.karisikDoldurma) {
+        msg += "\n⚠ " + bol.sayac.karisikDoldurma + " Shorts, istediğin adede ulaşmak için " +
+               "bölüm sınırı gözetilmeden (videonun her yerinden karışık) kuruldu — " +
+               "anlatı bölümlerinde yeterli malzeme yoktu.";
+      }
       if (bol.sayac && bol.sayac.kisaElendi) {
         msg += "\n⚠ " + bol.sayac.kisaElendi + " bölüm 27 sn'nin altında kaldığı için ATLANDI " +
                "(senin kuralın: 27 sn'den kısa Shorts üretme). Yedekler de yetmediyse sonuç " +
