@@ -134,7 +134,14 @@
      makinede çökertti (v1.9.20). Bu yüzden varlık kontrolü ZORUNLU, süs değil. */
   function logLine(msg) {
     var el = $("log"); var t = new Date().toLocaleTimeString();
-    if (el) el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent);
+    /* ⚠ GÖRÜNMÜYORSA YAZMA — ÖLÇÜLMÜŞ YAVAŞLAMA (12 Ağustos 2026: "altyazı oluşturma çok yavaş").
+       Bu satır TÜM günlük metnini okuyup birleştiriyor ve `trimLog` ile 200 satıra bölüp
+       yeniden kuruyor. Motor transkripsiyonda saniyede onlarca satır basıyor, yani bu
+       maliyet her satırda ödeniyordu — üstelik `#log` artık gizli `#progressBox`'ın içinde
+       ve HİÇ görünmüyor (ilerleme paneli kendi günlüğünü tutuyor). Yani tam bir israftı.
+       Kapalıyken atlanıyor; kullanıcı "Ayrıntılar"ı açarsa oradan sonraki satırlar yazılır
+       ve panelin kendi günlüğü zaten tam listeyi taşıyor. */
+    if (el && !el.hidden) el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent);
     if (typeof _ILER_LOG_PANEL !== "undefined" && _ILER_LOG_PANEL && _ILER_LOG_PANEL.length) {
       for (var i = 0; i < _ILER_LOG_PANEL.length; i++) {
         try { _ILER_LOG_PANEL[i].logYaz(msg); } catch (e) {}
@@ -354,6 +361,14 @@
        (zaman damgalarından hesaplanıyor) ve o sayı aşama listesinden çok daha isabetli;
        verildiğinde aşama tabanlı hesabın önüne geçer. -1 = verilmedi. */
     var disYuzde = -1;
+    /* Günlük satırları DİZİDE — DOM'a yalnız "Ayrıntılar" açıkken yazılıyor (bkz. logYaz). */
+    var logSatir = [];
+    /* ⚠ ÇİZİM KISITLAMASI. `setProgress` motorun bastığı HER satırda çağrılıyor (whenLog →
+       transProgress → setProgress) ve her çağrı `_ciz()` demek. Transkripsiyonda saniyede
+       onlarca satır geliyor; ekranı saniyede 40 kez yeniden çizmenin görsel bir karşılığı
+       yok, maliyeti var. 1 saniyelik zamanlayıcı zaten arka planda çalışıyor, yani hiçbir
+       güncelleme KAYBOLMUYOR — yalnız gereksiz olanlar atlanıyor. */
+    var sonCizim = 0;
 
     function _kur() {
       var kutu = $(kutuId);
@@ -398,6 +413,8 @@
          zorundaydı — "sorun neyse belirtebilen bir eklenti" isteğinin karşılığı bu. */
       tgl.addEventListener("click", function () {
         lg.hidden = !lg.hidden;
+        /* Açılırken biriken satırlar bir kez yazılır — kapalıyken DOM'a hiç dokunulmuyor. */
+        if (!lg.hidden) lg.textContent = logSatir.join("\n");
         tgl.textContent = lg.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴";
       });
 
@@ -446,9 +463,12 @@
     }
 
     /* Ekranı tazele. Saniyede bir çağrılıyor (geri sayım) ve her veri değişiminde. */
-    function _ciz() {
+    function _ciz(zorla) {
       if (!_kur()) return;
       var simdi = Date.now();
+      /* En fazla ~4 kez/sn çiz. `zorla` = durum gerçekten değişti (adım/uyarı/bitiş). */
+      if (!zorla && (simdi - sonCizim) < 250) return;
+      sonCizim = simdi;
       var d = sayac ? sayac.durum(simdi) : null;
 
       /* ⚠⚠ YÜZDE İŞİN TAMAMINI ANLATIR, SAYACIN TAMAMINI DEĞİL — ÖLÇÜLMÜŞ HATA
@@ -555,7 +575,7 @@
         ref.fil.style.width = "0%";
         while (ref.log.firstChild) ref.log.removeChild(ref.log.firstChild);
         if (_ILER_LOG_PANEL.indexOf(API) < 0) _ILER_LOG_PANEL.push(API);
-        _adimCiz(); _uyariCiz(); _ciz(); _tikBasla();
+        _adimCiz(); _uyariCiz(); _ciz(true); _tikBasla();
         return API;
       },
       baslik: function (m) { if (_kur()) ref.baslik.textContent = m || ""; return API; },
@@ -597,15 +617,15 @@
           for (var _si = 0; _si < _sl.length; _si++)
             if (_sl[_si].durum === "calisiyor") { sayacAdim = _sl[_si].ad; break; }
         }
-        etaBitisT = 0; _ciz();
+        etaBitisT = 0; _ciz(true);
         return API;
       },
       /* Sayaç satırının ortasındaki serbest not ("parça 5/7"). */
       not: function (m) { altNot = m || ""; _ciz(); return API; },
-      adim: function (ad) { if (asama) { asama.basla(ad, Date.now()); _adimCiz(); _ciz(); } return API; },
-      adimBitir: function (ad, not) { if (asama) { asama.bitir(ad, not, Date.now()); _adimCiz(); _ciz(); } return API; },
-      adimAtla: function (ad, not) { if (asama) { asama.atla(ad, not); _adimCiz(); _ciz(); } return API; },
-      adimHata: function (ad, not) { if (asama) { asama.hata(ad, not); _adimCiz(); _ciz(); } return API; },
+      adim: function (ad) { if (asama) { asama.basla(ad, Date.now()); _adimCiz(); _ciz(true); } return API; },
+      adimBitir: function (ad, not) { if (asama) { asama.bitir(ad, not, Date.now()); _adimCiz(); _ciz(true); } return API; },
+      adimAtla: function (ad, not) { if (asama) { asama.atla(ad, not); _adimCiz(); _ciz(true); } return API; },
+      adimHata: function (ad, not) { if (asama) { asama.hata(ad, not); _adimCiz(); _ciz(true); } return API; },
       adimNot: function (ad, not) { if (asama) { asama.not(ad, not); _adimCiz(); } return API; },
       /* biten: O ANA KADAR GERÇEKTEN biten sayı (gönderilen değil). */
       ilerle: function (biten, not) {
@@ -616,7 +636,7 @@
         var d = sayac.durum(simdi);
         /* ETA'yı hedef ana çevir → ekranda geri sayabilsin. */
         if (d.etaSn >= 0) etaBitisT = simdi + d.etaSn * 1000;
-        _ciz();
+        _ciz(true);
         return API;
       },
       /* satirlar: [["Kanallar", "V6 sağ · V7 sol"], ["Dağılım", "Moni 45 · Tofi 38"], …]
@@ -653,10 +673,21 @@
         }
         return API;
       },
+      /* ⚠⚠ GÜNLÜK DİZİDE TUTULUR, DOM'A YALNIZ GÖRÜNÜRKEN YAZILIR — ÖLÇÜLMÜŞ YAVAŞLAMA
+         (kullanıcı bildirdi, 12 Ağustos 2026: "altyazı oluşturma da çok yavaş").
+         Eski hâl her satırda `textContent = yeni + eski` yapıyordu: TÜM günlük metni (200
+         satır ≈ 10 KB) okunuyor, birleştiriliyor, `trimLog` ile satırlara bölünüp yeniden
+         birleştiriliyordu. Motor transkripsiyon sırasında saniyede onlarca satır basıyor ve
+         bu maliyet HER SATIRDA ödeniyordu — üstelik günlük varsayılan olarak KAPALI, yani
+         kimse görmeden.
+         Artık satırlar diziye ekleniyor (O(1)) ve DOM ancak kullanıcı "Ayrıntılar"ı açtığında
+         güncelleniyor. */
       logYaz: function (satir) {
         if (!ref) return API;
         var t = new Date().toLocaleTimeString();
-        ref.log.textContent = trimLog("[" + t + "] " + satir + "\n" + ref.log.textContent);
+        logSatir.unshift("[" + t + "] " + satir);
+        if (logSatir.length > 200) logSatir.length = 200;
+        if (!ref.log.hidden) ref.log.textContent = logSatir.join("\n");
         return API;
       },
       /* kind: yok = başarı · "warn" = kısmi · "bad" = hata.
@@ -680,7 +711,7 @@
         ref.eta.hidden = true;
         if (kind === "bad") ref.fil.style.width = "100%";
         var i2 = _ILER_LOG_PANEL.indexOf(API); if (i2 >= 0) _ILER_LOG_PANEL.splice(i2, 1);
-        _ciz();
+        _ciz(true);
         return API;
       },
       gizle: function () {
