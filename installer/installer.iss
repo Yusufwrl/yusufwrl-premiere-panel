@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.14.0"
+#define AppVersion "1.14.1"
 
 ; ============================================================
 ;  STAGING TAZELIK KAPISI - DERLEMEYI DURDURUR

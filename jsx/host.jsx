@@ -22,7 +22,7 @@ function _jsonEsc(s) {
    Bu, projenin en sık tekrar eden kafa karışıklığı: "düzeltmeyi kurdum ama hâlâ aynı" —
    çünkü düzeltme host tarafındaysa hiç yüklenmemiş oluyor. Artık ölçülebilir.
    ⚠ HOST.JSX'İ HER DEĞİŞTİRDİĞİNDE BU SAYIYI DA ARTIR (version.json ile aynı tut). */
-var HOST_SURUM = "1.14.0";
+var HOST_SURUM = "1.14.1";
 
 /* Panelin host sürümünü okuması için. app.js emoji/preset işlerinden önce çağırıp
    panelinkiyle karşılaştırıyor ve tutmuyorsa kullanıcıyı uyarıyor. */
@@ -733,8 +733,16 @@ function _klipBulZamanda(vt, sn) {
    ilerleme gosteremiyor; plan parcalara bolununce 2. parca "kanal bos degil" diye
    reddediliyordu. Bu bayrak yalnizca o kurali gevsetiyor — kullanicinin goruntusunun
    oldugu kanal HALA reddediliyor (asagida yabanci klip aramasi). */
-function emojiYerlestir(planYol, devamMi) {
+/* oncekiKlipSayisi (3. parametre, istege bagli): panelin bir onceki parcanin SONUNDA
+   kanalda saydigi klip sayisi. Verilmezse -1 kabul edilir ve guvenlik taramasi TAM yapilir
+   (eski davranis). Ayrintili gerekce asagida, taramanin basinda. */
+function emojiYerlestir(planYol, devamMi, oncekiKlipSayisi) {
     try {
+        var _oncekiSay = -1;
+        try { _oncekiSay = parseInt(oncekiKlipSayisi, 10); } catch (eOs) { _oncekiSay = -1; }
+        if (isNaN(_oncekiSay)) _oncekiSay = -1;
+        var _tTara = 0;
+        function _sim() { try { return $.hiresTimer; } catch (eT) { return 0; } }
         var ham = _readFileUTF8(planYol);
         var satirlar = String(ham).split(/\r?\n/), plan = [], i, p;
         for (i = 0; i < satirlar.length; i++) {
@@ -823,6 +831,20 @@ function emojiYerlestir(planYol, devamMi) {
             var _TARA_TAVAN = 60;
             var yabanci = 0, ci, cc, cp, ce;
             var _bas = (mevcut > _TARA_TAVAN) ? (mevcut - _TARA_TAVAN) : 0;
+            /* ⚠⚠ KLIP SAYISI DEGISMEDIYSE TARAMA GEREKSIZ — SADECE SON KLIBI OKU.
+               Bu tarama parca basina ~60 klip x ~3 Premiere turu = ~180 cagri demek ve
+               tumtest'in kendi notu onu sabit maliyetin adiyla sayilan bir parcasi olarak
+               gosteriyor ("host kurulumu, 60 klibin guvenlik taramasi, plan dosyasi").
+               Panel bir onceki parcanin SONUNDAKI klip sayisini geciriyor. Sayi birebir
+               tutuyorsa, iki parca ARASINDA kanala hicbir klip eklenmemis demektir; o
+               kliplerin hepsi kendi parcalarinda ZATEN bu kontrolden gecti. O yuzden yalniz
+               sonBitis icin SON klibi okuyoruz.
+               ⚠ GUVENLIK ZAYIFLAMIYOR: sayi tutmuyorsa (kullanici arada klip koyduysa,
+               ya da panel sayiyi bilmiyorsa = -1) TAM tarama yapiliyor. Ilk parcada kanalin
+               BOS olma sarti da aynen duruyor — v1.8.0 korumasi hic gevsemedi. */
+            var _hizliGecerli = (_oncekiSay >= 0 && _oncekiSay === mevcut);
+            if (_hizliGecerli) _bas = mevcut - 1;          // yalnizca son klip
+            var _tmT = _sim();
             for (ci = mevcut - 1; ci >= _bas; ci--) {
                 cc = null; try { cc = vt.clips[ci]; } catch (eC) { cc = null; }
                 cp = ""; try { cp = String(cc.projectItem.getMediaPath()); } catch (eCp) { cp = ""; }
@@ -834,10 +856,12 @@ function emojiYerlestir(planYol, devamMi) {
                     if (!isNaN(ce) && ce > sonBitis) sonBitis = ce;
                 } else yabanci++;
             }
+            _tTara += (_sim() - _tmT);
             /* Sayi "son _TARA_TAVAN klip icinde" anlaminda — mesaj bunu ima etmeli, yoksa
                kullanici kanalda toplam o kadar yabanci klip oldugunu sanar. */
             if (yabanci) return "err:V" + (kanal + 1) + " kanalinda emoji OLMAYAN klip var (" +
-                                yabanci + " tanesi son " + _TARA_TAVAN + " klipte) — yazilmadi";
+                                yabanci + (_hizliGecerli ? "" : (" tanesi son " + _TARA_TAVAN + " klipte")) +
+                                ") — yazilmadi";
         }
 
         // Bin yoksa yarat. Kosulsuz createBin her calistirmada kopya uretir.
@@ -866,6 +890,18 @@ function emojiYerlestir(planYol, devamMi) {
             harita = _binYolHaritasi(bin);
         }
 
+        /* ⚠ PARAMETRE INDEKS ONBELLEGI — parca boyunca yasar, klip basina ~5 Premiere turu
+           kazandirir (bkz. _paramAraIkiOnbellekli). Ilk klipte dolar. */
+        var _pOb = { c: -1, p1: -1, p2: -1 };
+        /* ⚠⚠ ZAMAN DOKUMU — "NEDEN YAVAS?" SORUSUNU TAHMINLE DEGIL OLCUMLE CEVAPLAMAK ICIN.
+           Kullanici (12 Agustos 2026): "emojiler eskiden hizli geliyordu, su an cok yavas".
+           Olculen taban: 25 emoji / ~109 sn = 4,4 sn/emoji. Bu surenin HANGI adima gittigi
+           bilinmiyordu ve tahminle optimize etmek bu projede defalarca yanlis kola gitti
+           (parca boyunu 12'ye cekme denemesi gibi — kullanici yavasladigini hemen fark etti).
+           Artik host her parcada dokumu geri gonderiyor; panel log'a yaziyor. Bir sonraki
+           kosu, hangi adimin optimize edilecegini KANITLA soyleyecek.
+           $.hiresTimer nanosaniye doner (autoCut'ta ayni desen kullaniliyor). */
+        var _tOver = 0, _tParam = 0, _tYaz = 0, _tm;
         var ok = 0, hata = [];
         for (i = 0; i < plan.length; i++) {
             var it = plan[i];
@@ -884,10 +920,12 @@ function emojiYerlestir(planYol, devamMi) {
                Simdi overwriteClip'ten SONRA BIR KEZ okunup degiskende tutuluyor.
                ⚠ GERI OKUMA ILKESI BOZULMUYOR: yine Premiere'den okunuyor, yalniz bir kez —
                "istenen degil gerceklesen" kurali aynen duruyor. */
+            _tm = _sim();
             var oncekiSayi = vt.clips.numItems;
             try { vt.overwriteClip(pi, it.bas); }
             catch (eO) { hata.push(it.ad + " (yerlestirilemedi: " + eO.toString() + ")"); continue; }
             var yeniSayi = vt.clips.numItems;          // TEK okuma, asagida yeniden kullanilir
+            _tOver += (_sim() - _tm);
             if (yeniSayi <= oncekiSayi) { hata.push(it.ad + " (klip olusmadi)"); continue; }
 
             /* KONAN KLIBI BUL. Plan zaman sirasinda ve sonBitis freni geriye yazmayi
@@ -930,7 +968,10 @@ function emojiYerlestir(planYol, devamMi) {
             /* ⚠ TEK YURUYUS: Position ve Scale ayni "Motion" bileseninde. Eskiden iki ayri
                _paramAraTum cagrisi agaci BASTAN iki kez geziyordu — klip basina ~17 Premiere
                erisimi, 206 emojide ~3.500 gereksiz cagri. */
-            var _ps = _paramAraIki(ti, ["Position", "Konum"], ["Scale", "Ölçek", "Olcek"]);
+            _tm = _sim();
+            var _ps = _paramAraIkiOnbellekli(ti, ["Position", "Konum"], ["Scale", "Ölçek", "Olcek"], _pOb);
+            _tParam += (_sim() - _tm);
+            _tm = _sim();
             var pos = _ps[0];
             if (pos) {
                 try {
@@ -954,6 +995,9 @@ function emojiYerlestir(planYol, devamMi) {
                     } catch (eSc) { olcekOk = false; }
                 }
             }
+            /* Yazma (setValue + geri okuma dogrulamasi) suresi burada kapanir — `continue`
+               dallarindan ONCE, yoksa hatali kliplerin suresi hic sayilmaz. */
+            _tYaz += (_sim() - _tm);
             if (!olcekOk) {
                 try { ti.remove(false, false); } catch (eR2) {}
                 hata.push(it.ad + " (olcek yazilamadi — ekrani kaplamasin diye kaldirildi)");
@@ -972,6 +1016,23 @@ function emojiYerlestir(planYol, devamMi) {
 
         if (!ok) return "err:" + (hata.length ? hata[0] : "hicbir emoji konmadi");
         var msg = "ok:" + ok + "/" + plan.length + " emoji kondu (V" + (kanal + 1) + ")";
+        /* ⚠ ZAMAN DOKUMU MESAJIN ICINDE — panel bunu log'a yaziyor.
+           Amaci: "neden yavas?" sorusunu bir sonraki kosuda TAHMINLE degil OLCUMLE
+           cevaplamak. Bicim `[sure] over=Xs param=Ys yaz=Zs tara=Ws` — hangi adimin
+           baskin oldugu tek bakista gorunur:
+             over  = vt.overwriteClip (+ klip sayaci) — timeline buyudukce pahalilasir
+             param = Position/Scale parametrelerini bulma (onbellekli)
+             yaz   = setValue + geri okuma dogrulamasi
+             tara  = devam parcasindaki guvenlik taramasi
+           ⚠ " | " AYRACINDAN ONCE: panel `indexOf(" | ")` ile UYARI kismini ayiriyor
+           (app.js `u = r.indexOf(" | ")`), dokum oraya karisirsa uyari metnine girer. */
+        /* `klip=N` = bu parcadan SONRA kanalda kalan klip sayisi. Panel bunu bir sonraki
+           parcaya geri veriyor; host sayiyi ayni bulursa "arada kimse dokunmamis" diye
+           60 kliplik guvenlik taramasini atlayabiliyor (bkz. taramanin basindaki not). */
+        var _sonSay = -1; try { _sonSay = vt.clips.numItems; } catch (eSs) { _sonSay = -1; }
+        msg += " [sure over=" + (_tOver / 1e9).toFixed(1) + "s param=" + (_tParam / 1e9).toFixed(1) +
+               "s yaz=" + (_tYaz / 1e9).toFixed(1) + "s tara=" + (_tTara / 1e9).toFixed(1) +
+               "s klip=" + _sonSay + "]";
         if (ok < plan.length) msg += " — " + (plan.length - ok) + " tanesi OLMADI";
         /* HEPSI KONSA BILE UYARI VARSA SOYLE. Eskiden konum/olcek uyarilari "ok:40/40"
            icinde kayboluyor, panel de yesil gosteriyordu (kismi-basari testi yalniz
@@ -1822,6 +1883,73 @@ function _paramAraTum(ti, adlar) {
    bulununca erken cikiliyor. Donus: [p1, p2] (bulunamayan null).
    ⚠ Ikisi FARKLI bilesenlerde olsa bile dogru calisir — tarama ikisi de dolana kadar
    surer, yalnizca erken cikis kacar. */
+/* ⚠ PARAMETRE INDEKS ONBELLEGI — EMOJI YERLESTIRMENIN EN SIK TEKRARLAYAN ISI.
+   `_paramAraIki` her klip icin components x properties agacini displayName okuyarak
+   geziyor; her erisim ayri bir ExtendScript->Premiere turu (klip basina ~12).
+   Emoji klipleri BIREBIR ayni yapida (hepsi PNG still, ayni sekilde konuyor), yani
+   Motion bileseninin ve Position/Scale ozelliklerinin INDEKSI hep ayni.
+   Ilk klipte indeksler ogrenilir, sonrakilerde dogrudan gidilir.
+   ⚠ KOR KULLANIM YOK: indeksten gelen parametrenin displayName'i yine DOGRULANIYOR.
+   Tutmazsa tam aramaya dusuluyor — yani yanlis parametreye yazma ihtimali YOK.
+   (Bu projede "geri okumadan dogru varsayma" bir kez cok pahaliya patlamisti.) */
+function _paramIndeksten(bilesen, pi, adlar) {
+    try {
+        if (!bilesen || pi < 0) return null;
+        var ps = bilesen.properties;
+        if (!ps || pi >= ps.numItems) return null;
+        var p = ps[pi], dn = "";
+        try { dn = String(p.displayName || ""); } catch (e) { return null; }
+        for (var j = 0; j < adlar.length; j++) if (dn === adlar[j]) return p;
+    } catch (e2) {}
+    return null;
+}
+/* ob = { c: bilesenIndeksi, p1: ..., p2: ... }  (-1 = henuz bilinmiyor) */
+function _paramAraIkiOnbellekli(ti, adlar1, adlar2, ob) {
+    var p1 = null, p2 = null, bil = null;
+    if (ob && ob.c >= 0) {
+        try {
+            var c = ti.components;
+            if (c && ob.c < c.numItems) bil = c[ob.c];
+        } catch (eC) { bil = null; }
+        if (bil) {
+            p1 = _paramIndeksten(bil, ob.p1, adlar1);
+            p2 = _paramIndeksten(bil, ob.p2, adlar2);
+        }
+    }
+    if (p1 && p2) return [p1, p2];
+    /* Onbellek tutmadi (ilk klip ya da farkli yapida bir klip) — TAM ARAMA ve onbellegi
+       doldur. Bir kez odenen bedel; sonraki kliplerin hepsi hizli yoldan gidiyor. */
+    var res = _paramAraIkiIndeksli(ti, adlar1, adlar2);
+    if (ob && res[2] >= 0) { ob.c = res[2]; ob.p1 = res[3]; ob.p2 = res[4]; }
+    return [res[0], res[1]];
+}
+/* _paramAraIki ile ayni is, ek olarak BULUNAN INDEKSLERI de dondurur:
+   [p1, p2, bilesenIndeksi, p1Indeksi, p2Indeksi]. Indeksler yalniz IKISI DE ayni
+   bilesende bulunduysa doldurulur (emoji klibinde Position ve Scale ikisi de Motion'da). */
+function _paramAraIkiIndeksli(ti, adlar1, adlar2) {
+    var c = null, i, j, p1 = null, p2 = null, ci = -1, i1 = -1, i2 = -1;
+    try { c = ti.components; } catch (eC) { return [null, null, -1, -1, -1]; }
+    if (!c) return [null, null, -1, -1, -1];
+    var n = 0; try { n = c.numItems; } catch (eN) { return [null, null, -1, -1, -1]; }
+    for (i = 0; i < n; i++) {
+        var bil = null;
+        try { bil = c[i]; } catch (eB) { continue; }
+        var ps = null, pn = 0;
+        try { ps = bil.properties; pn = ps ? ps.numItems : 0; } catch (eP) { continue; }
+        var b1 = -1, b2 = -1, dn;
+        for (j = 0; j < pn; j++) {
+            dn = ""; try { dn = String(ps[j].displayName || ""); } catch (eD) { continue; }
+            if (b1 < 0) { for (var a = 0; a < adlar1.length; a++) if (dn === adlar1[a]) { b1 = j; break; } }
+            if (b2 < 0) { for (var b = 0; b < adlar2.length; b++) if (dn === adlar2[b]) { b2 = j; break; } }
+            if (b1 >= 0 && b2 >= 0) break;
+        }
+        if (b1 >= 0 && !p1) { try { p1 = ps[b1]; } catch (e1) {} if (p1) i1 = b1; }
+        if (b2 >= 0 && !p2) { try { p2 = ps[b2]; } catch (e2) {} if (p2) i2 = b2; }
+        if (p1 && p2 && i1 >= 0 && i2 >= 0 && b1 >= 0 && b2 >= 0) { ci = i; break; }
+        if (p1 && p2) break;
+    }
+    return [p1, p2, ci, i1, i2];
+}
 function _paramAraIki(ti, adlar1, adlar2) {
     var c = null, i, p1 = null, p2 = null;
     try { c = ti.components; } catch (eC) { return [null, null]; }

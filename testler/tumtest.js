@@ -1441,14 +1441,43 @@ function bitir() {
           evalBlok.indexOf("res(") >= 0 && !/setTimeout\([^)]*res\(/.test(evalBlok));
     dogru("emoji yerleştirme nöbetçiyi kullanıyor",
           /emojiYerlestir\("[\s\S]{0,300}function \(sn\)/.test(a));
-    dogru("60 sn sonra kullanıcıya ne yapacağı yazılıyor",
-          /sn >= 60[\s\S]{0,600}Premiere YANIT VERMİYOR/.test(a));
+    /* ⚠⚠ EŞİK SABİT DEĞİL, ÖLÇÜLEN PARÇA SÜRESİNDEN TÜRETİLİR (12 Ağustos 2026).
+       GERÇEK ŞİKÂYET: "sürekli alttaki sarı yazı gidip geliyor". Sebep sabit `sn >= 60`
+       eşiğiydi: büyük projede bir parça normalde ~110 sn sürüyor, yani alarm HER parçada
+       çıkıp parça bitince siliniyordu. Panel her şey yolundayken 7 kez "Premiere YANIT
+       VERMİYOR" diye bağırınca gerçek bir takılma da fark edilmez hâle geliyor (kurt masalı).
+       Artık alarm ancak bu parça, o ana kadarki ORTALAMANIN 2.5 katını aşarsa çıkıyor;
+       "yavaş ama ilerliyor" durumu ayrı, sakin ve KALICI bir not olarak gösteriliyor. */
+    dogru("donma eşiği ölçülen parça süresinden türetiliyor (sabit 60 DEĞİL)",
+          /function _donmaEsigi[\s\S]{0,300}_parcaOrtalama\(\)[\s\S]{0,200}\* 2\.5/.test(a),
+          "sabit eşik büyük projede her parçada yanlış alarm veriyor");
+    dogru("nöbetçi ölçülen eşiği kullanıyor", /var _esik = _donmaEsigi\(\)/.test(a),
+          "eşik hesaplanıyor ama kullanılmıyor");
+    dogru("parça süreleri ölçülüyor (eşiğin beslendiği veri)",
+          /_parcaSureler\.push\(/.test(a), "ölçüm yok — eşik hep tabana düşer");
+    dogru("yavaşlık AYRI ve kalıcı bir bilgi notu (alarm değil)",
+          /iler\.uyari\("yavas"[\s\S]{0,400}"bilgi"\)/.test(a),
+          "yavaşlık alarmla karışıyor — kullanıcı gerçek takılmayı ayırt edemez");
+    dogru("uzun parçada kullanıcıya ne yapacağı yazılıyor",
+          /sn >= _esik[\s\S]{0,700}Premiere'i ÖNE ALDIM/.test(a));
     /* ⚠ MESAJ EN SIK SUÇLUYU ADIYLA SÖYLEMELİ (ParsMazi'de iki kez takıldı, 10 ve 11
        Ağustos 2026). "Bir pencere var mı?" demek yetmiyor — kullanıcı Premiere'i öne alıp
        bakmayı akıl etmiyor ve paneli öldürüyor. */
-    dogru("nöbetçi Auto Save'i ADIYLA söylüyor", /sn >= 60[\s\S]{0,600}Auto Save/.test(a));
+    dogru("nöbetçi Auto Save'i ADIYLA söylüyor", /sn >= _esik[\s\S]{0,700}Auto Save/.test(a));
     dogru("nöbetçi 'devam eder, kaybolmaz' güvencesini veriyor",
-          /sn >= 60[\s\S]{0,700}DEVAM EDER[\s\S]{0,120}kaybolmaz/.test(a));
+          /sn >= _esik[\s\S]{0,800}DEVAM EDER[\s\S]{0,200}kaybolmaz/.test(a));
+    /* ⚠⚠ PANEL PENCEREYİ KENDİSİ ÖNE ALIR — TALİMAT VERMEKLE YETİNMEZ.
+       Panel süreci bloke DEĞİL (yalnız Premiere'in ExtendScript motoru bloke), yani
+       işletim sistemi üzerinden Premiere'in penceresini öne getirebiliyor. Ölçülmüş
+       takılmanın sebebi Premiere'in kendi açtığı pencerenin BAŞKA pencerelerin arkasında
+       kalmasıydı; ParsMazi 14 dakika bekleyip sebebi bulamadı. */
+    dogru("panel Premiere'i öne alabiliyor (premiereOneAl)",
+          /function premiereOneAl\(\)[\s\S]{0,900}SetForegroundWindow/.test(a),
+          "kullanıcı gizlenmiş pencereyi bulamıyor — takılma teşhis edilemez kalıyor");
+    dogru("öne alma nöbetçiden çağrılıyor", /_oneAlindi = premiereOneAl\(\)/.test(a),
+          "fonksiyon var ama çağrılmıyor — ölü kod");
+    dogru("öne alma parça başına BİR KEZ (saniyede bir pencere fırlatmasın)",
+          /if \(!_oneAlindi\)/.test(a), "nöbetçi saniyede bir çağrılıyor");
     /* Uzun planda Auto Save uyarısı log'a düşüyor mu — takılmanın önlenebilir tek kolu. */
     dogru("80+ emojide Auto Save uyarısı veriliyor",
           /plan\.length > 80[\s\S]{0,400}Auto Save/.test(a));
@@ -1469,9 +1498,24 @@ function bitir() {
        olduğu hâlde "kaldı" der; bir kez tam bu oldu (9000 karakterde çağrı görünmüyordu). */
     var _yIx = h.indexOf("function emojiYerlestir");
     var yerBlok = h.slice(_yIx, _yIx + 16000);
-    dogru("emojiYerlestir tek yürüyüş kullanıyor", /_paramAraIki\(ti,/.test(yerBlok));
+    /* Tek yürüyüş + İNDEKS ÖNBELLEĞİ. Emoji klipleri birebir aynı yapıda (hepsi PNG still),
+       yani Motion bileşeninin ve Position/Scale özelliklerinin indeksi hep aynı: ilk klipte
+       öğrenilip sonrakilerde doğrudan gidiliyor (klip başına ~5 Premiere turu kazanç).
+       ⚠ KÖR KULLANIM YOK — indeksten gelen parametrenin displayName'i yine doğrulanıyor,
+       tutmazsa tam aramaya düşülüyor. Yanlış parametreye yazma ihtimali yok. */
+    dogru("emojiYerlestir tek yürüyüş + indeks önbelleği kullanıyor",
+          /_paramAraIkiOnbellekli\(ti,/.test(yerBlok));
+    dogru("önbellekten gelen parametre DOĞRULANIYOR (kör kullanım yok)",
+          /function _paramIndeksten[\s\S]{0,400}displayName[\s\S]{0,200}for \(var j/.test(h),
+          "indeks doğrulanmadan kullanılıyor — yanlış parametreye yazma riski");
     esit("emojiYerlestir'de artık iki ayrı _paramAraTum çağrısı YOK",
          (yerBlok.match(/_paramAraTum\(ti,/g) || []).length, 0);
+    /* ⚠ ZAMAN DÖKÜMÜ: "neden yavaş?" sorusu tahminle değil ÖLÇÜMLE cevaplanmalı.
+       Kullanıcı 12 Ağustos 2026'da yavaşlık bildirdi ve sürenin hangi adıma gittiği
+       hiçbir yerde yazmıyordu; parça boyunu değiştirme denemeleri hep yanlış kola gitti. */
+    dogru("host parça süresini adım adım raporluyor (over/param/yaz/tara)",
+          /\[sure over=[\s\S]{0,200}param=[\s\S]{0,120}yaz=[\s\S]{0,120}tara=/.test(h),
+          "ölçüm yok — bir sonraki yavaşlıkta yine tahmin edilir");
 
     /* GÜVENLİK TARAMASI O(n²) OLMAMALI — son N klip yeter (klipler zaman sırasında). */
     dogru("tarama tavanı var (_TARA_TAVAN)", /_TARA_TAVAN\s*=\s*\d+/.test(yerBlok));
@@ -1484,7 +1528,34 @@ function bitir() {
             parseInt(tavanM[1], 10) > parseInt(parcaM[1], 10),
             "küçükse önceki parçanın klipleri denetimsiz kalır");
     }
+    /* ⚠⚠ KLİP SAYISI KANITIYLA TARAMA ATLAMA — GÜVENLİK GEVŞEMEDEN HIZ.
+       Tarama parça başına ~60 klip × ~3 Premiere turu = ~180 çağrı ve tumtest'in kendi notu
+       onu sabit maliyetin adıyla sayılan parçası olarak gösteriyor. Panel bir önceki
+       parçanın SONUNDAKİ klip sayısını geçiriyor; host aynı bulursa arada kanala hiçbir
+       klip eklenmemiş demektir (o klipler kendi parçalarında zaten denetlendi) ve yalnız
+       son klip okunur.
+       ⚠ ÜÇ KAPI DA DURMAK ZORUNDA — bu testler onları kilitliyor:
+         1. Sayı BİLİNMİYORSA (-1) tam tarama,
+         2. Sayı TUTMUYORSA tam tarama,
+         3. İlk parçada kanal BOŞ olma şartı (v1.8.0) hiç gevşemedi. */
+    dogru("hızlı yol yalnız sayı BİREBİR tutunca açılıyor",
+          /_hizliGecerli = \(_oncekiSay >= 0 && _oncekiSay === mevcut\)/.test(yerBlok),
+          "koşul gevşek — kanala eklenen yabancı klip denetimsiz kalır");
+    dogru("hızlı yolda yalnız SON klip okunuyor",
+          /if \(_hizliGecerli\) _bas = mevcut - 1/.test(yerBlok));
+    dogru("panel önceki klip sayısını geçiriyor",
+          /emojiYerlestir\("[\s\S]{0,120}_sonKlipSayisi/.test(a),
+          "argüman gitmiyor — hızlı yol hiç açılmaz (zararsız ama ölü kod)");
+    dogru("panel sayıyı host'un dönüşünden okuyor",
+          /klip=\(-\?\\d\+\)|klip=\(-\?\\\\d\+\)|r\.match\(\/klip=/.test(a),
+          "sayı okunmuyor — hep -1 gider");
+    dogru("sayı her KANAL GRUBUNDA sıfırlanıyor",
+          /var _sonKlipSayisi = -1;[\s\S]{0,200}for \(p = 0/.test(a),
+          "bir kanalın sayısı ötekine taşınırsa host'a YANLIŞ kanıt verilir");
     /* İLK PARÇA KURALI DEĞİŞMEDİ: kanal BOŞ olmak zorunda (v1.8.0 koruması). */
+    dogru("ilk parçada kanal BOŞ olma şartı duruyor (v1.8.0)",
+          /if \(!devam\) return "err:V" \+ \(kanal \+ 1\) \+ " BOS DEGIL/.test(yerBlok),
+          "v1.8.0 koruması gevşemiş — kullanıcının görüntüsü silinebilir");
     /* ⚠ HIZ: clips.numItems emoji başına 4 kez okunuyordu — her biri ayrı Premiere turu
        (ParsMazi, 11 Ağustos 2026: "okey ekledi ama çok yavaştı"). 172 emojide 344 gereksiz
        çağrı. overwriteClip'ten sonra BİR KEZ okunup değişkende tutuluyor; geri okuma ilkesi
@@ -1492,7 +1563,15 @@ function bitir() {
     (function () {
       var i0 = h.indexOf("function emojiYerlestir");
       var blok = h.slice(i0, h.indexOf("\nfunction ", i0 + 10));
-      var ana = blok.slice(blok.lastIndexOf("for (i = 0; i < plan.length; i++)"));
+      /* ⚠ ÖLÇÜM DÖNGÜNÜN SONUNDA BİTER — fonksiyonun sonunda DEĞİL.
+         Kuralın amacı "EMOJİ BAŞINA kaç okuma": döngüden sonra parça başına bir kez yapılan
+         okuma (sonuç mesajındaki `klip=N`, bir sonraki parçanın güvenlik taramasını
+         atlamasını sağlıyor) bu bütçeye girmemeli. Dilim `var msg = "ok:"` satırında
+         kesiliyor — orası döngünün bittiği yer. Sınırı 2'den 3'e çıkarmak yanlış olurdu:
+         o zaman gerçekten emoji başına eklenen bir okuma da fark edilmezdi. */
+      var _sonIx = blok.indexOf('var msg = "ok:"');
+      var ana = blok.slice(blok.lastIndexOf("for (i = 0; i < plan.length; i++)"),
+                           _sonIx > 0 ? _sonIx : blok.length);
       var say = (ana.match(/\.clips\.numItems/g) || []).length;
       dogru("ana döngüde clips.numItems en fazla 2 kez okunuyor", say <= 2, "olan: " + say);
       dogru("yeniSayi değişkeni yeniden kullanılıyor", ana.indexOf("yeniSayi") !== -1);

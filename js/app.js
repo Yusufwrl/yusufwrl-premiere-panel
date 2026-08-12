@@ -4132,6 +4132,26 @@
          kullanıcı "parça 1,2,3 … sonra yine parça 1" görüyordu. Toplamla birlikte tek bir
          global sıra yazmak hem doğru hem de "daha ne kadar var" sorusuna cevap veriyor. */
       var _parcaSira = 0;
+      /* ⚠ "YAVAŞ" İLE "TAKILDI" AYRI ŞEYLER — ÖLÇEREK AYIRIYORUZ.
+         Kullanıcı şikâyeti (12 Ağustos 2026): "sürekli alttaki sarı yazı gidip geliyor".
+         Sebep: nöbetçi SABİT 60 sn'de alarm veriyordu, ama büyük projede bir parça normalde
+         ~110 sn sürüyor — yani alarm HER parçada çıkıp parça bitince siliniyordu. Panel her
+         şey yolundayken 7 kez "Premiere YANIT VERMİYOR" diye bağırıyor, bu da gerçek bir
+         takılmayı fark edilmez hâle getiriyordu (kurt masalı).
+         Artık eşik ÖLÇÜLEN parça süresinden türetiliyor: alarm ancak bu parça, o ana kadarki
+         ortalamanın 2.5 KATINI aşarsa çıkıyor. İlk parçada ölçüm yok — orada 90 sn tabanı
+         kullanılıyor (eski 60'tan yüksek: 60 sn büyük projede normal). */
+      var _parcaSureler = [];
+      function _parcaOrtalama() {
+        if (!_parcaSureler.length) return 0;
+        var t = 0;
+        for (var q = 0; q < _parcaSureler.length; q++) t += _parcaSureler[q];
+        return t / _parcaSureler.length;
+      }
+      function _donmaEsigi() {
+        var ort = _parcaOrtalama();
+        return ort ? Math.max(90, Math.round(ort * 2.5)) : 90;
+      }
       /* ⚠ AUTO SAVE UYARISI — ParsMazi'de iki kez takılmaya sebep oldu (10 ve 11 Ağustos
          2026). Premiere uzun işlem sırasında otomatik kaydetmeye kalkıyor, pencere açıyor ve
          panelin evalScript'i o pencere kapanana kadar DÖNMÜYOR. Panel bunu ölçemiyor
@@ -4144,6 +4164,13 @@
       var kgi, kgPlan;
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
+      /* ⚠ HER KANAL GRUBUNDA SIFIRLANIR. Bu sayı BİR kanaldaki klip sayısı; sağ taraf
+         bitip sol tarafa geçildiğinde önceki kanalın sayısını taşımak, host'a "arada
+         kimse dokunmadı" diye YANLIŞ bir kanıt vermek olurdu. -1 = "bilmiyorum" →
+         host TAM güvenlik taraması yapar (güvenli taban).
+         ⚠ `var` bildirimi döngünün İÇİNDE ama JavaScript'te fonksiyon başına taşınır;
+         buradaki ATAMA her grupta yeniden çalıştığı için sıfırlama gerçekten oluyor. */
+      var _sonKlipSayisi = -1;
       for (p = 0; p < kgPlan.length; p += EMOJI_PARCA_ETKIN) {
         /* İPTAL — parça sınırında güvenli: her parça kendi içinde tamamlanıyor ve sonraki
            parça kanalın gerçek durumunu yeniden okuyor. ⚠ İptal ZATEN DONMUŞ bir evalScript'i
@@ -4153,14 +4180,22 @@
         fs.writeFileSync(yol, dilim.join("\n"), "utf8");
         _parcaSira++;
         var _parcaNo = _parcaSira;
+        /* Bu parçada Premiere'i bir kez öne aldık mı? Saniyede bir çağrılan nöbetçinin
+           her turda pencere fırlatmasını önler. */
+        var _oneAlindi = false;
         iler.not("parça " + _parcaSira + "/" + _parcaToplam);
         t0 = Date.now();
         /* ⚠ NÖBETÇİ: bu çağrı sürerken durum satırı CANLI kalır. Eskiden "155/206" yazısı
            parça boyunca (dakikalarca) donuk duruyordu; Premiere bir pencere açıp kilitlense
            panel bunu hiçbir şekilde belli etmiyordu — kullanıcı "takıldı" deyip Premiere'i
            öldürüyordu. 60 saniyeden sonra ekranda ne yapması gerektiği yazıyor. */
+        /* ⚠ ÖNCEKİ PARÇANIN SONUNDAKİ KLİP SAYISI 3. ARGÜMAN OLARAK GİDER.
+           Host sayıyı kanalda AYNI bulursa, iki parça arasında kimsenin kanala dokunmadığı
+           KANITLANMIŞ olur ve 60 kliplik güvenlik taramasını atlayabilir (parça başına
+           ~180 Premiere turu). Sayı tutmazsa TAM tarama yapılır — güvenlik gevşemiyor.
+           İlk parçada -1: kanal zaten BOŞ olmak zorunda, tarama da yapılmıyor. */
         r = String(await evalES(
-          'emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '")',
+          'emojiYerlestir("' + esPath(yol) + '","' + (p ? "1" : "0") + '",' + _sonKlipSayisi + ')',
           function (sn) {
             /* Nöbetçi: saniyede bir çağrılıyor. Artık ilerleme SATIRINI bozmuyor —
                yalnız o parçanın süresini yazıyor; sayaç, yüzde ve kalan süre panelde
@@ -4185,7 +4220,8 @@
                  · Premiere ~%0 CPU  → hesaplamıyor, GÖRÜNMEYEN bir şeyi bekliyor (pencere)
                  · Premiere yüksek CPU → gerçekten çalışıyor, yalnız YAVAŞ (büyük proje)
                İkisinin çaresi bambaşka, o yüzden panel artık kullanıcıyı bu ölçüme yolluyor. */
-            if (sn >= 240) {
+            var _esik = _donmaEsigi();
+            if (sn >= Math.max(240, _esik * 2)) {
               iler.uyari("donma",
                   "⚠ Bu parça " + _sure(sn) + "'dir sürüyor (" + kondu + "/" + plan.length +
                   " emoji kondu).\n" +
@@ -4196,19 +4232,49 @@
                   "   · yüksekse gerçekten çalışıyor, yalnız yavaş: büyük projede " +
                   plan.length + " emoji uzun sürer, bekle.\n" +
                   "Konan " + kondu + " emoji her hâlükârda timeline'da kalır.", "");
-            } else if (sn >= 60) {
+            /* ⚠⚠ PENCEREYİ KULLANICIYA ARATMA — PANEL ONU KENDİSİ ÖNE ALIR.
+               Ölçülmüş takılmanın sebebi Premiere'in kendi açtığı bir pencereyi beklemesi;
+               o pencere BAŞKA PENCERELERİN ARKASINDA kalıyor ve kullanıcı "panel dondu"
+               sanıp Premiere'i öldürüyor (ParsMazi 14 dakika bekledi). Panel süreci bloke
+               DEĞİL — yalnız Premiere'in ExtendScript motoru bloke — yani işletim sistemi
+               üzerinden pencereyi öne getirebiliyoruz: "Premiere'i öne al ve bak" talimatını
+               kullanıcı adına YAPMAK. Parça başına BİR KEZ (nöbetçi saniyede bir çağrılıyor).
+               ⚠ BU YORUM `else if` SATIRININ ÜSTÜNDE KALMALI — nöbetçi testleri mesajın
+               `sn >= _esik`'ten sonraki ~700 karakter içinde geçtiğini arıyor; araya giren
+               bir yorum mesajı pencereden taşırır ve test, metin YERİNDE dururken kırmızı
+               verir (bu tuzağa bir kez düşüldü). */
+            } else if (sn >= _esik) {
+              if (!_oneAlindi) { _oneAlindi = premiereOneAl(); logLine("Premiere öne alındı (parça " + _parcaNo + " uzun sürüyor) — açık bir pencere varsa şimdi görünür."); }
               iler.uyari("donma",
-                  "⚠ Premiere YANIT VERMİYOR (" + sn + " sn). Premiere'i öne al ve bak: " +
-                  "Auto Save / Save Project / Import penceresi açık mı? Kapat ya da onayla — " +
-                  "panel kaldığı yerden DEVAM EDER, konan " + kondu + " emoji kaybolmaz.",
+                  "⚠ Bu parça " + sn + " sn'dir sürüyor. Premiere'i ÖNE ALDIM — ekranda açık " +
+                  "bir pencere var mı? (Auto Save · Save Project · Import · medya hatası) " +
+                  "Kapat ya da onayla; panel kaldığı yerden DEVAM EDER, konan " + kondu +
+                  " emoji kaybolmaz. Pencere yoksa Premiere gerçekten çalışıyordur — bekle.",
                   "");
             }
           }));
         /* Parça döndü → donma uyarısı ARTIK GEÇERSİZ. Silinmezse ekranda kalıcı olarak
            "Premiere yanıt vermiyor" yazar ve panel her şey yolundayken alarm veriyor olur. */
         iler.uyariSil("donma");
+        var _parcaSn = Math.round((Date.now() - t0) / 1000);
+        _parcaSureler.push(_parcaSn);
+        /* ⚠ YAVAŞLIK KALICI BİR NOT — ALARM DEĞİL. Kullanıcı "sarı yazı sürekli gidip
+           geliyor" dedi: eski kod her parçada alarm açıp kapatıyordu. Proje gerçekten
+           büyükse bu bir HATA değil, bir GERÇEK; bir kez sakin biçimde söylenir ve ekranda
+           kalır. Böylece asıl alarm ("takıldı") çıktığında ayırt edilebilir oluyor.
+           Eşik 45 sn: bunun altındaki parçalarda söylenecek bir şey yok. */
+        if (_parcaSn >= 45) {
+          var _ortSn = Math.round(_parcaOrtalama());
+          var _kalanParca = Math.max(0, _parcaToplam - _parcaSira);
+          iler.uyari("yavas",
+              "Büyük proje: her parça ortalama " + _ortSn + " sn sürüyor (" + EMOJI_PARCA_ETKIN +
+              " emoji). Kalan " + _kalanParca + " parça ≈ " + _sure(_ortSn * _kalanParca) +
+              ". Premiere bu sırada DONUK görünür — normaldir. Bir sorun olursa panel ayrıca " +
+              "uyarır ve Premiere'i öne alır.", "bilgi");
+        }
         logLine("Emoji parça " + _parcaNo + "/" + _parcaToplam + " (" + dilim.length +
-                " emoji, " + Math.round((Date.now() - t0) / 100) / 10 + " sn): " + r);
+                " emoji, " + _parcaSn + " sn = " + (dilim.length ? Math.round(_parcaSn / dilim.length * 10) / 10 : 0) +
+                " sn/emoji): " + r);
         if (r.indexOf("ok:") !== 0) {
           /* Bu KANAL durdu; hangi kanal olduğunu da yaz, yoksa "V8 BOŞ DEĞİL" mesajı hangi
              tarafa ait belli olmuyor. */
@@ -4221,6 +4287,10 @@
            emojiyi sessizce atabiliyor, yani "25 gönderdim" ile "25 kondu" aynı şey değil.
            Kalan süre tahmini de bu gerçek sayıdan besleniyor — parça bittikçe hız ölçülüyor
            ve ETA kendiliğinden doğruya yaklaşıyor. */
+        /* Host'un bildirdiği son klip sayısını sakla — bir sonraki parçaya geçirilecek.
+           Okunamazsa -1'e düşer ve o parçada TAM tarama yapılır (güvenli taban). */
+        var _mk = r.match(/klip=(-?\d+)/);
+        _sonKlipSayisi = _mk ? parseInt(_mk[1], 10) : -1;
         m = r.match(/^ok:(\d+)\//); if (m) kondu += parseInt(m[1], 10);
         iler.ilerle(kondu, "parça " + _parcaNo + "/" + _parcaToplam);
         u = r.indexOf(" | "); if (u !== -1) uyarilar.push(r.slice(u + 3));
@@ -8909,6 +8979,42 @@
       var b = $("hataBandi"); if (b) b.hidden = true;
     });
     tazele();
+  }
+
+  /* ================= PREMIERE'İ ÖNE AL =================
+     ⚠ NEDEN ÇALIŞABİLİYOR: uzun bir `evalScript` sırasında bloke olan şey Premiere'in
+     ExtendScript motoru; PANEL ayrı bir CEF sürecinde ve TAMAMEN serbest. Yani panel,
+     Premiere'e komut gönderemese bile İŞLETİM SİSTEMİ üzerinden penceresini öne getirebilir.
+     Bu, ölçülmüş takılma senaryosunun tam çaresi: Premiere kendi açtığı bir pencereyi
+     (Auto Save · Save Project · Import · medya hatası) bekliyor, o pencere başka
+     pencerelerin ARKASINDA kalıyor ve kullanıcı "panel dondu" sanıp Premiere'i öldürüyor —
+     oysa tek yapması gereken o pencereyi kapatmak. Panel artık onu kendisi gösteriyor.
+     ⚠ SÜREÇ ADI SABİT DEĞİL: sürüme/dile göre "Adobe Premiere Pro", "Adobe Premiere Pro
+     2026" gibi değişiyor. Bu yüzden ada göre GENİŞ eşleşme + pencere başlığı yedeği var ve
+     hiçbiri tutmazsa sessizce vazgeçiyor (bu bir kolaylık, iş değil — asla akışı durdurmaz).
+     ⚠ Dizge içinde ASCII-DIŞI karakter YOK: komut PowerShell'e -Command ile geçiyor. */
+  function premiereOneAl() {
+    if (!CEP) return false;
+    try {
+      var cp = require("child_process");
+      var ps =
+        "$ErrorActionPreference='SilentlyContinue';" +
+        "$p = Get-Process | Where-Object { ($_.ProcessName -like '*Premiere*') -and ($_.MainWindowHandle -ne 0) } | Select-Object -First 1;" +
+        "if (-not $p) { $p = Get-Process | Where-Object { $_.MainWindowTitle -like '*Premiere*' } | Select-Object -First 1 }" +
+        "if ($p) {" +
+        " Add-Type -Name Fg -Namespace Yw -MemberDefinition '" +
+        "[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);" +
+        "[DllImport(\"user32.dll\")] public static extern bool ShowWindowAsync(IntPtr h, int n);';" +
+        " [Yw.Fg]::ShowWindowAsync($p.MainWindowHandle, 9);" +      // 9 = SW_RESTORE (simge durumundaysa aç)
+        " [Yw.Fg]::SetForegroundWindow($p.MainWindowHandle);" +
+        "}";
+      /* Ateşle-unut: çıktısını beklemiyoruz ve hata dinleyicisi ŞART — spawn edilemezse
+         yakalanmayan bir "error" olayı paneli düşürürdü (bu tuzak pipeline.js'te ölçüldü). */
+      var pr = cp.spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                        { windowsHide: true, stdio: "ignore" });
+      pr.on("error", function () {});
+      return true;
+    } catch (e) { return false; }
   }
 
   function _wire(ad, fn) {
