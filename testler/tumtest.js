@@ -2609,6 +2609,23 @@ function bitir() {
      Panel paketi 22 MB ve GitHub CDN'inden geliyor; tek bir bağlantı kopması bütün
      güncellemeyi iptal ediyor ve kullanıcı eski sürümde kalıyordu.
      ================================================================ */
+  baslik("Emoji parça boyu (ölçülmüş değer korunuyor mu)");
+  (function () {
+    var a2 = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8");
+    /* ⚠ 25 ÖLÇÜLMÜŞ BİR DEĞER (önce 40'tan indirilmişti). Bir tur büyük planlarda 12'ye
+       çekildi — gerekçe iyiydi (takılmayı yerelleştirmek) ama maliyeti ölçülmedi: parça
+       sayısı iki katına çıkıyor ve her parça sabit maliyet ödüyor (evalScript köprüsü,
+       host kurulumu, 60 klibin güvenlik taraması, plan dosyası). Kullanıcı yavaşlamayı
+       hemen fark etti. Bu test o geri almayı kilitliyor. */
+    dogru("EMOJI_PARCA = 25 (ölçülmüş değer)", /var EMOJI_PARCA = 25;/.test(a2));
+    dogru("plan boyuna göre parça KÜÇÜLTÜLMÜYOR",
+          !/EMOJI_PARCA_ETKIN\s*=\s*\(plan\.length[^)]*\)\s*\?/.test(a2),
+          "parça sayısını artırmak sabit maliyeti de artırır — ölçmeden değiştirme");
+    /* Takılma teşhisinin doğru aracı: dosyaları ÖNCEDEN doğrulamak (maliyetsiz). */
+    dogru("plan dosyaları Premiere'e gitmeden ÖNCE doğrulanıyor",
+          /_eksikDosya[\s\S]{0,200}fs\.existsSync/.test(a2));
+  })();
+
   baslik("Oto-güncelleme indirmesi (kopan bağlantı)");
   (function () {
     var up = fs.readFileSync(path.join(KOK, "js", "updater.js"), "utf8");

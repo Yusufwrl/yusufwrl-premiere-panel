@@ -3756,16 +3756,20 @@
         return;
       }
 
-      /* ⚠ BÜYÜK PLANDA PARÇA KÜÇÜLÜR (ParsMazi, 184 emoji). Parça tek bir evalScript ve
-         içi KARA KUTU: 25 emoji giriyor, dakikalarca ses çıkmıyor. Küçük parçada (a) ilerleme
-         daha sık güncelleniyor, (b) “İptal” çok daha hızlı yanıt veriyor, (c) bir kilitlenme
-         25 değil 12 emojilik bir pencereye sıkışıyor — yani teşhis de kolaylaşıyor.
-         ⚠ `_TARA_TAVAN = 60`'ın ALTINDA kalmak ZORUNDA (host'taki güvenlik taraması tavanı),
-         yoksa önceki parçanın klipleri denetimsiz kalır. 12 ≪ 60. */
-      var EMOJI_PARCA_ETKIN = (plan.length > 100) ? 12 : EMOJI_PARCA;
-      if (EMOJI_PARCA_ETKIN !== EMOJI_PARCA)
-        logLine("Büyük plan (" + plan.length + " emoji): parça boyu " + EMOJI_PARCA +
-                " → " + EMOJI_PARCA_ETKIN + " (daha sık ilerleme, daha hızlı iptal).");
+      /* ⚠⚠ PARÇA BOYU KÜÇÜLTÜLMESİ GERİ ALINDI — ARAMA (kullanıcı bildirdi, 12 Ağustos 2026:
+         "emoji ekleme normalde çok hızlıydı, aşırı yavaşladı").
+         Bir tur önce büyük planlarda parça 25 → 12 yapılmıştı; gerekçe iyiydi (takılmayı
+         yerelleştirmek, “İptal”i hızlandırmak) ama MALİYETİ ÖLÇÜLMEDİ. Ölçüldüğünde:
+         184 emojide parça sayısı 8 → 16, yani İKİ KATI. Her parça sabit bir maliyet ödüyor —
+         evalScript köprüsü, host kurulumu, kanaldaki son 60 klibin güvenlik taraması, plan
+         dosyasının yazılıp okunması — ve bu maliyet de iki katına çıkıyor.
+         ⚠ 25 KEYFÎ BİR SAYI DEĞİL: daha önce 40'tan 25'e ÖLÇÜLEREK indirilmişti. Ölçülmüş
+         bir değeri sezgiyle değiştirmek bu projede yasak; yaptım ve kullanıcı yavaşlamayı
+         hemen fark etti.
+         ⚠ Takılma teşhisi için parçayı küçültmek YANLIŞ ARAÇTI: asıl koruma, plandaki her
+         dosyanın Premiere'e gönderilmeden önce diskte DOĞRULANMASI (hemen yukarıda) — o
+         kontrol maliyetsiz ve aynı hata sınıfını kapatıyor. */
+      var EMOJI_PARCA_ETKIN = EMOJI_PARCA;
 
       var _parcaToplam = 0, _kg;
       for (_kg = 0; _kg < kgAnah.length; _kg++)
