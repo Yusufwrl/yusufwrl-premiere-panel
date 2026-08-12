@@ -3696,9 +3696,49 @@
         if (!kanalGrup[kn]) { kanalGrup[kn] = []; kgAnah.push(kn); }
         kanalGrup[kn].push(satir);
       });
+      /* ⚠⚠ PLANDAKİ HER DOSYA GERÇEKTEN VAR MI — PREMIERE'E GÖNDERMEDEN ÖNCE.
+         GERÇEK VAKA (ParsMazi, 12 Ağustos 2026): yerleştirme HER SEFERİNDE tam 100 emojide,
+         yani KANAL GEÇİŞİNDE (sol kanalın ilk parçası) kilitleniyordu ve panel dakikalarca
+         hiçbir şey söyleyemiyordu. Sol kanal AYNALANMIŞ dosyaları kullanıyor; ayna kopyası
+         üretilememiş ya da silinmişse plan var olmayan bir yola işaret ediyor ve Premiere
+         medya hatası penceresi açıp BEKLİYOR — panel için ayırt edilemez bir donma.
+         Bu kontrol Node tarafında, saniyenin altında sürüyor ve o bütün sınıfı kapatıyor:
+         eksik dosya varsa Premiere'e HİÇ gidilmiyor, kullanıcı dosya adlarını görüyor. */
+      var _eksikDosya = [], _gorulen = {};
+      plan.forEach(function (satir) {
+        var y = String(satir).split("|")[0];
+        if (!y || _gorulen[y]) return;
+        _gorulen[y] = 1;
+        try { if (!fs.existsSync(y)) _eksikDosya.push(y.replace(/^.*[\\\/]/, "")); }
+        catch (eEx) { _eksikDosya.push(y.replace(/^.*[\\\/]/, "") + " (okunamadı)"); }
+      });
+      if (_eksikDosya.length) {
+        var eksikMsg = _eksikDosya.length + " emoji resmi bulunamadı: " +
+                       _eksikDosya.slice(0, 5).join(", ") + (_eksikDosya.length > 5 ? " …" : "");
+        logLine("Emoji DURDU — " + eksikMsg);
+        iler.adimHata("Timeline'a yerleştiriliyor", _eksikDosya.length + " dosya yok")
+            .uyari("eksik", "⛔ " + eksikMsg + "\n\nBu dosyalar ayna (yatay çevrilmiş) kopyalar " +
+                   "olabilir. Ayarlar → Duygu Emojileri → “Emojileri Yeniden Kur” dedikten sonra " +
+                   "tekrar dene; ayna kopyaları kendiliğinden yeniden üretilir.", "bad")
+            .bitir("Emoji resimleri eksik — hiçbir şey konmadı", "bad");
+        yaz(eksikMsg, "var(--bad)");
+        return;
+      }
+
+      /* ⚠ BÜYÜK PLANDA PARÇA KÜÇÜLÜR (ParsMazi, 184 emoji). Parça tek bir evalScript ve
+         içi KARA KUTU: 25 emoji giriyor, dakikalarca ses çıkmıyor. Küçük parçada (a) ilerleme
+         daha sık güncelleniyor, (b) “İptal” çok daha hızlı yanıt veriyor, (c) bir kilitlenme
+         25 değil 12 emojilik bir pencereye sıkışıyor — yani teşhis de kolaylaşıyor.
+         ⚠ `_TARA_TAVAN = 60`'ın ALTINDA kalmak ZORUNDA (host'taki güvenlik taraması tavanı),
+         yoksa önceki parçanın klipleri denetimsiz kalır. 12 ≪ 60. */
+      var EMOJI_PARCA_ETKIN = (plan.length > 100) ? 12 : EMOJI_PARCA;
+      if (EMOJI_PARCA_ETKIN !== EMOJI_PARCA)
+        logLine("Büyük plan (" + plan.length + " emoji): parça boyu " + EMOJI_PARCA +
+                " → " + EMOJI_PARCA_ETKIN + " (daha sık ilerleme, daha hızlı iptal).");
+
       var _parcaToplam = 0, _kg;
       for (_kg = 0; _kg < kgAnah.length; _kg++)
-        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA);
+        _parcaToplam += Math.ceil(kanalGrup[kgAnah[_kg]].length / EMOJI_PARCA_ETKIN);
       logLine("Emoji yerleştirme başlıyor: " + plan.length + " emoji · " + _parcaToplam +
               " parça. Premiere bu sırada DONUK görünecek — bu normal, dokunma. " +
               "Durdurmak istersen “İptal” (süren parça bitince durur).");
@@ -3728,12 +3768,12 @@
       var kgi, kgPlan;
       for (kgi = 0; kgi < kgAnah.length; kgi++) {
       kgPlan = kanalGrup[kgAnah[kgi]];
-      for (p = 0; p < kgPlan.length; p += EMOJI_PARCA) {
+      for (p = 0; p < kgPlan.length; p += EMOJI_PARCA_ETKIN) {
         /* İPTAL — parça sınırında güvenli: her parça kendi içinde tamamlanıyor ve sonraki
            parça kanalın gerçek durumunu yeniden okuyor. ⚠ İptal ZATEN DONMUŞ bir evalScript'i
            kurtarmaz (o Premiere'in elinde); sonraki parçanın hiç başlamamasını sağlar. */
         if (_emojiIptal) { parcaHata = "kullanıcı iptal etti"; break; }
-        dilim = kgPlan.slice(p, p + EMOJI_PARCA);
+        dilim = kgPlan.slice(p, p + EMOJI_PARCA_ETKIN);
         fs.writeFileSync(yol, dilim.join("\n"), "utf8");
         _parcaSira++;
         var _parcaNo = _parcaSira;
