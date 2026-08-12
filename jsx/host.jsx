@@ -22,7 +22,7 @@ function _jsonEsc(s) {
    Bu, projenin en sık tekrar eden kafa karışıklığı: "düzeltmeyi kurdum ama hâlâ aynı" —
    çünkü düzeltme host tarafındaysa hiç yüklenmemiş oluyor. Artık ölçülebilir.
    ⚠ HOST.JSX'İ HER DEĞİŞTİRDİĞİNDE BU SAYIYI DA ARTIR (version.json ile aynı tut). */
-var HOST_SURUM = "1.13.2";
+var HOST_SURUM = "1.13.3";
 
 /* Panelin host sürümünü okuması için. app.js emoji/preset işlerinden önce çağırıp
    panelinkiyle karşılaştırıyor ve tutmuyorsa kullanıcıyı uyarıyor. */

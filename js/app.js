@@ -497,8 +497,18 @@
       else {
         var kalanSn = (etaBitisT - simdi) / 1000;
         if (kalanSn <= 1) {
-          /* Tahmin tükendi ama iş sürüyor: "0 sn" yazmak yalan olurdu. */
-          ref.eta.hidden = false; ref.eta.textContent = "birazdan biter";
+          /* ⚠⚠ TAHMİN AŞILDIĞINDA "BİRAZDAN BİTER" DEMEK YALANDIR — ÖLÇÜLDÜ (ParsMazi,
+             12 Ağustos 2026): tek bir parça 845 saniye sürerken panel 14 DAKİKA boyunca
+             "birazdan biter" yazdı. Kullanıcı buna güvenip bekledi.
+             Tahmin tükendiğinde iki farklı durum var ve ayrılmaları ŞART:
+               · Az aştı (< 45 sn)  → gerçekten bitmek üzere olabilir
+               · Çok aştı           → tahmin ÇÖKTÜ; bunu söylemek, yanlış bir söz vermekten
+                                      iyidir. Rozet artık beklemeyi değil AŞIMI gösteriyor. */
+          var asim = (simdi - etaBitisT) / 1000;
+          ref.eta.hidden = false;
+          ref.eta.textContent = (asim > 45)
+            ? ("tahmini " + ILER.sureMetni(ILER.yuvarlaEta(asim)) + " aştı")
+            : "birazdan biter";
         } else {
           ref.eta.hidden = false;
           ref.eta.textContent = "~" + ILER.sureMetni(ILER.yuvarlaEta(kalanSn)) + " kaldı";
@@ -3751,7 +3761,26 @@
                (tumtest.js 12. bölüm) mesajın `sn >= 60`'tan sonraki ~600 karakter içinde
                geçtiğini arıyor. Yorum araya girerse mesaj pencereden taşıyor ve test,
                metin aslında YERİNDE dururken kırmızı veriyor. */
-            if (sn >= 60) {
+            /* ⚠⚠ MESAJ KADEMELİ — TEK BİR SUÇLU ADI YETMİYOR (ParsMazi, 12 Ağustos 2026).
+               Eski mesaj yalnız "Auto Save / Save Project / Import penceresi açık mı?"
+               diyordu. ParsMazi'de Auto Save KAPALIYDI ve mesaj onu yanlış yola soktu:
+               14 dakika bekledi, sebebi bulamadı.
+               CLAUDE.md'de belgelenmiş AYIRT EDİCİ ÖLÇÜT Görev Yöneticisi'ndeki CPU'dur:
+                 · Premiere ~%0 CPU  → hesaplamıyor, GÖRÜNMEYEN bir şeyi bekliyor (pencere)
+                 · Premiere yüksek CPU → gerçekten çalışıyor, yalnız YAVAŞ (büyük proje)
+               İkisinin çaresi bambaşka, o yüzden panel artık kullanıcıyı bu ölçüme yolluyor. */
+            if (sn >= 240) {
+              iler.uyari("donma",
+                  "⚠ Bu parça " + _sure(sn) + "'dir sürüyor (" + kondu + "/" + plan.length +
+                  " emoji kondu).\n" +
+                  "1) Premiere'i öne al: açık BİR pencere var mı? (Auto Save · Save Project · " +
+                  "Import · medya hatası). Varsa kapat/onayla — panel kaldığı yerden DEVAM EDER.\n" +
+                  "2) Pencere yoksa Görev Yöneticisi'ni aç ve Premiere'in CPU'suna bak:\n" +
+                  "   · ~%0 ise Premiere görünmeyen bir şeyi bekliyor — Premiere'i yeniden başlatman gerekir.\n" +
+                  "   · yüksekse gerçekten çalışıyor, yalnız yavaş: büyük projede " +
+                  plan.length + " emoji uzun sürer, bekle.\n" +
+                  "Konan " + kondu + " emoji her hâlükârda timeline'da kalır.", "");
+            } else if (sn >= 60) {
               iler.uyari("donma",
                   "⚠ Premiere YANIT VERMİYOR (" + sn + " sn). Premiere'i öne al ve bak: " +
                   "Auto Save / Save Project / Import penceresi açık mı? Kapat ya da onayla — " +
