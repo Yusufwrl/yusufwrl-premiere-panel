@@ -964,10 +964,29 @@ function bitir() {
     /* GÜVENLİK TARAMASI O(n²) OLMAMALI — son N klip yeter (klipler zaman sırasında). */
     dogru("tarama tavanı var (_TARA_TAVAN)", /_TARA_TAVAN\s*=\s*\d+/.test(yerBlok));
     dogru("tarama sondan başlıyor", /for \(ci = mevcut - 1; ci >= _bas; ci--\)/.test(yerBlok));
-    /* Tavan EMOJI_PARCA'dan büyük olmalı: önceki parçanın koyduğu her klip kapsamda kalsın. */
+    /* Tavan EMOJI_PARCA'dan büyük olmalı: önceki parçanın koyduğu her klip kapsamda kalsın.
+       ⚠⚠ AMA BU KURAL YALNIZ DEVAM PARÇASI MÜMKÜNSE GEÇERLİ (13 Ağustos 2026).
+       Panel planı EMOJI_PANEL_TAVAN'a (300) seyreltiyor, yani bir kanal grubunun planı
+       hiçbir zaman ondan uzun olmuyor. EMOJI_PARCA o tavana EŞİT ya da BÜYÜKSE döngü tek
+       tur çalışır (`for (p = 0; p < kgPlan.length; p += EMOJI_PARCA)`), `devam` hep "0"
+       kalır ve 60 kliplik güvenlik taraması HİÇ ÇALIŞMAZ — çünkü o tarama yalnız
+       `devam === "1"` dalında. Yani karşılaştırılacak bir şey yok.
+       Kullanıcı 13 Ağustos'ta EMOJI_PARCA'yı 500 yaptı ("tek seferde hepsini eklesin").
+       Kuralı SİLMİYORUZ: parça boyu tavanın altına inerse devam parçaları geri gelir ve
+       kontrol kendiliğinden yeniden devreye girer. */
     var tavanM = yerBlok.match(/_TARA_TAVAN\s*=\s*(\d+)/);
     var parcaM = a.match(/EMOJI_PARCA\s*=\s*(\d+)/);
-    if (tavanM && parcaM) {
+    var panelTavanM = a.match(/EMOJI_PANEL_TAVAN\s*=\s*(\d+)/);
+    var tekParca = (parcaM && panelTavanM &&
+                    parseInt(parcaM[1], 10) >= parseInt(panelTavanM[1], 10));
+    if (tekParca) {
+      not("parça boyu (" + parcaM[1] + ") ≥ plan tavanı (" + panelTavanM[1] +
+          ") — hep TEK parça, devam taraması hiç çalışmıyor (kural uygulanamaz)");
+      /* Tek parça yolunda ASIL koruma bu: kanal BOŞ olmak zorunda (v1.8.0). Onu ölç. */
+      dogru("tek parça yolunda kanal BOŞ olma kuralı duruyor (v1.8.0)",
+            /if \(!devam\) return "err:V" \+ \(kanal \+ 1\) \+ " BOS DEGIL/.test(yerBlok),
+            "v1.8.0 koruması gevşemiş — kullanıcının görüntüsü silinebilir");
+    } else if (tavanM && parcaM) {
       dogru("tarama tavanı (" + tavanM[1] + ") parça boyutundan (" + parcaM[1] + ") BÜYÜK",
             parseInt(tavanM[1], 10) > parseInt(parcaM[1], 10),
             "küçükse önceki parçanın klipleri denetimsiz kalır");

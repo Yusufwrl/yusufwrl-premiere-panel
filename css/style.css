@@ -389,6 +389,14 @@ select:focus, .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
 .progress-box.done .progress-fill::after { display: none; }
 .progress-box.error .progress-fill::after { display: none; }
 .progress-box.error .progress-fill { filter: grayscale(.35) brightness(.8); }
+/* UYARI ≠ HATA. progressFail("…","warn") çağrıldığında kutu KIRMIZI görünmemeli: iş
+   BAŞARILI oldu, yalnız söylenecek bir şey var. Eskiden warn'da da `.error` sınıfı
+   veriliyor ve rozet kırmızı ✕ oluyordu — kullanıcı 597 altyazının başarıyla eklendiği
+   bir işte "bir şeyler patladı" sanıyordu (kullanıcı bildirdi, 14 Ağustos 2026).
+   Her şeyi kırmızı göstermek kırmızının anlamını yok eder. */
+.prog-badge.warn { background: var(--warn); box-shadow: 0 0 10px rgba(251,191,36,.5); color: #241a02; }
+.progress-box.warn .progress-fill { background: linear-gradient(90deg, #d97706, #fbbf24); }
+.progress-box.warn .progress-fill::after { display: none; }
 
 /* ---------- RENK DEĞİŞTİR sekmesi ---------- */
 .color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 9px; margin-top: 8px; }

@@ -159,7 +159,9 @@
 
           <!-- Stili panel ATAYAMAZ (seq.captionTracks Premiere'de yok) — kullanıcı her track'e
                kendi stilini elle verir. Bedeli bu; karşılığı karaktere göre renk. -->
-          <p class="note" style="margin-top:10px">Yazı tipi, renk ve konumu Premiere'de ayarlarsın: altyazıya tıkla → <b>Track Style</b>. <b>Herkes</b> seçiliyken her karakter ayrı bir altyazı kanalına gider; hangisine hangi rengi vereceğin üretim bitince yazar.</p>
+          <!-- Kısaltıldı: 198 → ~105. "hangisine hangi rengi vereceğin üretim bitince yazar"
+               kısmı zaten sonuç satırında birebir çıkıyor, burada tekrar etmeye gerek yok. -->
+          <p class="note" style="margin-top:10px">Yazı tipi ve rengi Premiere'de: altyazıya tıkla → <b>Track Style</b>. Her karakter ayrı altyazı kanalına gider.</p>
 
           <!-- STİLLERİ PROJEYE AL: Premiere'de "New caption track > Style" listesi YALNIZ
                proje öğelerini gösteriyor; bilgisayara kurulu yerel stiller (.prtextstyle)
@@ -170,7 +172,8 @@
             <button class="btn-ghost" id="btnStilProje" type="button">Stilleri projeye ekle</button>
             <span class="dict-status" id="stilProjeDurum"></span>
           </div>
-          <p class="note" style="margin-top:6px">Hazır renkli stiller bilgisayarına kurulu ama Premiere'in <b>Style</b> listesinde ancak projeye eklenince görünür. Her yeni projede bir kez bas.</p>
+          <!-- Kısaltıldı: 137 → ~55. Kullanıcının yapması gereken tek şey "her yeni projede bir kez bas". -->
+          <p class="note" style="margin-top:6px">Her yeni projede bir kez bas — stiller Premiere'de görünsün.</p>
 
           <!-- SHORTS: dikey (1080x1920) video. Sadece Tek Stil'de anlamlı — Konuşmacıya Göre
                modunda üst üste katmanlar dikey karede zaten sığmıyor. -->
@@ -183,7 +186,8 @@
                  kullanıcı "Konuşmacıya Göre neden kapalı?" diye sordu. -->
             <!-- Kelime tavanı ARTIK HER ZAMAN 2 (Shorts'tan bağımsız, bkz. app.js trOpts).
                  Shorts yalnız KARAKTER sınırını daraltır — dikey karede satır dar. -->
-            <p class="note" style="margin-top:8px">Dikey karede satırlar daha kısa olur (kelime sayısı her videoda zaten <b>en fazla 2</b>). Konum ve boyut Premiere'deki altyazı stilinden ayarlanır.</p>
+            <!-- Kısaltıldı: 140 → ~45. Konum/boyut zaten Track Style'dan ayarlanıyor, üstteki not söylüyor. -->
+            <p class="note" style="margin-top:8px">Dikey videoda satırlar daha kısa olur.</p>
             <!-- Hangi yolda olduğumuzu söyleyen satır (app.js wireShorts dolduruyor).
                  Altyazı kanalı = tek kanal, kasma yok, animasyon yok.
                  MOGRT = animasyonlu ama altyazı başına bir klip. -->
@@ -215,7 +219,12 @@
             <span>Asla üst üste gelmesin <small>(aynı anda konuşmada birini gizle)</small></span>
             <input type="checkbox" id="chkCakisma">
           </label>
-          <p class="note" style="margin-top:8px">Önce altyazının <b>bitişi kırpılır</b> — başlangıç zamanına dokunulmaz, yani sesle bağı bozulmaz. Kırpmak yetmezse (iki kişi gerçekten aynı anda konuşuyorsa) <b>alt sıradaki karakterin</b> o altyazısı gizlenir; kaç tane ve kimden gizlendiği sonuçta yazar. Kutuyu kapatırsan hiçbir şey gizlenmez, üst üste binenler yalnızca sayılır.<br>Hiç altyazı kaybetmeden çözmek istersen: Premiere'de her altyazı kanalına <b>farklı dikey konum</b> ver (Track Style), sonra bu kutuyu kapat.</p>
+          <!-- ⚠ AÇIKLAMA KISALTILDI (kullanıcı isteği, 14 Ağustos 2026): 451 → ~95 karakter.
+               Eski metin panelin İÇ MEKANİĞİNİ anlatıyordu (önce bitiş kırpılır, yetmezse alt
+               sıradaki gizlenir, kapatırsan yalnız sayılır, Track Style'da dikey konum ver…).
+               İkinci kullanıcının bunların hiçbiriyle işi yok — kutuyu açar ya da kapatır.
+               Ayrıntı zaten gerektiği yerde: kaç altyazının gizlendiği SONUÇ satırında yazıyor. -->
+          <p class="note" style="margin-top:8px">Aynı anda konuşulan yerlerde alttaki karakterin yazısı gizlenir. Kaç tane gizlendiği bitince yazar.</p>
         </div>
 
 
@@ -273,21 +282,15 @@
               <!-- "Bölümler" ile aralığı birlikte tut: satır dar panelde alt satıra kayarsa ikisi birlikte kaysın.
                    <span> DEĞİL <div>: içinde blok seviyesinde bir <div class="select"> var, <span> yalnızca
                    metin-içi içerik alabilir (geçersiz HTML). Görünüm değişmez, .chap-group zaten inline-flex. -->
+              <!-- ⚠ "1 dk'da bir" ARALIK SEÇİCİSİ KALDIRILDI (kullanıcı isteği, 14 Ağustos 2026).
+                   Bu seçici YouTube açıklamasına yapıştırılan BÖLÜM ZAMAN DAMGALARININ sıklığıydı;
+                   altyazı sıklığıyla ilgisi yoktu. Ama sonuç satırında altyazı düğmelerinin
+                   yanında durduğu için öyle sanılıyordu ve "altyazı sıklığını zaten
+                   kararlaştırmıştık" (ilk 2 dk tam, sonra ~12 sn'de bir — Tofi Moni video modu)
+                   diye kafa karıştırıyordu. Bölümler artık sabit 1 dakikalık aralıkla üretiliyor;
+                   ayarlanacak bir şey kalmadı. -->
               <div class="chap-group">
-                <button class="btn-ghost" id="btnExportChapters" title="YouTube bölüm zaman damgaları">Bölümler</button>
-                <!-- Eskiden stilsiz <input type="number"> idi: koyu panelde beyaz zeminli/Arial bir kutu
-                     çıkıyor, ne olduğu sadece tooltip'te yazıyordu ve "1" yazılıp binlerce bölüm üretilebiliyordu.
-                     Menüye çevrildi: hem temaya uyuyor hem kendini anlatıyor hem de saçma değer girilemiyor. -->
-                <div class="select chap-select">
-                  <!-- Tooltip birime bağlanmıyor: ilk seçenek saniye ("30 sn'de bir"), "kaç dakikada bir"
-                       diyen eski metin onunla çelişiyordu (kullanıcı 30'u 30 dakika sanabiliyordu). -->
-                  <select id="chapInterval" title="Ne kadar aralıkla bölüm başlığı üretilsin?">
-                    <option value="30">30 sn'de bir</option>
-                    <option value="60" selected>1 dk'da bir</option>
-                    <option value="120">2 dk'da bir</option>
-                    <option value="300">5 dk'da bir</option>
-                  </select>
-                </div>
+                <button class="btn-ghost" id="btnExportChapters" title="YouTube açıklamasına yapıştırılacak bölüm zaman damgaları (1 dakikalık aralıklarla)">Bölümler</button>
               </div>
             </div>
           </div>
@@ -324,12 +327,12 @@
       <div class="view" id="viewEmoji" hidden>
         <div class="card">
           <div class="card-title">Emoji</div>
+          <!-- Kısaltıldı: 335 → ~150 (kullanıcı isteği). Taraf/aynalama kuralı panelin kendi
+               işi — kullanıcı onu ayarlayamıyor, bilmesi de gerekmiyor. Yapması gereken tek
+               şey aşağıdaki listeyi onaylamak. -->
           <p class="note" style="margin:0 0 10px">
-            Konuşanın duygusuna göre köşeye tepki resmi koyar. Duyguyu <b>yapay zekâ</b> altyazı
-            metninden seçer; <b>kimin konuştuğunu</b> ise aşağıdaki liste belirler — tahmin yok.
-            <b>Tofi ve Moni sağ</b> alt köşede, diğerleri <b>sol</b> alt köşede (resimleri ekrana
-            baksın diye yatay çevrilir). <b>A1'deki kişi</b> (videoyu çeken) adı ne olursa olsun
-            her zaman sağda ve çevrilmez.
+            Konuşanın duygusuna göre köşeye tepki resmi koyar. <b>Kimin hangi kanalda</b>
+            olduğunu aşağıdan onayla, sonra <b>Emoji Ekle</b>'ye bas. Taraf ve yön otomatik.
           </p>
           <p class="note" style="margin:0 0 10px">Önce Altyazı ekranında altyazıyı üret — emoji onun metninden seçiliyor.</p>
 
@@ -438,8 +441,10 @@
                bir şeyi ikinci bir ekranda tekrar sormak kafa karıştırıyordu. -->
           <!-- TARAF KURALI BURADA YAZILI: kullanıcı "neden bu solda?" diye sormadan görsün.
                Liste js/app.js → EMOJI_SAG_KARAKTER; kadro değişirse orası tek satır. -->
-          <p class="note" style="margin:8px 0 0"><b>Taraf otomatik:</b> Tofi, Moni ve A1'deki kişi sağ alt köşede, diğer karakterler (Dora, Mimi…) sol alt köşede — soldakilerin resmi ekrana baksın diye <b>yatay çevrilir</b> ve çevrilmiş kopyalar emoji klasöründeki <code>ayna</code> alt klasörüne bir kez üretilir. Seçmen gereken bir şey yok. Yanındaki <b>animasyon</b> menüsü tarafla ilgili değil: emojinin ekrana geliş hareketini (pop) seçer ve iki tarafa da aynısı uygulanır.</p>
-          <p class="note" style="margin:8px 0 0">Hangi karakterin hangi emojiyi alacağını artık <b>Emoji ekranından</b> seçiyorsun (ana ekran → Emoji): orada her ses kanalının karşısında bir karakter menüsü var. Varsayılan yine kanal adından gelir; menüden seçersen o kazanır. Emojisi hiç olmayan biri için “emoji yok” de. Burası yalnızca <b>klasör ayarı</b> ve ölçüm için.</p>
+          <p class="note" style="margin:8px 0 0"><b>Taraf otomatik</b> — seçmen gereken bir şey yok. Yanındaki <b>animasyon</b> menüsü emojinin ekrana geliş hareketini seçer.</p>
+          <!-- Kısaltıldı: 310 → ~95. Kim-hangi-kanalda seçimi zaten Emoji ekranında yapılıyor
+               ve orası kendini anlatıyor; burada yalnız "burası klasör ayarı" demek yeterli. -->
+          <p class="note" style="margin:8px 0 0">Kimin hangi kanalda olduğunu <b>Emoji ekranından</b> seçersin. Burası yalnızca klasör ayarı.</p>
           <!-- KLASÖR DURUMU: panelin GÖRDÜĞÜ resim sayısı ile PAKETTEKİ sayı yan yana.
                ⚠ Bu satır olmadan "güncelleme geldi ama yeni emojiler yok" durumu görünmezdi:
                panel emojileri motor kökünden türettiği klasöre kuruyor, ama okuduğu klasör

@@ -133,7 +133,7 @@
   var _pg = { base: "", max: 0, transT0: 0, totalSec: 0, etaNot: "" };   // totalSec: ilerlemeyi zaman damgasindan hesaplamak icin
   function _fmtEta(sec) { sec = Math.max(0, Math.round(sec)); var m = Math.floor(sec / 60), s = sec % 60; return "~" + m + ":" + (s < 10 ? "0" : "") + s; }
   function setProgress(pct, label, eta) {
-    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error", "warn");
     var sp = $("spinner"); if (sp) sp.hidden = false;
     var bd = $("progressBadge"); if (bd) bd.hidden = true;
     if (label != null) _pg.base = label;
@@ -149,26 +149,40 @@
   }
   function progressReset(label) {
     _pg.base = label || ""; _pg.max = 0; _pg.transT0 = 0; _pg.totalSec = 0; _pg.etaNot = "";
-    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error", "warn");
     $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
     $("progressLabel").style.color = ""; $("progressLabel").textContent = _pg.base;
     $("progressFill").style.width = "0%"; $("progressPct").textContent = "0%";
   }
   function progressBusy(label) {
-    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error");
+    var box = $("progressBox"); box.hidden = false; box.classList.remove("done", "error", "warn");
     $("spinner").hidden = false; var bd = $("progressBadge"); if (bd) bd.hidden = true;
     $("progressLabel").style.color = ""; if (label != null) { _pg.base = label; $("progressLabel").textContent = label; }
   }
   function progressDone(label) {
-    var box = $("progressBox"); box.hidden = false; box.classList.add("done"); box.classList.remove("error");
+    /* ⚠ "warn" DA TEMİZLENİR. Eskiden yalnız "error" kaldırılıyordu; bir uyarıdan sonra
+       gelen başarılı iş sarı çubukla yeşil rozeti bir arada gösteriyordu. */
+    var box = $("progressBox"); box.hidden = false; box.classList.add("done"); box.classList.remove("error", "warn");
     $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✓"; bd.className = "prog-badge ok"; }
     _pg.max = 100; $("progressFill").style.width = "100%"; $("progressPct").textContent = "100%";
     $("progressLabel").style.color = "var(--good)"; $("progressLabel").textContent = label || "Bitti";
   }
+  /* kind: "warn" = iş BAŞARILI ama söylenecek bir şey var · başka her şey = gerçek HATA.
+     ⚠ UYARIDA "error" SINIFI VERİLMEZ ve rozet ✕ OLMAZ. Eskiden ikisi de koşulsuzdu:
+     yalnız yazı rengi sarıya dönüyor, kutu kırmızı kalıyor ve rozet kırmızı ✕ oluyordu.
+     Sonuç: 597 altyazının 5 kanala sorunsuz eklendiği bir işte kullanıcı kırmızı çarpı
+     görüp "patladı" sanıyordu (bildirildi, 14 Ağustos 2026). Her şeyi kırmızı göstermek
+     gerçek hataların kırmızısını da değersizleştiriyor. */
   function progressFail(label, kind) {
-    var box = $("progressBox"); box.hidden = false; box.classList.add("error"); box.classList.remove("done");
-    $("spinner").hidden = true; var bd = $("progressBadge"); if (bd) { bd.hidden = false; bd.textContent = "✕"; bd.className = "prog-badge bad"; }
-    $("progressLabel").style.color = (kind === "warn") ? "var(--warn)" : "var(--bad)"; $("progressLabel").textContent = label || "Hata";
+    var uyari = (kind === "warn");
+    var box = $("progressBox"); box.hidden = false;
+    box.classList.remove("done", "error", "warn");
+    box.classList.add(uyari ? "warn" : "error");
+    $("spinner").hidden = true;
+    var bd = $("progressBadge");
+    if (bd) { bd.hidden = false; bd.textContent = uyari ? "⚠" : "✕"; bd.className = "prog-badge " + (uyari ? "warn" : "bad"); }
+    $("progressLabel").style.color = uyari ? "var(--warn)" : "var(--bad)";
+    $("progressLabel").textContent = label || "Hata";
   }
   // Whisper transkripsiyon yüzdesini (0-100) genel ilerlemeye [lo,hi] eşler + kalan süreyi tahmin eder.
   function transProgress(rawPct, lo, hi) {
@@ -1574,9 +1588,29 @@
      boşluğudur; çözümü kod değil, resmi alt kenara dayalı yeniden kaydetmek. */
   var EMOJI_BOSLUK_Y = 0;
   /* Bir evalScript'te kaç emoji. Klip başına 12-15 ExtendScript↔Premiere turu var ve tek
-     çağrı boyunca Premiere'in arayüzü DONUYOR; 150 emoji tek seferde gitseydi kullanıcı ne
-     kadar kaldığını göremez, "kilitlendi" sanıp Premiere'i öldürebilirdi. */
-  var EMOJI_PARCA = 40;
+     çağrı boyunca Premiere'in arayüzü DONUYOR.
+
+     ⚠⚠ 40 → 500 (13 Ağustos 2026, KULLANICI İSTEĞİ: "o ayarı 500 yap sınırı olmasın
+     neredeyse"). 500 pratikte "PARÇALAMA YOK" demek: panel planı zaten en fazla
+     EMOJI_PANEL_TAVAN (300) emojiye seyreltiyor, yani tek parça hiçbir zaman 300'ü geçmiyor
+     ve host'un 400 tavanına da çarpmıyor. Sonuç: bütün emojiler TEK evalScript ile gidiyor.
+
+     KAZANÇ: parça başına ödenen sabit maliyet (evalScript köprüsü, host kurulumu, plan
+     dosyası yazımı, devam parçalarındaki 60 kliplik güvenlik taraması) artık BİR KEZ
+     ödeniyor. 155 emojide 4 parça yerine 1 parça.
+
+     ⚠ BEDELİ — ÜÇÜ DE BİLEREK KABUL EDİLDİ:
+       1. Premiere işin TAMAMI boyunca donuk kalır (dakikalarca) ve panelin sayacı baştan
+          sona kımıldamaz; ancak iş bitince 0'dan doğrudan son sayıya sıçrar. Parçalama tam
+          da bunu önlemek için konmuştu.
+       2. "İptal" düğmesi ETKİSİZ kalır: iptal yalnız parça SINIRINDA çalışıyor, tek parça
+          varsa sınır yok. Çalışan bir evalScript kesilemez (o Premiere'in elinde).
+       3. Premiere araya bir pencere sokup takılırsa (Auto Save / Save Project / Import)
+          çağrı orada kalır. Konan emojiler timeline'da DURUR — kaybolmaz — ama panel kaç
+          tanesinin konduğunu öğrenemez.
+     Yavaşlık şikâyeti sürerse doğru kol bu sayı DEĞİL: 12'ye çekme denemesi ölçüldü ve
+     işi YAVAŞLATTI (parça sayısı arttıkça sabit maliyet de artıyor). */
+  var EMOJI_PARCA = 500;
   /* Plandaki en fazla emoji (host tavanı 400). Aşılırsa REDDEDİLMEZ, eşit aralıkla
      SEYRELTİLİR: host'un eski davranışı (plan > 100 ise tek emoji koymadan "err:") ödenmiş
      API isteğini ve 25 dakikalık GPU işini çöpe atıyordu. */
@@ -3910,7 +3944,14 @@
        altyazı eklenemedi değil BİLEREK eklenmedi — yanlış açıklama yanlış teşhise yollar.
        Modal bilerek yok: her basışta pencere açmak yıldırır (büyük kayıp zaten yerleştirmeden
        ÖNCE onay soruyor), sayı sonuç çubuğunda duruyor. */
-    if (/altyazı gizlendi|ÜST ÜSTE kaldı|altyazı kalmadı/.test(ham)) { progressFail("⚠ " + msg, "warn"); return; }
+    /* ⚠ GİZLENEN ALTYAZI BAŞARISIZLIK DEĞİL — YEŞİL GÖSTERİLİR (kullanıcı isteği, 14 Ağustos 2026:
+       "altyazılar başarıyla eklendi ama sarı yazı ve kırmızı çarpı geliyo, eklendiyse
+       başarıyla eklendi falan desin").
+       Eskiden bu dal progressFail'e gidiyordu. Oysa altyazılar EKLENDİ; "14 altyazı gizlendi"
+       panelin BİLEREK yaptığı bir iş (aynı anda konuşanların yazısı üst üste binmesin diye)
+       ve kullanıcı bunu zaten kutuyla açıkça istemiş. Başarılı bir işi hata gibi göstermek
+       hem yanlış hem de gerçek hataların kırmızısını değersizleştiriyordu.
+       Bilgi KAYBOLMUYOR: sayı `msg` içinde, yeşil satırın devamında yazıyor. */
     progressDone("Bitti — " + msg);
   }
 
@@ -4404,10 +4445,16 @@
   $("btnExportChapters").addEventListener("click", function () {
     if (!CEP) { uiAlert("Önizleme modu."); return; }
     if (!exportCues().length) { uiAlert("Önce altyazı oluştur."); return; }
-    var iv = parseInt($("chapInterval").value, 10) || 60;
+    /* ⚠ ARALIK ARTIK SABİT 60 sn — aralık seçicisi KALDIRILDI (kullanıcı isteği,
+       14 Ağustos 2026). Eskiden değer o seçiciden korumasız okunuyordu; öğe silinince
+       o satır çökerdi, bu yüzden sayı doğrudan burada duruyor.
+       ⚠ Yorumda seçicinin id'sini getElementById kalıbıyla YAZMA: tumtest "app.js'in
+       aradığı her id HTML'de var mı" kontrolünü düz metin taramasıyla yapıyor ve
+       yorumdaki kalıbı da gerçek bir arama sanıp haksız yere kırmızı veriyor. */
+    var iv = 60;
     var txt = pipeline.cuesToChapters(exportCues(), { interval: iv });
     var n = (txt.match(/\n/g) || []).length;
-    if (n < 3) { uiAlert("Sadece " + n + " bölüm çıktı. YouTube bölümleri için en az 3 gerekir (aralığı küçült veya daha uzun video).", "Bölümler"); }
+    if (n < 3) { uiAlert("Sadece " + n + " bölüm çıktı. YouTube bölümleri için en az 3 gerekir (video 3 dakikadan uzun olmalı).", "Bölümler"); }
     saveAs("bolumler.txt", ["txt"], txt);
   });
 
@@ -4447,7 +4494,7 @@
   function snkLog(msg) { var el = $("snkLog"); if (!el) return; var t = new Date().toLocaleTimeString(); el.textContent = trimLog("[" + t + "] " + msg + "\n" + el.textContent); }
   function snkProgress(pct, label) {
     var box = $("snkProgress"); if (!box) return;
-    box.hidden = false; box.classList.remove("done", "error");
+    box.hidden = false; box.classList.remove("done", "error", "warn");
     $("snkSpinner").hidden = false; var bd = $("snkBadge"); if (bd) bd.hidden = true;
     $("snkLabel").style.color = ""; if (label != null) $("snkLabel").textContent = label;
     if (pct >= 0) { if (pct < _snkMax) pct = _snkMax; else _snkMax = pct; $("snkFill").style.width = pct + "%"; $("snkPct").textContent = Math.round(pct) + "%"; }
@@ -5323,7 +5370,7 @@
   // ---------- AUTOCUT ----------
   var acCuts = [], acLast = null, _acMax = 0;
   function acSetProgress(pct, label) {
-    var box = $("acProgress"); box.hidden = false; box.classList.remove("done", "error");
+    var box = $("acProgress"); box.hidden = false; box.classList.remove("done", "error", "warn");
     var sp = $("acSpinner"); if (sp) sp.hidden = false; var bd = $("acBadge"); if (bd) bd.hidden = true;
     if (label) $("acLabel").textContent = label;
     if (pct >= 0) { if (pct < _acMax) pct = _acMax; else _acMax = pct; $("acFill").style.width = pct + "%"; $("acPct").textContent = Math.round(pct) + "%"; }
@@ -5964,10 +6011,13 @@
     catch (e) { if ($("log")) logLine("Bağlantı kurulamadı (" + ad + "): " + (e.message || e)); }
   }
   function wirePersistence() {
-    // chapInterval artık gerçek bir <select> (index.html): YouTube bölüm aralığı da hatırlansın —
-    // her panel açılışında varsayılana dönüp kullanıcıya tekrar seçtiriyordu.
+    /* ⚠ BÖLÜM ARALIĞI SEÇİCİSİ LİSTEDEN ÇIKARILDI — artık HTML'de yok (14 Ağustos 2026).
+       restoreSelect/persistSelect kendi içinde null kontrolü yapıyor, yani bırakmak
+       çökertmezdi; ama her açılışta olmayan bir öğeyi aramak kodu okuyanı yanıltır.
+       "selStyleSingle/selStyleA1/selIstif" de aynı sebeple burada duruyor ve onlar da
+       HTML'de yok — v1.8.0'da stil seçicileriyle birlikte kaldırılmışlardı. */
     _wire("ayar hafızası", function () {
-      var ids = ["acSens", "acMin", "selStyleSingle", "selStyleA1", "selIstif", "chapInterval"];
+      var ids = ["acSens", "acMin"];
       for (var i = 0; i < ids.length; i++) { restoreSelect(ids[i]); persistSelect(ids[i]); }
       // AutoCut ayarları değişince ekranda duran analiz sonucu artık o ayara ait değil — sıfırla
       var acIds = ["acSens", "acMin"];
