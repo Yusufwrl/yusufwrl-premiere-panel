@@ -5010,18 +5010,29 @@
       // --- referans sesler ---
       snkProgress(8, "OBS sesi hazırlanıyor (A1)…");
       var refA1 = await snkRefWav(0, "snkref1");
-      var refA2 = null;
+      var refA2 = null, _a2Neden = "";
       try {
         snkProgress(14, "OBS sesi hazırlanıyor (A2)…");
         refA2 = await snkRefWav(1, "snkref2");
-      } catch (e2) { snkLog("A2 okunamadı: " + (e2.message || e2)); }
+      } catch (e2) { _a2Neden = String(e2.message || e2); snkLog("A2 okunamadı: " + _a2Neden); }
       snk.a2Uyari = "";              // bu çalıştırmaya ait; A2 varsa eski uyarı ekranda kalmasın
       if (!refA2) {
         /* A2 yoksa SESSİZCE A1'e düşmek en tehlikeli hatalardan biri: A1 senin kendi
            mikrofonun; arkadaşının konuşma zarfıyla korele değil (sohbette sıra alındığı için
            neredeyse ters korele). Korelasyon rastgele bir tepeye oturuyor, tek dosya olduğu
            için tutarlılık kontrolü de devreye girmiyor ve panel yeşil ✓ gösteriyordu. */
-        snk.a2Uyari = "⚠ A2 (Discord karışık kanalı) okunamadı — hizalama kendi mikrofonunla (A1) yapıldı, sonuç yanlış olabilir.";
+        /* ⚠ SEBEBİ DE YAZ. Eskiden yalnız "okunamadı" diyordu ve gerçek sebep gizli log'da
+           kalıyordu; kullanıcı ne yapacağını bilemiyordu. buildTimelineAudio üç ayrı sebeple
+           patlıyor ve üçünün çaresi bambaşka:
+             · "ses klibi bulunamadı"     → A2 BOŞ. OBS'in Discord kanalını A2'ye koy.
+             · "medya dosyası okunamadı"  → klip iç içe sekans / birleştirilmiş klip /
+                                            çevrimdışı medya. Ham ses dosyasıyla değiştir.
+             · başka                       → mesajın kendisi söyler. */
+        snk.a2Uyari = "⚠ A2 (Discord karışık kanalı) okunamadı — hizalama kendi mikrofonunla (A1) " +
+          "yapıldı, sonuç YANLIŞ olabilir." +
+          (_a2Neden ? ("\nSebep: " + _a2Neden) : "") +
+          "\nÇare: OBS'in Discord'dan aldığı karışık sesi A2'ye koy, sonra tekrar dene. " +
+          "A2'de zaten bir klip varsa ve iç içe sekans / birleştirilmiş klip ise, ham ses dosyasıyla değiştir.";
         snkPlanCiz();
         var devamA1 = await uiConfirm(
           "A2 (OBS'in Discord'dan aldığı karışık kanal) okunamadı.\n\n" +
