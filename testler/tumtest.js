@@ -1370,6 +1370,58 @@ function bitir() {
     esit("parametre gölgeleme ve regex bayrağı yanlış pozitif vermiyor", taraKaynak(temiz), []);
   })();
 
+  /* ================= 20. AYKIRI + NEGATİF KAYMA KESME YAPMAMALI =================
+     ⚠ GERÇEKTEN OLDU (16 Ağustos 2026, kullanıcının gerçek senkronu). Üç Craig kaydı
+     +7.72 / +7.76 / +7.82 sn hizalanırken dördüncüsü -123.48 sn çıktı. Panel bunu "aykırı"
+     diye DOĞRU işaretledi, ama negatif kayma dalı yine de devreye girip dosyanın başından
+     2 dk 3 sn KESECEKTİ (trimAudioCopy → kırpılmış kopya klibin medyası olur, geri dönüşü yok).
+     Yani panel, kendi "güvenmiyorum" dediği ölçüye dayanarak geri alınamaz bir iş yapıyordu.
+     Kullanıcının ekranda gördüğü tek ipucu bir eksi işaretiydi.
+     KURAL: aykırı İŞARETLİ ve NEGATİF ölçüm kırpma tetiklemez — güvenli referansa (diğerlerinin
+     medyanı, yoksa çekenin kendi ölçülen gecikmesi) konur.
+     ⚠ SIRA ŞART: güvenlik bloğu kırpma döngüsünden ÖNCE çalışmak zorunda. Sonraya taşınırsa
+     sözdizimi geçerli kalır, test dışında hiçbir şey ses çıkarmaz ve blok sessizce ETKİSİZ olur
+     — bu yüzden aşağıda varlık değil KONUM da ölçülüyor. */
+  baslik("Aykırı + negatif kayma kesme yapmamalı (senkron veri kaybı)");
+  (function () {
+    var src = "";
+    try { src = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+    dogru("app.js okunabildi", src.length > 1000);
+
+    var iGuvenlik = src.indexOf("p.kirpmaIptalOlcum = p.offset");
+    var iKirpma   = src.indexOf("pipeline.trimAudioCopy");
+    dogru("aykırı+negatif ölçümü nötrleyen güvenlik bloğu duruyor", iGuvenlik > -1,
+          "app.js'te 'p.kirpmaIptalOlcum = p.offset' bulunamadı — kırpma yine güvenilmez ölçüye dayanıyor.");
+    dogru("kırpma dalı (trimAudioCopy) duruyor", iKirpma > -1);
+    dogru("güvenlik bloğu kırpmadan ÖNCE çalışıyor", iGuvenlik > -1 && iKirpma > -1 && iGuvenlik < iKirpma,
+          "Güvenlik bloğu trimAudioCopy'den SONRA — offset zaten kırpılmış olur, blok etkisiz.");
+
+    /* Koşul iki şartı da aramalı: yalnız "negatif" bakmak herkesin birlikte negatif kaydığı
+       geçerli senaryoyu (Craig OBS'ten önce başlatılmış) bozardı, yalnız "aykırı" bakmak da
+       pozitif aykırıları gereksizce medyana çekerdi. */
+    var blok = iGuvenlik > -1 ? src.slice(Math.max(0, iGuvenlik - 400), iGuvenlik + 200) : "";
+    dogru("koşul 'aykırı' şartını içeriyor", /p\.aykiri/.test(blok),
+          "Aykırı şartı yok — normal negatif kaymalar da kırpılmadan geçer.");
+    dogru("koşul 'negatif' şartını içeriyor", /p\.offset\s*<\s*-0\.01/.test(blok),
+          "Negatif şartı yok — pozitif aykırılar da gereksiz yere medyana çekilir.");
+
+    /* Güvenli referans HER İKİ kaynaktan da türetilebilmeli: çok dosyada medyan, tek dosyada
+       çekenin kendi ölçümü. Yalnız medyana bakan bir sürüm tek dosyalık senkronda (en sık
+       senaryo: sen + tek arkadaş) sessizce devre dışı kalırdı. */
+    var iRef = src.indexOf("var guvenliOfs");
+    dogru("güvenli referans tanımlı", iRef > -1);
+    var refBlok = iRef > -1 ? src.slice(iRef, iRef + 320) : "";
+    dogru("güvenli referans medyanı kullanıyor", /tut\.medyan/.test(refBlok));
+    dogru("güvenli referans tek dosyada çekenin ölçümüne düşüyor", /cekenKontrol/.test(refBlok),
+          "Tek dosyalık senkronda medyan yok; cekenKontrol yedeği olmadan güvenlik ağı çalışmaz.");
+
+    /* Kullanıcı bedeli EKRANDA görmeli — asıl şikâyet buydu ("herkeste + yazıyorken serada
+       neden - diyor"). Eksi işaretinin ne demek olduğu onay metninde yazmazsa uyarı işe yaramaz. */
+    dogru("onay metni eksi işaretinin ne demek olduğunu yazıyor",
+          /kaydın BAŞINDAN o kadarı kesilecek/.test(src),
+          "İşaret açıklaması yok — kullanıcı -123.48'in '2 dakikan gidiyor' demek olduğunu göremez.");
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");

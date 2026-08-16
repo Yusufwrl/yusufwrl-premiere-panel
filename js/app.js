@@ -5130,6 +5130,38 @@
                  snk.cekenKontrol.toFixed(2) + " sn — uyuşmuyor.");
         }
       }
+      /* AYKIRI + NEGATİF KAYMA = GÜVENİLMEZ ÖLÇÜME DAYALI SES KAYBI (16 Ağustos 2026).
+         Panel iki şeyi de DOĞRU ölçüyordu ama ikisini hiç birleştirmiyordu:
+           • "aykırı"  = tutarlılık/çapraz kontrol "bu ölçüme GÜVENMİYORUM" demiş,
+           • negatif   = aşağıdaki kırpma dalı dosyanın BAŞINDAN o kadarını kesecek
+                         (trimAudioCopy, çıktı klibin MEDYASI oluyor — geri dönüşü yok).
+         Yani panel, kendi güvenilmez ilan ettiği bir sayıya dayanarak dakikalarca ses siliyordu.
+         GERÇEK VAKA: üç dosya +7.72 / +7.76 / +7.82 iken dördüncüsü -123.48 çıktı; Devam
+         denseydi o kişinin kaydından 2 dk 3 sn kesilecekti. Kullanıcının ekranda gördüğü tek
+         şey bir eksi işaretiydi ("herkeste + yazıyorken serada neden - diyor") — bedelini
+         anlamasının hiçbir yolu yoktu, çünkü uyarı yalnız "sonra kontrol et" diyordu.
+         Craig'in çoklu-parça dışa aktarımı HERKESİ aynı kayıt başlangıcına hizaladığı için
+         doğru cevap neredeyse her zaman diğerlerinin medyanıdır. Bu yüzden aykırı dosya
+         KESİLMEZ, güvenli referansa konur: yanlışsa kullanıcı klibi sürükleyip düzeltir
+         (geri alınabilir), oysa kesilen ses geri gelmez. Asimetrik risk, asimetrik varsayılan.
+         ⚠ KAPSAM BİLEREK DAR: yalnız "aykırı VE negatif". Herkesin kayması birlikte negatifse
+         (Craig OBS'ten önce başlatılmış) kimse aykırı olmaz ve kırpma normal çalışmaya devam
+         eder — bu dal o senaryoya hiç dokunmaz. */
+      var guvenliOfs = (tut.medyan != null && isFinite(tut.medyan)) ? tut.medyan
+                     : ((snk.cekenKontrol != null && isFinite(snk.cekenKontrol)) ? snk.cekenKontrol : null);
+      var kirpmaIptal = 0;
+      if (guvenliOfs != null) {
+        yerlesecek.forEach(function (p) {
+          if (!p.aykiri || !(p.offset < -0.01)) return;
+          p.kirpmaIptalOlcum = p.offset;
+          p.offset = guvenliOfs;
+          kirpmaIptal++;
+          snkLog("GÜVENLİK: " + p.karakter + " ölçümü hem aykırı hem negatif (" +
+                 p.kirpmaIptalOlcum.toFixed(2) + " sn) — dosya KESİLMEDİ, güvenli referansa (" +
+                 guvenliOfs.toFixed(2) + " sn) kondu.");
+        });
+      }
+
       /* Kanal durumunu ONAYDAN HEMEN ÖNCE tazele. Oyun sesini artık kullanıcı elle taşıyor ve
          bunu panel hizalama yaparken (dakikalar sürebilir) yapmış olabilir. Bayat veriyle
          sorulursa "A3'ün üzerine yazılacak" uyarısı yanlış çıkar ve oyun sesi satırı taşınmış
@@ -5141,7 +5173,10 @@
       var ozet = [];
       yerlesecek.forEach(function (p) {
         ozet.push("A" + (p.kanal + 1) + " → " + p.karakter + "   " +
-                  (p.offset >= 0 ? "+" : "") + p.offset.toFixed(2) + " sn" + (p.aykiri ? "  ⚠" : ""));
+                  (p.offset >= 0 ? "+" : "") + p.offset.toFixed(2) + " sn" + (p.aykiri ? "  ⚠" : "") +
+                  (p.kirpmaIptalOlcum != null
+                     ? "  (ölçüm " + p.kirpmaIptalOlcum.toFixed(2) + " sn çıkmıştı — güvenilmez, kullanılmadı)"
+                     : ""));
       });
       var atlandiNot = "";
       if (hizalanamayan.length) {
@@ -5178,9 +5213,30 @@
       if (snk.kanalKlip === null) {
         ezmeNot += "\n\n⚠ Kanalların içeriği okunamadı — üzerine yazma riski KONTROL EDİLEMEDİ.";
       }
-      var msg = yerlesecek.length + " ses dosyası yerleştirilecek:\n\n" + ozet.join("\n") + oyunNot + atlandiNot + ezmeNot +
-        (tut.aykiriSayisi ? "\n\n⚠ " + tut.aykiriSayisi + " dosyanın kayması diğerlerinden farklı — " +
-          "yanlış hizalanmış olabilir. Uyguladıktan sonra o kanalları kontrol et." : "") +
+      /* İŞARETİN ANLAMI EKRANDA YAZMALI — "+7.76" ile "-123.48" AYNI TÜR İŞLEM DEĞİL.
+         Artı: klip o saniyeye KONUR (zararsız, beğenmezsen sürükleyip düzeltirsin).
+         Eksi: dosyanın BAŞINDAN o kadarı KESİLİR ve kırpılmış kopya klibin medyası olur.
+         Kullanıcı ikisini de aynı biçimde, tek bir işaret farkıyla görüyordu. Bu satır yalnız
+         gerçekten kesme yapılacaksa çıkar — hiçbir şey kesilmezken metni uzatmanın anlamı yok. */
+      var kesilecekVar = false;
+      yerlesecek.forEach(function (p) { if (p.offset < -0.01) kesilecekVar = true; });
+      var isaretNot = kesilecekVar
+        ? "\n\n(− işareti: kaydın BAŞINDAN o kadarı kesilecek. + işareti: klip o saniyeye konacak.)"
+        : "";
+      var kirpNot = kirpmaIptal
+        ? ("\n\n⚠ " + kirpmaIptal + " dosyanın ölçümü hem diğerlerinden farklı hem NEGATİF çıktı. " +
+           "Negatif kayma “kaydın başından o kadarını kes” demek; ölçüme güvenilmediği için " +
+           "KESİLMEDİ, diğerleriyle aynı kaymaya (" + guvenliOfs.toFixed(2) + " sn) kondu. " +
+           "Uyguladıktan sonra o kanalı dinle; gerekirse klibi elle kaydır.")
+        : "";
+      /* Uyarı SAYI değil AD versin: "1 dosyanın kayması farklı" cümlesi kullanıcıyı tabloya
+         geri gönderip hangisi olduğunu aratıyordu. */
+      var aykiriAdlar = [];
+      yerlesecek.forEach(function (p) { if (p.aykiri) aykiriAdlar.push(p.karakter); });
+      var msg = yerlesecek.length + " ses dosyası yerleştirilecek:\n\n" + ozet.join("\n") + isaretNot +
+        oyunNot + atlandiNot + ezmeNot + kirpNot +
+        (tut.aykiriSayisi ? "\n\n⚠ " + (aykiriAdlar.length ? aykiriAdlar.join(", ") : tut.aykiriSayisi + " dosya") +
+          " diğerlerinden farklı hizalandı — yanlış olabilir. Uyguladıktan sonra o kanalları dinle." : "") +
         (caprazNot ? "\n" + caprazNot : "") +
         "\n\nProje önce kaydedilecek; sorun olursa üstteki “Geri Al” ile bu ana dönebilirsin.";
       if (!(await uiConfirm(msg, "Senkron"))) { snkFail("İptal edildi", "warn"); return; }
