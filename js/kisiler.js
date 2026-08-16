@@ -34,7 +34,14 @@ var VARSAYILAN = [
   { karakter: "Mimi", adlar: ["1298721"], renk: 11 },
   { karakter: "Dora", adlar: ["dielyzed"], renk: 13 },
   { karakter: "Sage", adlar: ["tenebrissa"], renk: 10 },
-  { karakter: "Niko", adlar: ["pompa456", "adsadsaadas"], renk: 15 }
+  { karakter: "Niko", adlar: ["pompa456", "adsadsaadas"], renk: 15 },
+  /* ⚠ SERA — YENİ KARAKTER (16 Ağustos 2026). Discord görünen adı HENÜZ BİLİNMİYOR;
+     "sera" makul bir taban ama Craig dosyası başka bir adla geliyorsa (ör. "sera_yt",
+     "Sera🌸") eşleşme TUTMAZ ve kaydı "bilinmeyen" olarak ayrı kanala düşer.
+     Doğrusu panelden bakmak: Senkron → Craig klasörünü seç → dosya adlarında ne yazıyorsa
+     "Kişiler" kutusuna onu ekle. Liste SIRASI ses kanalı sırasını belirliyor, Sera en sonda
+     olduğu için mevcut kadronun kanal düzeni DEĞİŞMİYOR. */
+  { karakter: "Sera", adlar: ["sera"], renk: 4 }
 ];
 
 /* Karşılaştırma normali.
@@ -233,13 +240,97 @@ function save(extRoot, entries) {
   }
   /* surum: sıra göçünün bir kez çalışıp bir daha çalışmaması için. Yazılmazsa panel her
      açılışta kullanıcının elle değiştirdiği sırayı varsayılana geri çevirirdi. */
+  /* ⚠ pkgSurum + silinenVarsayilanlar: paket birleştirmesinin damgası ve kullanıcının
+     BİLEREK sildiği varsayılan karakterlerin kaydı (bkz. paketBirlestir). Bunlar
+     yazılmazsa birleştirme her açılışta yeniden çalışır ve silinen kişi geri gelir. */
+  var eskiPkg = 0, silinen = [];
+  try {
+    var yolS = path.join(extRoot, DOSYA);
+    if (fs.existsSync(yolS)) {
+      var hamS = fs.readFileSync(yolS, "utf8");
+      if (hamS.charCodeAt(0) === 0xFEFF) hamS = hamS.slice(1);
+      var eskiJ = JSON.parse(hamS);
+      eskiPkg = Number(eskiJ.pkgSurum || 0);
+      if (Object.prototype.toString.call(eskiJ.silinenVarsayilanlar) === "[object Array]") {
+        silinen = eskiJ.silinenVarsayilanlar.slice();
+      }
+    }
+  } catch (eS) { eskiPkg = 0; silinen = []; }
+  try {
+    var varAd = {}, q;
+    for (q = 0; q < temiz.length; q++) if (temiz[q].karakter) varAd[_norm(temiz[q].karakter)] = 1;
+    var kayitliS = {};
+    for (q = 0; q < silinen.length; q++) kayitliS[_norm(silinen[q])] = 1;
+    /* ⚠⚠ SİLME KAYDI ANCAK DOSYA GÜNCEL PAKETTEN GEÇTİYSE ÇIKARILIR — sozluk.js ile aynı
+       gerekçe ve aynı ölçülmüş hata. Koşulsuz hâli, listesi Sera'dan ÖNCE oluşmuş her
+       kullanıcıda (yani herkeste) Sera'yı ilk kayıtta "silinmiş" işaretleyip birleştirmeyi
+       kalıcı olarak etkisiz kılıyordu. `pkgSurum < PAKET_SURUM` iken yokluk "sildim" değil
+       "bana hiç ulaşmadı" demektir.
+       ⚠ Boşaltma da AYRI bir karar — orada da kayıt çıkarılmaz. */
+    if (temiz.length && eskiPkg >= PAKET_SURUM) {
+      VARSAYILAN.forEach(function (v) {
+        var kk = _norm(v.karakter);
+        if (!varAd[kk] && !kayitliS[kk]) { silinen.push(v.karakter); kayitliS[kk] = 1; }
+      });
+    }
+  } catch (eS2) {}
   fs.writeFileSync(path.join(extRoot, DOSYA),
-    JSON.stringify({ surum: SURUM, kisiler: temiz }, null, 2), "utf8");
+    JSON.stringify({ surum: SURUM, pkgSurum: Math.max(eskiPkg, PAKET_SURUM),
+                     silinenVarsayilanlar: silinen, kisiler: temiz }, null, 2), "utf8");
   _sonListe = temiz;    // yazma başarılıysa "bilinen son iyi liste" bu olur
+}
+
+/* ⚠⚠ KADROYA EKLENEN YENİ KARAKTER MEVCUT KULLANICIYA NASIL ULAŞACAK?
+   `load()` kullanıcının kisiler.json'ı varsa VARSAYILAN'a HİÇ bakmıyor — yani listeye
+   eklenen Sera (16 Ağustos 2026) kişi listesini bir kez kaydetmiş kimseye ULAŞMAZ.
+   Bu modülde hiç birleştirme YOKTU; sözlükteki `paketBirlestir` deseninin aynısı.
+
+   KURALLAR:
+   · YALNIZ EKLER — kullanıcının kendi karakterleri, Discord adları ve SIRASI korunur.
+   · Yeni karakter listenin SONUNA eklenir. Sıra = ses kanalı sırası olduğu için başa
+     eklemek mevcut kadronun bütün kanal düzenini kaydırırdı.
+   · PAKET_SURUM damgasıyla BİR KEZ çalışır.
+   · Kullanıcının SİLDİĞİ varsayılan karakter DİRİLTİLMEZ.
+   · Liste bilerek boşaltıldıysa dokunulmaz.
+   ⚠ Kadroya yeni karakter eklerken PAKET_SURUM'u ARTIR — yoksa kimseye gitmez. */
+var PAKET_SURUM = 1;
+function paketBirlestir(extRoot) {
+  var p = path.join(extRoot, DOSYA), raw, j;
+  try {
+    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [] };
+    raw = fs.readFileSync(p, "utf8");
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+    j = JSON.parse(raw);
+  } catch (e) { return { durum: "okunamadi", eklenen: [], hata: String((e && e.message) || e) }; }
+  if (!j || Object.prototype.toString.call(j.kisiler) !== "[object Array]") return { durum: "bicim", eklenen: [] };
+  if (!j.kisiler.length) return { durum: "bos-birakilmis", eklenen: [] };
+  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
+
+  var eklenen = [], var_ = {}, i;
+  for (i = 0; i < j.kisiler.length; i++) {
+    if (j.kisiler[i] && j.kisiler[i].karakter) var_[_norm(j.kisiler[i].karakter)] = 1;
+  }
+  var silinenSet = {};
+  try {
+    if (Object.prototype.toString.call(j.silinenVarsayilanlar) === "[object Array]") {
+      for (i = 0; i < j.silinenVarsayilanlar.length; i++) silinenSet[_norm(j.silinenVarsayilanlar[i])] = 1;
+    }
+  } catch (eS) {}
+  VARSAYILAN.forEach(function (v) {
+    var k = _norm(v.karakter);
+    if (var_[k] || silinenSet[k]) return;
+    j.kisiler.push({ karakter: v.karakter, adlar: (v.adlar || []).slice(), renk: v.renk || 0 });
+    eklenen.push(v.karakter);
+  });
+  j.pkgSurum = PAKET_SURUM;
+  try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, hata: String((e2 && e2.message) || e2) }; }
+  return { durum: "birlestirildi", eklenen: eklenen };
 }
 
 module.exports = {
   load: load, save: save, defaults: defaults,
+  paketBirlestir: paketBirlestir, PAKET_SURUM: PAKET_SURUM,
   parseText: parseText, toText: toText,
   adCikar: adCikar, bul: bul, karakterBul: karakterBul, ekKirp: _ekKirp,
   LABELLER: LABELLER, DOSYA: DOSYA,

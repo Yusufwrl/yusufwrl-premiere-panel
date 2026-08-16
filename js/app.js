@@ -5904,11 +5904,33 @@
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
     // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
     SZ = pipeline.sozluk;
+    /* ⚠ PAKETTEKİ YENİ İSİMLER ÖNCE BİRLEŞTİRİLİR, load()'DAN ÖNCE.
+       load() kullanıcının sozluk.json'ı varsa VARSAYILAN'a hiç bakmıyor; yani pakete
+       eklenen yeni bir karakter (Sera) sözlüğü bir kez kaydetmiş kimseye ULAŞMAZDI.
+       paketBirlestir yalnız EKLER, PAKET_SURUM damgasıyla bir kez çalışır ve kullanıcının
+       bilerek sildiği ismi diriltmez. Kendi try'ında: patlarsa sözlük yine yüklenmeli. */
+    try {
+      var _szB = SZ.paketBirlestir ? SZ.paketBirlestir(extRoot) : null;
+      if (_szB && _szB.eklenen && _szB.eklenen.length)
+        logLine("Sözlük güncellendi (pakete eklenen " + _szB.eklenen.length + " yeni yazım): " +
+                _szB.eklenen.join(" · "));
+      else if (_szB && _szB.hata) logLine("Sözlük paket birleştirmesi yapılamadı: " + _szB.hata);
+    } catch (eSzB) { logLine("Sözlük paket birleştirmesi atlandı: " + (eSzB.message || eSzB)); }
     state.dict = SZ.load(extRoot);
     // Senkron kartı modülleri (Craig kayıtlarını hizalama ve yerleştirme)
     try {
       KISI = require(path.join(extRoot, "js", "kisiler.js"));
       HIZ = require(path.join(extRoot, "js", "hizala.js"));
+      /* Aynı gerekçe kişi listesi için de geçerli — yeni karakter kadroya girsin.
+         ⚠ load()'DAN ÖNCE: sonra çağrılırsa state.kisiler eski listeyi tutar ve yeni
+         karakter ancak panel bir daha açılınca görünür. */
+      try {
+        var _kiB = KISI.paketBirlestir ? KISI.paketBirlestir(extRoot) : null;
+        if (_kiB && _kiB.eklenen && _kiB.eklenen.length)
+          logLine("Kişi listesine yeni karakter eklendi: " + _kiB.eklenen.join(" · ") +
+                  " — Senkron kartından Discord adını kontrol et.");
+        else if (_kiB && _kiB.hata) logLine("Kişi listesi birleştirmesi yapılamadı: " + _kiB.hata);
+      } catch (eKiB) { logLine("Kişi listesi birleştirmesi atlandı: " + (eKiB.message || eKiB)); }
       state.kisiler = KISI.load(extRoot);
       snkKisiDoldur();
       var ck = lsGet("snkCeken", "Tofi");

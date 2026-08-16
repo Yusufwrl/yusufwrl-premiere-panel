@@ -26,7 +26,16 @@ var VARSAYILAN = [
   { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni"] },
   { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra"] },
   { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi"] },
-  { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko"] }
+  { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko"] },
+  /* ⚠ SERA — YENİ KARAKTER (16 Ağustos 2026).
+     VARYANT SEÇİM KURALI (üstteki uyarının aynısı): gerçek Türkçe kelimeye BENZEYEN varyant
+     EKLENMEZ, yoksa masum cümleler bozulur. Bu yüzden bilerek DIŞARIDA bırakılanlar:
+       · "sera"  → gerçek Türkçe kelime (sera = cam ev). Doğru yazımın kendisi zaten
+                   otomatik ekleniyor, yani "sera" → "Sera" büyük harf düzeltmesi çalışıyor;
+                   listeye ayrıca varyant olarak koymak GEREKMİYOR ve tehlikeli olurdu.
+       · "sıra", "seri", "sera"ya yakın her şey → aynı sebep.
+     Kalanlar Whisper'ın Türkçe dinlerken üretmesi muhtemel, kelime OLMAYAN yazımlar. */
+  { ad: "Sera", varyant: ["seraa", "serra", "sehra", "seyra", "se ra"] }
 ];
 
 /* BİLİNEN İSİMLER — oyun, marka ve süper kahraman adları. Motor Türkçe dinlerken bunları
@@ -409,12 +418,113 @@ function load(extRoot) {
   return defaults();
 }
 function save(extRoot, entries) {
-  fs.writeFileSync(path.join(extRoot, DOSYA), JSON.stringify({ entries: entries || [] }, null, 2), "utf8");
-  return path.join(extRoot, DOSYA);
+  /* ⚠ pkgSurum DA YAZILIR. Yazılmazsa kullanıcı sözlüğü her kaydettiğinde damga silinir,
+     sonraki açılışta paketBirlestir yeniden çalışır ve kullanıcının BİLEREK sildiği isim
+     geri gelir. "Bir kez ekle" sözü ancak damga kalıcıysa tutuluyor.
+     ⚠ silinenVarsayilanlar: kullanıcı bir varsayılan ismi sildiyse KAYDEDİLİR ve
+     birleştirme onu bir daha diriltmez (birikimli — önce Tofi'yi, sonra Moni'yi silerse
+     ikisi de kayıtta kalmalı). */
+  var p = path.join(extRoot, DOSYA);
+  entries = entries || [];
+  var silinen = [], oncekiPkg = 0;
+  try {
+    if (fs.existsSync(p)) {
+      var ham = fs.readFileSync(p, "utf8");
+      if (ham.charCodeAt(0) === 0xFEFF) ham = ham.slice(1);
+      var eski = JSON.parse(ham);
+      oncekiPkg = Number(eski && eski.pkgSurum || 0);
+      if (eski && Object.prototype.toString.call(eski.silinenVarsayilanlar) === "[object Array]") {
+        silinen = eski.silinenVarsayilanlar.slice();
+      }
+    }
+  } catch (e) { silinen = []; oncekiPkg = 0; }
+  try {
+    var varAd = {}, i;
+    for (i = 0; i < entries.length; i++) if (entries[i] && entries[i].ad) varAd[String(entries[i].ad).toLowerCase()] = 1;
+    var kayitli = {};
+    for (i = 0; i < silinen.length; i++) kayitli[String(silinen[i]).toLowerCase()] = 1;
+    /* ⚠⚠ SİLME KAYDI ANCAK DOSYA GÜNCEL PAKETTEN GEÇTİYSE ÇIKARILIR — ÖLÇÜLDÜ.
+       İlk yazımda koşul yoktu ve mekanizma kendi amacını yok ediyordu: listesi Sera'dan
+       ÖNCE oluşmuş bir kullanıcı (yani HERKES) kaydettiği anda Sera "kullanıcı sildi" diye
+       işaretleniyor, birleştirme de onu bir daha ASLA eklemiyordu. Test yakaladı.
+       Doğru ayrım: `pkgSurum < PAKET_SURUM` iken bir varsayılanın YOKLUĞU "sildim" değil
+       "bana hiç ulaşmadı" demektir. Silme kaydı ancak paket o kullanıcıya TESLİM EDİLDİKTEN
+       sonra (damga güncelken) anlamlı.
+       ⚠ Liste TAMAMEN boşsa da kayıt çıkarılmaz: "boşalttım" ayrı bir karar ve
+       paketBirlestir onu zaten `bos-birakilmis` dalıyla koruyor. */
+    if (entries.length && oncekiPkg >= PAKET_SURUM) {
+      VARSAYILAN.forEach(function (v) {
+        var k = String(v.ad).toLowerCase();
+        if (!varAd[k] && !kayitli[k]) { silinen.push(v.ad); kayitli[k] = 1; }
+      });
+    }
+  } catch (e2) {}
+  fs.writeFileSync(p, JSON.stringify({ pkgSurum: PAKET_SURUM, silinenVarsayilanlar: silinen,
+                                       entries: entries }, null, 2), "utf8");
+  return p;
+}
+
+/* ⚠⚠ PAKETE EKLENEN YENİ İSİM MEVCUT KULLANICIYA NASIL ULAŞACAK? — BEŞİNCİ KEZ.
+   `load()` kullanıcının sozluk.json'ı varsa VARSAYILAN'a HİÇ bakmıyor. Yani listeye
+   eklenen yeni bir karakter (Sera, 16 Ağustos 2026) sözlüğü bir kez kaydetmiş HİÇ KİMSEYE
+   ulaşmaz — sessizce ölü doğar. Aynı soru bu projede emoji PNG tazelemede, preset
+   kartlarında ve Track Style'larda da çıktı; cevabı olmayan her ekleme kayboldu.
+
+   KURALLAR — dördü de bilinçli:
+   · YALNIZ EKLER. Kullanıcının kendi isimleri ve kendi yazdığı varyantlar aynen kalır.
+   · PAKET_SURUM damgasıyla BİR KEZ çalışır. Damgasız birleştirme, kullanıcının sildiği
+     varyantı her açılışta geri getirirdi.
+   · Kullanıcı sözlüğü BİLEREK boşalttıysa (entries: []) dokunulmaz.
+   · Kullanıcının SİLDİĞİ varsayılan isim DİRİLTİLMEZ (silinenVarsayilanlar).
+   ⚠ Pakete yeni isim/varyant eklerken PAKET_SURUM'u ARTIR — yoksa kimseye gitmez. */
+var PAKET_SURUM = 1;
+function paketBirlestir(extRoot) {
+  var p = path.join(extRoot, DOSYA), raw, j;
+  try {
+    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [] };   // load() zaten varsayılanı veriyor
+    raw = fs.readFileSync(p, "utf8");
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+    j = JSON.parse(raw);
+  } catch (e) { return { durum: "okunamadi", eklenen: [], hata: String((e && e.message) || e) }; }
+  if (!j || Object.prototype.toString.call(j.entries) !== "[object Array]") return { durum: "bicim", eklenen: [] };
+  if (!j.entries.length) return { durum: "bos-birakilmis", eklenen: [] };
+  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
+
+  var eklenen = [], indeks = {}, i;
+  for (i = 0; i < j.entries.length; i++) {
+    if (j.entries[i] && j.entries[i].ad) indeks[String(j.entries[i].ad).toLowerCase()] = i;
+  }
+  var silinenSet = {};
+  try {
+    if (Object.prototype.toString.call(j.silinenVarsayilanlar) === "[object Array]") {
+      for (i = 0; i < j.silinenVarsayilanlar.length; i++) silinenSet[String(j.silinenVarsayilanlar[i]).toLowerCase()] = 1;
+    }
+  } catch (eS) {}
+  VARSAYILAN.forEach(function (v) {
+    var k = String(v.ad).toLowerCase();
+    if (indeks[k] === undefined) {
+      if (silinenSet[k]) return;                       // bilerek silmiş — diriltme
+      j.entries.push({ ad: v.ad, varyant: (v.varyant || []).slice() });
+      eklenen.push(v.ad + " (yeni isim)");
+      return;
+    }
+    var mevcut = j.entries[indeks[k]];
+    if (!mevcut.varyant) mevcut.varyant = [];
+    var gorulen = {}, q;
+    for (q = 0; q < mevcut.varyant.length; q++) gorulen[String(mevcut.varyant[q]).toLowerCase()] = 1;
+    (v.varyant || []).forEach(function (x) {
+      if (!gorulen[String(x).toLowerCase()]) { mevcut.varyant.push(x); eklenen.push(v.ad + ": " + x); }
+    });
+  });
+  j.pkgSurum = PAKET_SURUM;
+  try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, hata: String((e2 && e2.message) || e2) }; }
+  return { durum: "birlestirildi", eklenen: eklenen };
 }
 
 module.exports = {
   load: load, save: save, defaults: defaults,
+  paketBirlestir: paketBirlestir, PAKET_SURUM: PAKET_SURUM,
   parseText: parseText, toText: toText,
   buildMap: buildMap, fixWords: fixWords, fixToken: fixToken, fixText: fixText,
   hotwords: hotwords, DOSYA: DOSYA,

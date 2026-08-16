@@ -1,26 +1,34 @@
 ﻿[
     {
-        "dosya":  "stil01.prtextstyle",
-        "ad":  "Kırmızı Text.prtextstyle"
+        "dosya": "stil01.prtextstyle",
+        "ad": "Kırmızı Text.prtextstyle"
     },
     {
-        "dosya":  "stil02.prtextstyle",
-        "ad":  "Mavi Text.prtextstyle"
+        "dosya": "stil02.prtextstyle",
+        "ad": "Mavi Text.prtextstyle"
     },
     {
-        "dosya":  "stil03.prtextstyle",
-        "ad":  "Mor Text.prtextstyle"
+        "dosya": "stil03.prtextstyle",
+        "ad": "Mor Text.prtextstyle"
     },
     {
-        "dosya":  "stil04.prtextstyle",
-        "ad":  "Pembe Text.prtextstyle"
+        "dosya": "stil04.prtextstyle",
+        "ad": "Pembe Text.prtextstyle"
     },
     {
-        "dosya":  "stil05.prtextstyle",
-        "ad":  "Siyah Text.prtextstyle"
+        "dosya": "stil05.prtextstyle",
+        "ad": "Siyah Text.prtextstyle"
     },
     {
-        "dosya":  "stil06.prtextstyle",
-        "ad":  "Yeşil Text.prtextstyle"
+        "dosya": "stil06.prtextstyle",
+        "ad": "Yeşil Text.prtextstyle"
+    },
+    {
+        "dosya": "stil07.prtextstyle",
+        "ad": "Turuncu Text.prtextstyle"
+    },
+    {
+        "dosya": "stil08.prtextstyle",
+        "ad": "Sarı Text.prtextstyle"
     }
 ]

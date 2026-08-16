@@ -465,6 +465,113 @@ function bitir() {
     esit("sayısal renk hâlâ ayrışıyor", c.length === 1 ? [c[0].adlar, c[0].renk] : null, [["kiz"], 3]);
   })();
 
+  /* ---- 12b. YENİ KARAKTER MEVCUT KULLANICIYA ULAŞIYOR MU (paketBirlestir) ----
+     GERÇEK SORU, BEŞİNCİ KEZ: `load()` kullanıcının kendi dosyası varsa VARSAYILAN'a HİÇ
+     bakmıyor. Yani kadroya/sözlüğe eklenen yeni bir karakter (Sera, 16 Ağustos 2026) kendi
+     listesini bir kez kaydetmiş kimseye ULAŞMAZ — sessizce ölü doğar. Aynı soru bu projede
+     emoji PNG tazelemede, preset kartlarında ve Track Style'larda da çıktı.
+
+     ⚠⚠ BU TESTLER GERÇEK BİR HATA YAKALADI VE O YÜZDEN BURADALAR.
+     İlk yazımda `save()` "varsayılanlarda olup listede olmayan" her ismi KOŞULSUZ olarak
+     "kullanıcı sildi" diye işaretliyordu. Ama listesi Sera'dan ÖNCE oluşmuş bir kullanıcıda
+     (yani HERKESTE) Sera'nın yokluğu silme değil "henüz teslim edilmedi" demek: ilk kayıtta
+     Sera "silinmiş" damgası yiyor ve birleştirme onu bir daha ASLA eklemiyordu. Mekanizma
+     kendi amacını yok ediyordu ve hiçbir sözdizimi/tip kontrolü bunu göremezdi.
+     Düzeltme: silme kaydı ancak `pkgSurum >= PAKET_SURUM` iken (paket o kullanıcıya GERÇEKTEN
+     teslim edildikten sonra) çıkarılır. */
+  baslik("Yeni karakter mevcut kullanıcıya ulaşıyor mu");
+  (function () {
+    var SZ, KS2, os = require("os");
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); KS2 = require(path.join(KOK, "js", "kisiler.js")); }
+    catch (e) { hata("modül yüklenemedi", e.message); return; }
+    if (typeof SZ.paketBirlestir !== "function") { hata("sozluk.paketBirlestir yok"); return; }
+    if (typeof KS2.paketBirlestir !== "function") { hata("kisiler.paketBirlestir yok"); return; }
+
+    /* Sistem tmp + PID: repo içine YAZMA, iki koşu birbirinin dosyasını GÖRMESİN. */
+    var kok = path.join(os.tmpdir(), "yw-paket-test-" + process.pid);
+    try { fs.mkdirSync(kok, { recursive: true }); } catch (e) {}
+    function oku(f) { try { return JSON.parse(String(fs.readFileSync(path.join(kok, f), "utf8")).replace(/^﻿/, "")); } catch (e) { return null; } }
+    function sil(f) { try { fs.unlinkSync(path.join(kok, f)); } catch (e) {} }
+    function damgaSifirla(f, alan) {
+      var j = oku(f); if (!j) return; j.pkgSurum = 0;
+      fs.writeFileSync(path.join(kok, f), JSON.stringify(j, null, 2), "utf8");
+      return alan;
+    }
+
+    try {
+      /* ── SÖZLÜK ── mevcut kullanıcı: eski kadroyu kaydetmiş, yeni isim yok */
+      sil(SZ.DOSYA);
+      SZ.save(kok, [{ ad: "Tofi", varyant: ["toffy"] }, { ad: "Moni", varyant: ["money"] }]);
+      damgaSifirla(SZ.DOSYA);                       // "eski sürümden kalma dosya"
+      var r1 = SZ.paketBirlestir(kok);
+      var ad1 = (oku(SZ.DOSYA).entries || []).map(function (e) { return e.ad; });
+      esit("sözlük: birleştirme çalıştı", r1.durum, "birlestirildi");
+      dogru("sözlük: YENİ karakter eklendi", ad1.indexOf("Sera") !== -1, "adlar: " + ad1.join(", "));
+      dogru("sözlük: kullanıcının kendi isimleri duruyor",
+            ad1.indexOf("Tofi") !== -1 && ad1.indexOf("Moni") !== -1);
+      esit("sözlük: ikinci çağrı hiçbir şey yapmıyor (damga)", SZ.paketBirlestir(kok).durum, "guncel");
+
+      /* Kullanıcı yeni karakteri SİLDİ → bir daha gelmemeli */
+      SZ.save(kok, (oku(SZ.DOSYA).entries || []).filter(function (e) { return e.ad !== "Sera"; }));
+      damgaSifirla(SZ.DOSYA);
+      SZ.paketBirlestir(kok);
+      dogru("sözlük: kullanıcının SİLDİĞİ isim geri gelmiyor",
+            (oku(SZ.DOSYA).entries || []).map(function (e) { return e.ad; }).indexOf("Sera") === -1);
+
+      /* Bilerek boşaltılmış sözlüğe dokunulmuyor */
+      sil(SZ.DOSYA);
+      fs.writeFileSync(path.join(kok, SZ.DOSYA), JSON.stringify({ pkgSurum: 0, entries: [] }, null, 2), "utf8");
+      esit("sözlük: boşaltılmışa dokunulmuyor", SZ.paketBirlestir(kok).durum, "bos-birakilmis");
+
+      /* ── KİŞİLER ── */
+      sil(KS2.DOSYA);
+      KS2.save(kok, [{ karakter: "Tofi", adlar: ["yusufwrl"], renk: 6 },
+                     { karakter: "Moni", adlar: ["e"], renk: 9 }]);
+      damgaSifirla(KS2.DOSYA);
+      var r2 = KS2.paketBirlestir(kok);
+      var kar = (oku(KS2.DOSYA).kisiler || []).map(function (x) { return x.karakter; });
+      esit("kişiler: birleştirme çalıştı", r2.durum, "birlestirildi");
+      dogru("kişiler: YENİ karakter eklendi", kar.indexOf("Sera") !== -1, "kadro: " + kar.join(", "));
+      /* ⚠ SONA eklenmeli: liste sırası = ses kanalı sırası. Başa eklemek mevcut kadronun
+         BÜTÜN kanal düzenini kaydırır ve kullanıcı bunu ancak videoyu izlerken fark eder. */
+      esit("kişiler: yeni karakter listenin SONUNDA (kanal düzeni kaymasın)", kar[kar.length - 1], "Sera");
+      dogru("kişiler: kullanıcının sırası korunuyor", kar[0] === "Tofi" && kar[1] === "Moni",
+            "kadro: " + kar.join(", "));
+      esit("kişiler: ikinci çağrı hiçbir şey yapmıyor (damga)", KS2.paketBirlestir(kok).durum, "guncel");
+
+      KS2.save(kok, (oku(KS2.DOSYA).kisiler || []).filter(function (x) { return x.karakter !== "Sera"; }));
+      damgaSifirla(KS2.DOSYA);
+      KS2.paketBirlestir(kok);
+      dogru("kişiler: kullanıcının SİLDİĞİ karakter geri gelmiyor",
+            (oku(KS2.DOSYA).kisiler || []).map(function (x) { return x.karakter; }).indexOf("Sera") === -1);
+
+      /* Dosyası HİÇ olmayan kullanıcı: load() zaten varsayılanı veriyor */
+      sil(KS2.DOSYA); sil(SZ.DOSYA);
+      dogru("dosyasız kullanıcı yeni karakteri varsayılandan alıyor (kişiler)",
+            KS2.load(kok).map(function (x) { return x.karakter; }).indexOf("Sera") !== -1);
+      dogru("dosyasız kullanıcı yeni karakteri varsayılandan alıyor (sözlük)",
+            SZ.load(kok).map(function (x) { return x.ad; }).indexOf("Sera") !== -1);
+    } catch (eT) { hata("paket birleştirme testi", eT.message || String(eT)); }
+    try { sil(SZ.DOSYA); sil(KS2.DOSYA); fs.rmdirSync(kok); } catch (e) {}
+
+    /* Panel bu birleştirmeleri GERÇEKTEN çağırıyor mu — yazılmış ama çağrılmayan kod
+       bu projede birkaç kez oldu (ölü fonksiyon). */
+    var appHam = "";
+    try { appHam = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); } catch (e) {}
+    dogru("panel sözlük birleştirmesini çağırıyor", /SZ\.paketBirlestir\(extRoot\)/.test(appHam),
+          "yazıldı ama çağrılmıyor — yeni isim kimseye ulaşmaz");
+    dogru("panel kişi birleştirmesini çağırıyor", /KISI\.paketBirlestir\(extRoot\)/.test(appHam),
+          "yazıldı ama çağrılmıyor — yeni karakter kimseye ulaşmaz");
+    /* ⚠ SIRA: birleştirme load()'DAN ÖNCE olmalı, yoksa state eski listeyi tutar ve yeni
+       karakter ancak panel bir daha açılınca görünür. */
+    dogru("sözlük birleştirmesi load()'dan ÖNCE",
+          appHam.indexOf("SZ.paketBirlestir(extRoot)") < appHam.indexOf("state.dict = SZ.load(extRoot)"),
+          "sonra çağrılıyor — yeni isim ancak bir sonraki açılışta görünür");
+    dogru("kişi birleştirmesi load()'dan ÖNCE",
+          appHam.indexOf("KISI.paketBirlestir(extRoot)") < appHam.indexOf("state.kisiler = KISI.load(extRoot)"),
+          "sonra çağrılıyor — yeni karakter ancak bir sonraki açılışta görünür");
+  })();
+
   /* ---- 13. PNG: APNG SESSİZCE BOZULMASIN ---- */
   /* GERÇEK HATA: animasyon chunk'ları (acTL/fcTL/fdAT) yan chunk sayılıp IDAT'ın ÖNÜNE
      taşınıyor, fdAT içindeki piksel verisi aynalanmadan kalıyordu — geçersiz APNG üretilip
