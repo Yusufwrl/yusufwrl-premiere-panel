@@ -4488,6 +4488,10 @@
               sesKanalSayisi: 0,
               cekenKontrol: null,   // çekenin kendi kaydının A1'e göre gecikmesi (çapraz kontrol)
               uyariMetni: "",       // tablonun üstünde kalıcı gösterilecek kritik uyarı (eşleşme kaynaklı)
+              /* ⚠ Craig kayıtları timeline'a GERÇEKTEN kondu mu. AutoCut buna bakıyor:
+                 konmadıysa o kişilerin konuştuğu yerler "sessizlik" sayılıp KESİLİR
+                 (ParsMazi, 16 Ağustos 2026 — "tüm cutlar boşa gitti"). */
+              uygulandi: false,
               a2Uyari: "" };        // A2 referansı okunamadıysa (o çalıştırmaya ait) uyarı
   var _snkMax = 0;
 
@@ -4684,7 +4688,25 @@
        gidiyordu (#snkLog varsayılan olarak kapalı); kullanıcı hiç görmüyordu. Artık tablonun
        üstündeki uyarı satırında da görünür. */
     snk.uyariMetni = "";
-    if (!snk.cekenDosya && bilinmeyen.length) {
+    /* ⚠⚠ AYNI DISCORD ADI İKİ KARAKTERDE — EN PAHALI SESSİZ HATA, EN ÖNDE UYAR.
+       KISI.bul listeyi baştan tarayıp İLK eşleşeni döndürüyor; aynı ad iki karakterdeyse
+       kayıt sessizce YANLIŞ kişiye gidiyor ve doğru kişi "videoda yok" görünüyor.
+       GERÇEKTEN OLDU (ParsMazi, 16 Ağustos 2026): Sera'nın kaydı ("4-juiced.aac")
+       eşleşmeyince "Bilinmeyen kişi" satırından Niko seçilmiş, "juiced" kalıcı olarak
+       Niko'ya yazılmış. Sera'nın sesi Niko'nun kanalına kondu, Sera'nın kendi kanalı hiç
+       açılmadı ve AutoCut onun konuştuğu yerleri SESSİZLİK sanıp KESTİ — kullanıcının
+       bütün kesimleri boşa gitti. Tek satırlık bir uyarı bunu baştan önlerdi. */
+    try {
+      var _cak = (KISI && KISI.yinelenenAdlar) ? KISI.yinelenenAdlar(state.kisiler) : [];
+      if (_cak.length) {
+        snk.uyariMetni = "⚠ AYNI DISCORD ADI İKİ KİŞİDE: " +
+          _cak.map(function (c) { return "“" + c.ad + "” → " + c.birinci + " ve " + c.ikinci; }).join(" · ") +
+          ". Kayıt " + _cak[0].birinci + "'e gider, " + _cak[0].ikinci + " “videoda yok” görünür ve " +
+          "AutoCut onun konuşmasını kesebilir. Aşağıdaki “Kişiler” listesinden yanlış olandan sil.";
+        snkLog("UYARI: " + snk.uyariMetni);
+      }
+    } catch (eCak) {}
+    if (!snk.uyariMetni && !snk.cekenDosya && bilinmeyen.length) {
       snk.uyariMetni = "⚠ " + ceken + " adına kayıtlı dosya bulunamadı. Bilinmeyenlerden biri SENİN kaydınsa " +
         "onu yerleştirme — sesin zaten A1'de, videoda çift/yankılı çıkar. Kişi listesine Discord adını ekleyip tekrar dene.";
       snkLog("UYARI: " + snk.uyariMetni);
@@ -5254,6 +5276,9 @@
           "kanal başlığına sağ tıklayıp uygun tipte yeni bir ses kanalı ekleyip tekrar dene.", "Senkron");
         return;
       }
+      /* ⚠ AutoCut bu bayrağa bakıyor: Craig kayıtları timeline'a KONMADAN kesim yapılırsa
+         o kişilerin konuştuğu yerler "sessizlik" sayılıp kesilir (bkz. AutoCut'taki kapı). */
+      snk.uygulandi = true;
       snkDone("Bitti — " + sonucStr.replace(/^ok:/, "") +
               (hizalanamayan.length ? " (" + hizalanamayan.length + " dosya hizalanamadı, konmadı)" : ""));
 
@@ -5606,6 +5631,40 @@
       ? ("\n\n⚠ " + acCuts.length + " kesim çok fazla — bu işlem uzun sürebilir. İptal edip “En kısa boşluk” " +
          "değerini büyütmen (ör. 0.3 sn) neredeyse aynı süreyi kazandırır ama çok daha hızlı biter.")
       : "";
+    /* ⚠⚠ YERLEŞTİRİLMEMİŞ CRAIG KAYDI VARKEN KESME — "TÜM CUTLAR BOŞA GİTTİ" BURADAN ÇIKTI.
+       GERÇEKTEN OLDU (ParsMazi, 16 Ağustos 2026): Sera'nın Craig kaydı eşleşmediği için
+       timeline'a HİÇ konmamıştı. AutoCut yalnız timeline'daki sesi analiz ediyor; o yüzden
+       Sera'nın konuştuğu bölümler "hiç kimse konuşmuyor" sayıldı ve KESİLDİ. Kullanıcının
+       bütün kesimleri çöp oldu ve geri alması Ctrl+Z ile onlarca adım sürdü.
+       Panel bunu BİLİYORDU (Senkron planında o dosya "Bilinmeyen kişi" satırında duruyordu)
+       ama iki kart birbirine hiç bakmıyordu. Tek soru bütün kaybı önlerdi.
+       ⚠ ENGELLEMİYOR, SORUYOR: kullanıcı bilerek de kesiyor olabilir (o kişi gerçekten
+       videoda olmayabilir). Ama sessizce geçmek, bedeli en yüksek seçenekti. */
+    try {
+      var _sebep = "", _liste = [];
+      if (snk && snk.dosyalar && snk.dosyalar.length && !snk.uygulandi) {
+        /* Craig klasörü seçilmiş ama "Uygula"ya HİÇ basılmamış: arkadaşların sesi
+           timeline'da YOK, yalnız senin OBS mikrofonun var. */
+        _sebep = "Senkron kartında " + snk.dosyalar.length + " Craig kaydı seçili ama " +
+                 "“Uygula”ya BASILMAMIŞ — o sesler timeline'da yok.";
+      } else if (snk && snk.plan && snk.plan.length) {
+        /* Uygulandı ama bazı kayıtlar hizalanamadığı için KONMADI (yerlesecek filtresi
+           onları eliyor). "Bilinmeyen kişi" satırları KONUYOR, o yüzden listeye girmez. */
+        snk.plan.forEach(function (p) {
+          if (p && p.dosya && p.hizaHata) _liste.push(p.dosya.dosya);
+        });
+        if (_liste.length) _sebep = _liste.length + " Craig kaydı hizalanamadığı için timeline'a KONMADI:\n" +
+                                    _liste.slice(0, 5).join("\n") + (_liste.length > 5 ? "\n…" : "");
+      }
+      if (_sebep) {
+        if (!(await uiConfirm(
+            "⚠ " + _sebep + "\n\n" +
+            "AutoCut yalnız TIMELINE'DAKİ sesi dinler. Timeline'da olmayan kişilerin " +
+            "konuştuğu yerler “sessizlik” sayılır ve KESİLİR — seslerini sonradan eklersen " +
+            "boşluğa düşer ve bütün kesimler boşa gider.\n\n" +
+            "Önce Senkron'u tamamlaman önerilir.\n\nYine de kesmek istiyor musun?", "AutoCut"))) return;
+      }
+    } catch (eYk) {}
     if (!(await uiConfirm(acCuts.length + " boşluk kesilecek (~" + _secTxt + " kısalır)." + _uyari +
         "\n\nSekans dışı / kayıt boşluğu olanlar otomatik atlanır. Kesimden ÖNCE kaydet; geri almak için Ctrl+Z (birden çok kez gerekebilir).", "Boşlukları Kes"))) return;
     btn.disabled = true;   // çift-tık koruması: kesim sürerken tekrar tetiklenmesin

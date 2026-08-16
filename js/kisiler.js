@@ -41,7 +41,18 @@ var VARSAYILAN = [
      Doğrusu panelden bakmak: Senkron → Craig klasörünü seç → dosya adlarında ne yazıyorsa
      "Kişiler" kutusuna onu ekle. Liste SIRASI ses kanalı sırasını belirliyor, Sera en sonda
      olduğu için mevcut kadronun kanal düzeni DEĞİŞMİYOR. */
-  { karakter: "Sera", adlar: ["sera"], renk: 4 }
+  /* ⚠ Discord adları ÖLÇÜLDÜ (kullanıcının gönderdiği profil, 16 Ağustos 2026):
+     görünen ad "Kawakami" · kullanıcı adı "juiceoi" · takma adlar "Eybep", "Juic…"
+     Craig dosyası "4-juiced.aac" olarak geldi — yani KAYIT ANINDAKİ görünen ad "juiced"di.
+     Craig dosyayı o anki görünen adla adlandırıyor ve o ad değişebiliyor; bu yüzden bilinen
+     bütün varyantlar burada.
+     ⚠⚠ "juiced" BAŞKA BİR KARAKTERE DE ATANMIŞ OLABİLİR. ParsMazi'de tam bu oldu: dosya
+     eşleşmeyince "Bilinmeyen kişi" satırından NİKO seçilmiş ve "juiced" kalıcı olarak
+     Niko'nun adlarına yazılmış. Sonuç: Sera'nın sesi Niko sanıldı, Sera "videoda yok"
+     göründü ve AutoCut onun konuşmasını SESSİZLİK sayıp KESTİ — bütün kesimler boşa gitti.
+     Aynı ad iki karakterde varsa `bul()` LİSTEDE ÖNCE GELENİ döndürür (Niko, Sera'dan önce).
+     Bu yüzden aşağıya yinelenen-ad denetimi eklendi (`yinelenenAdlar`). */
+  { karakter: "Sera", adlar: ["juiced", "juiceoi", "kawakami", "eybep", "sera"], renk: 4 }
 ];
 
 /* Karşılaştırma normali.
@@ -306,9 +317,12 @@ function paketBirlestir(extRoot) {
   if (!j.kisiler.length) return { durum: "bos-birakilmis", eklenen: [] };
   if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
 
-  var eklenen = [], var_ = {}, i;
+  var eklenen = [], catismalar = [], var_ = {}, indeks = {}, i;
   for (i = 0; i < j.kisiler.length; i++) {
-    if (j.kisiler[i] && j.kisiler[i].karakter) var_[_norm(j.kisiler[i].karakter)] = 1;
+    if (j.kisiler[i] && j.kisiler[i].karakter) {
+      var_[_norm(j.kisiler[i].karakter)] = 1;
+      indeks[_norm(j.kisiler[i].karakter)] = i;
+    }
   }
   var silinenSet = {};
   try {
@@ -316,21 +330,78 @@ function paketBirlestir(extRoot) {
       for (i = 0; i < j.silinenVarsayilanlar.length; i++) silinenSet[_norm(j.silinenVarsayilanlar[i])] = 1;
     }
   } catch (eS) {}
+  /* HANGİ Discord adı ZATEN hangi karaktere ait? Yeni ad eklerken buna bakılıyor. */
+  var adSahibi = {};
+  for (i = 0; i < j.kisiler.length; i++) {
+    var kk = j.kisiler[i]; if (!kk || !kk.adlar) continue;
+    for (var z = 0; z < kk.adlar.length; z++) adSahibi[_norm(kk.adlar[z])] = kk.karakter;
+  }
   VARSAYILAN.forEach(function (v) {
     var k = _norm(v.karakter);
-    if (var_[k] || silinenSet[k]) return;
-    j.kisiler.push({ karakter: v.karakter, adlar: (v.adlar || []).slice(), renk: v.renk || 0 });
-    eklenen.push(v.karakter);
+    if (silinenSet[k]) return;                       // bilerek silmiş — diriltme
+    if (!var_[k]) {
+      j.kisiler.push({ karakter: v.karakter, adlar: (v.adlar || []).slice(), renk: v.renk || 0 });
+      eklenen.push(v.karakter);
+      (v.adlar || []).forEach(function (a) { adSahibi[_norm(a)] = v.karakter; });
+      return;
+    }
+    /* ⚠⚠ KARAKTER ZATEN VARSA DISCORD ADLARI DA BİRLEŞTİRİLİR — eskiden bu dal `return`
+       ediyordu ve pakete sonradan eklenen bir Discord adı MEVCUT kullanıcıya ULAŞMIYORDU.
+       Gerçek vaka (ParsMazi, 16 Ağustos 2026): Sera kadroya birleştirmeyle geldi ama
+       `adlar` boş taban ("sera") ile geldi; gerçek adı ("juiced") sonradan pakete eklendi
+       ve ona hiç gitmezdi.
+       ⚠ BAŞKA KARAKTERE AİT BİR AD EKLENMEZ. Aksi hâlde aynı Discord adı iki karakterde
+       birden olur ve `bul()` listede ÖNCE geleni döndürür — yani sessizce YANLIŞ kişiye
+       eşleşir. Böyle bir çakışma varsa ad eklenmiyor, `catisma` olarak RAPORLANIYOR ve
+       kullanıcıya söyleniyor (panel bunu uyarı satırında gösteriyor). */
+    var hedef = j.kisiler[indeks[k]];
+    if (!hedef.adlar) hedef.adlar = [];
+    (v.adlar || []).forEach(function (a) {
+      var an = _norm(a);
+      var sahip = adSahibi[an];
+      if (sahip && _norm(sahip) !== k) { catismalar.push({ ad: a, sahip: sahip, olmasiGereken: v.karakter }); return; }
+      if (sahip) return;                               // zaten bu karakterde
+      hedef.adlar.push(a); adSahibi[an] = v.karakter;
+      eklenen.push(v.karakter + ": " + a);
+    });
   });
   j.pkgSurum = PAKET_SURUM;
   try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
-  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, hata: String((e2 && e2.message) || e2) }; }
-  return { durum: "birlestirildi", eklenen: eklenen };
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, catismalar: catismalar, hata: String((e2 && e2.message) || e2) }; }
+  return { durum: "birlestirildi", eklenen: eklenen, catismalar: catismalar };
+}
+
+/* ⚠⚠ AYNI DISCORD ADI İKİ KARAKTERDE — SESSİZ VE ÇOK PAHALI BİR HATA.
+   `bul()` listeyi baştan tarayıp İLK eşleşeni döndürüyor. Aynı ad iki karakterde varsa
+   kayıt sessizce YANLIŞ kişiye gider; doğru kişi ise "videoda yok" görünür, kanal açılmaz.
+   GERÇEKTEN OLDU (ParsMazi, 16 Ağustos 2026): Sera'nın Craig kaydı ("4-juiced.aac")
+   eşleşmeyince "Bilinmeyen kişi" satırından NİKO seçilmiş ve "juiced" kalıcı olarak
+   Niko'nun adlarına yazılmış. Sonuç zinciri:
+     · Sera'nın sesi Niko'nun kanalına kondu,
+     · Sera "videoda yok" sayıldı, kendi kanalı hiç açılmadı,
+     · AutoCut Sera'nın konuştuğu yerleri SESSİZLİK sanıp KESTİ,
+     · kullanıcının bütün kesimleri boşa gitti ("tüm cutlar boşa gitti").
+   Panel bunu ekranda söylemeli — bu fonksiyon o denetimi yapıyor. */
+function yinelenenAdlar(liste) {
+  var sahip = {}, cakisan = [], i, j2, k, an;
+  liste = liste || [];
+  for (i = 0; i < liste.length; i++) {
+    k = liste[i]; if (!k || !k.adlar) continue;
+    for (j2 = 0; j2 < k.adlar.length; j2++) {
+      an = _norm(k.adlar[j2]);
+      if (!an) continue;
+      if (sahip[an] && sahip[an] !== k.karakter) {
+        cakisan.push({ ad: k.adlar[j2], birinci: sahip[an], ikinci: k.karakter });
+      } else if (!sahip[an]) { sahip[an] = k.karakter; }
+    }
+  }
+  return cakisan;
 }
 
 module.exports = {
   load: load, save: save, defaults: defaults,
   paketBirlestir: paketBirlestir, PAKET_SURUM: PAKET_SURUM,
+  yinelenenAdlar: yinelenenAdlar,
   parseText: parseText, toText: toText,
   adCikar: adCikar, bul: bul, karakterBul: karakterBul, ekKirp: _ekKirp,
   LABELLER: LABELLER, DOSYA: DOSYA,

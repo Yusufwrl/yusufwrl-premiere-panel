@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="7.0" ExtensionBundleId="com.yusufwrl.premierepanel"
-    ExtensionBundleVersion="1.27.0" ExtensionBundleName="Yusufwrl Premiere"
+    ExtensionBundleVersion="1.28.0" ExtensionBundleName="Yusufwrl Premiere"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
     <Extension Id="com.yusufwrl.premierepanel.main" Version="1.0.0" />

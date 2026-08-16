@@ -572,6 +572,63 @@ function bitir() {
           "sonra çağrılıyor — yeni karakter ancak bir sonraki açılışta görünür");
   })();
 
+  /* ---- 12c. AYNI DISCORD ADI İKİ KARAKTERDE — SESSİZ VE ÇOK PAHALI ----
+     GERÇEKTEN OLDU (ParsMazi, 16 Ağustos 2026): Sera'nın Craig kaydı ("4-juiced.aac")
+     eşleşmeyince "Bilinmeyen kişi" satırından NİKO seçilmiş ve "juiced" kalıcı olarak
+     Niko'nun adlarına yazılmış. `bul()` listeyi baştan tarayıp İLK eşleşeni döndürdüğü ve
+     Niko listede Sera'dan önce olduğu için:
+       · Sera'nın sesi Niko'nun kanalına kondu,
+       · Sera "videoda yok" sayıldı, kendi kanalı hiç açılmadı,
+       · AutoCut onun konuştuğu yerleri SESSİZLİK sanıp KESTİ,
+       · kullanıcının bütün kesimleri boşa gitti ("tüm cutlar boşa gitti").
+     Tek satırlık bir uyarı bunu baştan önlerdi. */
+  baslik("Aynı Discord adı iki karakterde (sessiz yanlış eşleşme)");
+  (function () {
+    var KS3;
+    try { KS3 = require(path.join(KOK, "js", "kisiler.js")); } catch (e) { hata("kisiler.js", e.message); return; }
+    if (typeof KS3.yinelenenAdlar !== "function") { hata("yinelenenAdlar dışa açık değil"); return; }
+
+    /* ParsMazi'nin durumu birebir */
+    var cakisik = [{ karakter: "Tofi", adlar: ["yusufwrl"] },
+                   { karakter: "Niko", adlar: ["pompa456", "juiced"] },
+                   { karakter: "Sera", adlar: ["juiced", "juiceoi"] }];
+    var c = KS3.yinelenenAdlar(cakisik);
+    esit("çakışma bulundu", c.length, 1);
+    esit("çakışan ad doğru", c.length ? c[0].ad : "", "juiced");
+    dogru("iki sahip de raporlanıyor",
+          c.length && c[0].birinci === "Niko" && c[0].ikinci === "Sera",
+          JSON.stringify(c[0] || {}));
+    /* Neden tehlikeli olduğunun KANITI: bul() yanlış kişiyi döndürüyor. */
+    esit("bul() listede ÖNCE geleni döndürüyor (yanlış kişi)",
+         (KS3.bul(cakisik, "juiced") || {}).karakter, "Niko");
+    esit("temiz listede çakışma yok",
+         KS3.yinelenenAdlar([{ karakter: "Tofi", adlar: ["a"] }, { karakter: "Sera", adlar: ["b"] }]).length, 0);
+    /* Aynı karakterde aynı adın iki kez yazılması çakışma DEĞİL (zararsız tekrar). */
+    esit("aynı karakterdeki tekrar çakışma sayılmıyor",
+         KS3.yinelenenAdlar([{ karakter: "Sera", adlar: ["juiced", "juiced"] }]).length, 0);
+
+    /* Panel bunu EKRANDA söylüyor mu — sessiz kalması bu hatanın ta kendisiydi. */
+    var ah = "";
+    try { ah = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); } catch (e) {}
+    dogru("panel çakışmayı Senkron kartında gösteriyor",
+          /KISI\.yinelenenAdlar\(state\.kisiler\)/.test(ah),
+          "denetim yazıldı ama panel çağırmıyor — kullanıcı yine göremez");
+    dogru("uyarı metni ne yapılacağını söylüyor",
+          /AYNI DISCORD ADI İKİ KİŞİDE/.test(ah));
+
+    /* ---- AutoCut kapısı: timeline'da OLMAYAN ses kesilmesin ---- */
+    dogru("AutoCut, Senkron uygulanmadan kesime karşı uyarıyor",
+          /snk\.dosyalar\.length && !snk\.uygulandi/.test(ah),
+          "uyarı yok — arkadaşların sesi timeline'da yokken kesim yapılır ve konuşmaları silinir");
+    dogru("AutoCut, hizalanamayıp KONMAMIŞ kayıtları da sayıyor",
+          /p\.hizaHata\) _liste\.push/.test(ah));
+    dogru("snk.uygulandi başarılı yerleştirmede kuruluyor",
+          /snk\.uygulandi = true/.test(ah),
+          "bayrak hiç true olmuyor — kapı her seferinde yanlış alarm verir");
+    dogru("snk.uygulandi başlangıçta false",
+          /uygulandi: false/.test(ah));
+  })();
+
   /* ---- 13. PNG: APNG SESSİZCE BOZULMASIN ---- */
   /* GERÇEK HATA: animasyon chunk'ları (acTL/fcTL/fdAT) yan chunk sayılıp IDAT'ın ÖNÜNE
      taşınıyor, fdAT içindeki piksel verisi aynalanmadan kalıyordu — geçersiz APNG üretilip
