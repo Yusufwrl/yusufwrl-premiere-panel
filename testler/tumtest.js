@@ -1769,6 +1769,62 @@ function bitir() {
           "Fren devreye girince 'Gir' düğmesi sessiz bir no-op oluyor.");
   })();
 
+  /* ========== 24. SAGE VARYANTLARI (ParsMazi'nin gerçek kayıtlarından, 18 Ağustos 2026) ==========
+     ParsMazi motorun "Sage" için ürettiği yanlış yazımları tek tek yazıp gönderdi.
+     Liste sözlüğe girdi; bu bölüm ikisini birden kilitliyor:
+       (a) gönderdiği her yazım GERÇEKTEN düzeliyor mu,
+       (b) gerçek Türkçe kelime olan "saç" listeye GERİ GİRMEDİ mi.
+     (b) şart: ölçüldü, eklenseydi "saç kesimi güzel olmuş" -> "Sage kesimi güzel olmuş" oluyordu. */
+  baslik("Sage varyantları (ParsMazi listesi) ve 'saç' tuzağı");
+  (function () {
+    var SZ = null;
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); } catch (e) {}
+    dogru("sozluk.js yüklendi", !!(SZ && SZ.defaults && SZ.buildMap && SZ.fixText));
+    if (!SZ || !SZ.defaults) return;
+
+    var varsayilan = SZ.defaults();
+    var harita = SZ.buildMap(varsayilan);
+    var adlar = varsayilan.map(function (x) { return x.ad; });
+    dogru("Sage varsayılan sözlükte var", adlar.indexOf("Sage") > -1,
+          "Sage yok — ParsMazi'nin en çok şikâyet ettiği isim düzeltilmiyor demektir.");
+
+    /* ParsMazi'nin gönderdiği yazımların TAMAMI (saç HARİÇ — o bilerek dışarıda). */
+    var liste = ["Sej", "Sace", "Saje", "Saqe", "Sagee", "Sagge", "Sgae", "Sge", "Saage",
+                 "Sega", "Sege", "Sagi", "Seyc", "Seyj", "seyç", "sayge", "seyiç"];
+    var tutmayan = [];
+    for (var i = 0; i < liste.length; i++) {
+      if (SZ.fixText(liste[i], harita) !== "Sage") tutmayan.push(liste[i]);
+    }
+    dogru("ParsMazi'nin " + liste.length + " yazımının hepsi Sage'e düzeliyor", tutmayan.length === 0,
+          "düzelmeyenler: " + JSON.stringify(tutmayan));
+
+    /* ⚠ ASIL NÖBETÇİ: gerçek Türkçe kelimeler bozulmamalı. "saç" listeye eklenirse bu düşer. */
+    var masum = ["saç", "saçım uzun", "saç kesimi güzel olmuş", "saçlarını kestirmiş",
+                 "mini etek", "mani oldu", "sıra bende", "seri üretim", "dara ağırlığı"];
+    var bozulan = [];
+    for (var j = 0; j < masum.length; j++) {
+      if (SZ.fixText(masum[j], harita) !== masum[j]) bozulan.push(masum[j]);
+    }
+    dogru("masum Türkçe kelimeler bozulmuyor (özellikle 'saç')", bozulan.length === 0,
+          "bozulanlar: " + JSON.stringify(bozulan) + "  — gerçek kelimeye benzeyen varyant eklenmiş olabilir.");
+
+    /* Diğer karakterlere de aynı kalıplar uygulandı; birer örnekle kilitle. */
+    var ornek = [["tofe", "Tofi"], ["toffie", "Tofi"], ["monee", "Moni"], ["monni", "Moni"],
+                 ["doraa", "Dora"], ["thora", "Dora"], ["mimee", "Mimi"], ["niiko", "Niko"],
+                 ["serah", "Sera"]];
+    var eksik = [];
+    for (var k = 0; k < ornek.length; k++) {
+      if (SZ.fixText(ornek[k][0], harita) !== ornek[k][1]) eksik.push(ornek[k][0]);
+    }
+    dogru("diğer karakterlerin yeni varyantları da çalışıyor", eksik.length === 0,
+          "çalışmayanlar: " + JSON.stringify(eksik));
+
+    /* ⚠ DAMGA: paket sürümü artmazsa yeni varyantlar MEVCUT kullanıcıya (ParsMazi dahil)
+       hiç ulaşmaz — güncelleme yüklenir, sözlük eski kalır. Sessiz ve pahalı bir hata. */
+    dogru("PAKET_SURUM artırıldı (yeni varyantlar mevcut kullanıcıya ulaşsın)", SZ.PAKET_SURUM >= 2,
+          "Damga 1'de kalmış — paketBirlestir bir daha çalışmaz ve varyantlar kimseye gitmez.");
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");

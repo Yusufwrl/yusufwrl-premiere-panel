@@ -21,12 +21,42 @@ var DOSYA = "sozluk.json";
    böylece "tofi" -> "Tofi" (büyük harf düzeltmesi) de yapılır.
    DİKKAT: gerçek Türkçe kelimelere benzeyen varyant EKLEME — masum kelimeler bozulur
    (ör. "mini" -> Mimi, "mani" -> Moni gibi eşleşmeler bilerek listeye alınmadı). */
+/* ⚠ VARYANT LİSTESİ 18 AĞUSTOS 2026'DA GENİŞLETİLDİ — kaynak: ParsMazi'nin gerçek kayıtları.
+   O, motorun "Sage" için ürettiği yanlış yazımları tek tek yazıp gönderdi; diğer karakterlere
+   de aynı KALIPLAR uygulandı. Motorun Türkçe dinlerken yaptığı dört tip hata:
+     1. ünsüz kayması : g→c/j/q  (sace · saje · saqe) · k→c (nico) · t→d (dofi)
+     2. harf ikizleme : sagee · sagge · saage · monni · mimee
+     3. harf düşmesi  : sgae · sge · tofi→tofe
+     4. kulaktan yazım: seyç · sayge · seyiç  (Türkçe okunuşun harfe dökülmesi)
+   ⚠ Yeni varyant eklerken bu listenin ÜSTÜNDEKİ kuralı uygula: gerçek Türkçe kelimeye
+   benzeyen varyant EKLENMEZ. */
 var VARSAYILAN = [
-  { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi"] },
-  { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni"] },
-  { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra"] },
-  { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi"] },
-  { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko"] },
+  { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi",
+                          "tofe", "tofii", "toffie", "tovi", "topfi", "tofhi", "tofii", "dofy"] },
+  { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni",
+                          "monee", "monni", "monyi", "mohni", "monny", "moniy"] },
+  { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra",
+                          "doraa", "tohra", "thora", "dhora", "torra"] },
+  { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi",
+                          "mimee", "mimii", "meemi", "mimmie", "mimii"] },
+  { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko",
+                          "niiko", "nikoh", "nikho", "nikoe"] },
+  /* ⚠⚠ SAGE — LİSTE PARSMAZI'DEN GELDİ (18 Ağustos 2026), AMA BİR TANESİ ALINMADI.
+     Onun gönderdiği yazımlar: Sej · Sace · Saje · Saqe · Sagee · Sagge · Sgae · Sge · Saage ·
+     Sega · Sege · Sagi · Seyc · Seyj · Saç  (+ önceki mesajda: seyç · sayge · seyiç)
+
+     "SAÇ" BİLEREK ALINMADI — gerçek Türkçe kelime. Gerçek sözlükle ÖLÇÜLDÜ:
+       "saç kesimi güzel olmuş"  →  "Sage kesimi güzel olmuş"
+     Yani listeye konsaydı saçtan bahseden her cümle bozulacaktı. Sage'in adının bir kez
+     yanlış yazılması, masum cümlelerin sürekli bozulmasından ucuzdur (dosyanın en üstündeki
+     kural). Kullanıcı yine de isterse panelden kendi sözlüğüne ekleyebilir.
+
+     ⚠ "SEGA" ALINDI ama farkında ol: Sega bir oyun konsolu markası. Minecraft/Roblox
+     videosunda geçme ihtimali düşük olduğu için Sage'in adını kurtarmak yeğ tutuldu.
+     Şikâyet gelirse ÇIKARILACAK İLK VARYANT BUDUR. */
+  { ad: "Sage", varyant: ["sej", "sace", "saje", "saqe", "sagee", "sagge", "sgae", "sge", "saage",
+                          "sega", "sege", "sagi", "seyc", "seyj", "seyç", "sayge", "seyiç",
+                          "sayc", "sagë", "sa ge"] },
   /* ⚠ SERA — YENİ KARAKTER (16 Ağustos 2026).
      VARYANT SEÇİM KURALI (üstteki uyarının aynısı): gerçek Türkçe kelimeye BENZEYEN varyant
      EKLENMEZ, yoksa masum cümleler bozulur. Bu yüzden bilerek DIŞARIDA bırakılanlar:
@@ -35,7 +65,8 @@ var VARSAYILAN = [
                    listeye ayrıca varyant olarak koymak GEREKMİYOR ve tehlikeli olurdu.
        · "sıra", "seri", "sera"ya yakın her şey → aynı sebep.
      Kalanlar Whisper'ın Türkçe dinlerken üretmesi muhtemel, kelime OLMAYAN yazımlar. */
-  { ad: "Sera", varyant: ["seraa", "serra", "sehra", "seyra", "se ra"] }
+  { ad: "Sera", varyant: ["seraa", "serra", "sehra", "seyra", "se ra",
+                          "serah", "seira", "seraah", "sehraa", "seraa"] }
 ];
 
 /* BİLİNEN İSİMLER — oyun, marka ve süper kahraman adları. Motor Türkçe dinlerken bunları
@@ -477,7 +508,12 @@ function save(extRoot, entries) {
    · Kullanıcı sözlüğü BİLEREK boşalttıysa (entries: []) dokunulmaz.
    · Kullanıcının SİLDİĞİ varsayılan isim DİRİLTİLMEZ (silinenVarsayilanlar).
    ⚠ Pakete yeni isim/varyant eklerken PAKET_SURUM'u ARTIR — yoksa kimseye gitmez. */
-var PAKET_SURUM = 1;
+/* 2 = 18 Ağustos 2026: Sage karakteri eklendi + altı karakterin varyantları genişletildi
+   (kaynak: ParsMazi'nin gerçek kayıtlarından gönderdiği yanlış yazımlar).
+   ⚠ ARTIRILMASI ŞART OLDUĞU İÇİN ARTIRILDI: damga eskisi gibi kalsaydı `paketBirlestir`
+   birleştirmeyi bir daha çalıştırmaz ve yeni varyantlar MEVCUT kullanıcılara (ParsMazi
+   dahil) hiç ulaşmazdı — güncelleme yüklenir, sözlük eski kalırdı. */
+var PAKET_SURUM = 2;
 function paketBirlestir(extRoot) {
   var p = path.join(extRoot, DOSYA), raw, j;
   try {
