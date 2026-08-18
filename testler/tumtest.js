@@ -120,7 +120,12 @@ baslik("PNG aynalama (sol taraf resimleri)");
   var AY;
   try { AY = require(path.join(KOK, "js", "pngayna.js")); } catch (e) { hata("js/pngayna.js yüklenemedi", e.message); return; }
   if (!tarama) { not("kaynak klasör yok, atlandı"); return; }
-  var tmp = path.join(require("os").tmpdir(), "yw-ayna-test");
+  /* ⚠ PID ŞART — KARARSIZ TESTİ BU YAKALADI (18 Ağustos 2026). Ad sabitken iki koşu
+     (ör. paralel bir denetim ajanı + geliştirici) AYNI klasörü kullanıyor: biri bitirip
+     klasörü silerken diğeri yazmaya çalışıyor ve ENOENT alıyor. Kardeş testlerin hepsi
+     zaten PID ekliyor (yw-apng-test-, yw-paket-test-, yw-lisans-test-, yw-cfg-test-);
+     yalnız bu biri atlanmıştı. Kararsız bir test, olmayan bir testten daha zararlıdır. */
+  var tmp = path.join(require("os").tmpdir(), "yw-ayna-test-" + process.pid);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   fs.mkdirSync(tmp, { recursive: true });
   var basarisiz = [];
@@ -1405,21 +1410,363 @@ function bitir() {
     dogru("koşul 'negatif' şartını içeriyor", /p\.offset\s*<\s*-0\.01/.test(blok),
           "Negatif şartı yok — pozitif aykırılar da gereksiz yere medyana çekilir.");
 
-    /* Güvenli referans HER İKİ kaynaktan da türetilebilmeli: çok dosyada medyan, tek dosyada
-       çekenin kendi ölçümü. Yalnız medyana bakan bir sürüm tek dosyalık senkronda (en sık
-       senaryo: sen + tek arkadaş) sessizce devre dışı kalırdı. */
+    /* ⚠⚠ BURADAKİ ESKİ KONTROLLER DİZGE ARIYORDU VE HATAYI KAÇIRDI (18 Ağustos 2026).
+       Eski hâli `var guvenliOfs`'tan sonraki 320 karakterde "tut.medyan" ve "cekenKontrol"
+       DİZGELERİNİ arıyordu. İkisi de yerindeydi, test YEŞİLDİ ve koruma yine de yalnız 3+
+       dosyada çalışıyordu: `tut.medyan` AYKIRI ölçümleri de içerdiği için 2 dosyada çöp ölçüm
+       medyanı kirletiyor, 1 dosyada ise medyan güvenilmez ölçümün TA KENDİSİ oluyordu.
+       Ders: bir POLİTİKA dizge aramayla doğrulanamaz. Politika artık saf bir fonksiyon
+       (`HIZ.guvenliKayma`) ve aşağıda GERÇEK SAYILARLA ölçülüyor. Buraya bir daha dizge
+       kontrolü ekleme — davranışı ölç. */
     var iRef = src.indexOf("var guvenliOfs");
     dogru("güvenli referans tanımlı", iRef > -1);
-    var refBlok = iRef > -1 ? src.slice(iRef, iRef + 320) : "";
-    dogru("güvenli referans medyanı kullanıyor", /tut\.medyan/.test(refBlok));
-    dogru("güvenli referans tek dosyada çekenin ölçümüne düşüyor", /cekenKontrol/.test(refBlok),
-          "Tek dosyalık senkronda medyan yok; cekenKontrol yedeği olmadan güvenlik ağı çalışmaz.");
+    dogru("güvenli referans saf fonksiyondan geliyor (dizge değil, davranış test edilebilsin)",
+          /HIZ\.guvenliKayma\(/.test(src),
+          "guvenliOfs yeniden app.js içinde hesaplanıyor — o zaman aşağıdaki davranış testleri onu ölçmez.");
+
+    var HIZM = null;
+    try { HIZM = require(path.join(KOK, "js", "hizala.js")); } catch (e) {}
+    dogru("hizala.js yüklendi ve guvenliKayma dışa açık", !!(HIZM && typeof HIZM.guvenliKayma === "function"));
+
+    if (HIZM && HIZM.guvenliKayma) {
+      /* Panelin gerçek zincirini taklit et: tutarlilikKontrol aykırıları işaretler ->
+         guvenliKayma referansı seçer -> app.js negatifse kırpar. Kesilen saniyeyi ölç. */
+      var sim = function (offs, capraz) {
+        var lst = offs.map(function (o, i) { return { offset: o, karakter: "K" + i }; });
+        var t = HIZM.tutarlilikKontrol(lst, 0.5, capraz);
+        if (t.tekDosya && capraz != null) {
+          /* app.js'teki çapraz kontrol dalının aynısı (tek dosyada aykırıyı O kuruyor) */
+          for (var c = 0; c < lst.length; c++) {
+            if (Math.abs(lst[c].offset - capraz) > 1.0) lst[c].aykiri = true;
+          }
+        }
+        var g = HIZM.guvenliKayma(lst, capraz);
+        var enCokKesilen = 0, iptalSayisi = 0;
+        lst.forEach(function (p) {
+          var ofs = p.offset;
+          /* ⚠ NÖBETÇİ BURADA KAYNAĞA DUYARLI MODELLENİR — app.js ile AYNI kural:
+             "saglam" (aykırı OLMAYAN ölçümlerin medyanı) negatifse MEŞRUDUR ve kırpma
+             yapılır (Craig OBS'ten önce başlatılmış senaryosu); "ceken"/"yok" negatifse
+             doğrulanmamış tek sayıdır ve KESİLMEZ.
+             Kural bir tur KOŞULSUZ yazıldı ve geçerli senaryoyu bozdu: [-5.0,-5.1,-7.0]
+             örneğinde aykırı dosya 0'a çekilip komşularından 5 sn kayıyordu. */
+          if (p.aykiri && p.offset < -0.01) {
+            iptalSayisi++;
+            ofs = (g.ofs != null) ? g.ofs : 0;
+            if (ofs < -0.01 && g.kaynak !== "saglam") ofs = 0;
+          }
+          if (ofs < -0.01) enCokKesilen = Math.max(enCokKesilen, -ofs);
+        });
+        /* ⚠ ÇÖKME KAPISI: kirpmaIptal > 0 iken guvenliOfs null olabiliyor. app.js bir tur
+           onay metnini `guvenliOfs.toFixed(2)` ile kuruyordu ve bu durumda TypeError
+           fırlatıp SENKRONUN TAMAMINI düşürüyordu (dakikalarca ffmpeg + korelasyon çöpe).
+           Ölçüldü: [-100,-123.48] ve [7.72,-123.48], çapraz kontrol yokken. */
+        sim.sonIptal = iptalSayisi;
+        sim.sonKaynak = g.kaynak;
+        sim.sonOfs = g.ofs;
+        return enCokKesilen;
+      };
+
+      /* Belgelenen gerçek vaka — bu zaten çalışıyordu, gerilemesin diye duruyor. */
+      dogru("4 dosya: aykırı olan kesilmiyor", sim([7.72, 7.76, 7.82, -123.48], null) === 0);
+      dogru("3 dosya: aykırı olan kesilmiyor", sim([7.72, 7.76, -123.48], null) === 0);
+      /* ⚠ ÜÇÜ DE ESKİ KODDA KESİYORDU — bu testler o yüzden var. */
+      dogru("2 dosya: çöp ölçüm kesme TETİKLEMİYOR (eski kod 57.88 sn kesiyordu)",
+            sim([7.72, -123.48], null) === 0,
+            "Çift sayıda ölçümde medyan iki ortanın ORTALAMASI; aykırıları dışarıda bırakmazsan negatif kalır.");
+      dogru("2 dosya, ikisi de negatif: kesme YOK (eski kod ölçülenden FAZLA kesiyordu)",
+            sim([-100.00, -123.48], null) === 0,
+            "Referans ölçümden daha negatif çıkarsa kesilen süre BÜYÜR — nöbetçi bunu durdurmalı.");
+      dogru("1 dosya + çapraz kontrol: kesme YOK (eski kod 123.48 sn kesiyordu)",
+            sim([-123.48], 7.76) === 0,
+            "tekDosya dalında tut.medyan = dosyanın KENDİ güvenilmez ölçümü; cekenKontrol yedeği devreye girmeli.");
+
+      /* Referans seçiminin kendisi */
+      var g1 = HIZM.guvenliKayma([{ offset: 7.72 }, { offset: 7.76 }, { offset: -123.48, aykiri: true }], null);
+      dogru("referans yalnız aykırı OLMAYAN ölçümlerden geliyor", g1.kaynak === "saglam" && Math.abs(g1.ofs - 7.74) < 0.001);
+      var g2 = HIZM.guvenliKayma([{ offset: -123.48, aykiri: true }], 7.76);
+      dogru("hiç sağlam ölçüm yoksa çekenin ölçümüne düşüyor", g2.kaynak === "ceken" && g2.ofs === 7.76);
+      var g3 = HIZM.guvenliKayma([{ offset: -123.48, aykiri: true }], null);
+      dogru("hiçbir kaynak yoksa referans YOK (uydurma değil)", g3.kaynak === "yok" && g3.ofs === null);
+
+      /* ⚠ REGRESYON NÖBETÇİSİ 1 — ÇÖKME. kirpmaIptal > 0 iken referans null olabiliyor;
+         onay metni o değeri okursa senkronun TAMAMI düşer. Metin artık gerçekten yazılan
+         değerden üretiliyor; burada null durumunun GERÇEKTEN oluştuğunu kilitliyoruz ki
+         ileride biri yine `guvenliOfs.toFixed()` yazarsa test bunu hatırlatsın. */
+      sim([-100.00, -123.48], null);
+      dogru("referans YOK durumu gerçekten oluşuyor (onay metni buna hazır olmalı)",
+            sim.sonIptal > 0 && sim.sonOfs === null,
+            "Senaryo değişmiş; çökme kapısı artık bu girdiyle ölçülmüyor.");
+      var appSrc2 = "";
+      try { appSrc2 = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+      var iNot = appSrc2.indexOf("var kirpNot");
+      var notBlok = iNot > -1 ? appSrc2.slice(iNot, iNot + 1200) : "";
+      dogru("onay metni guvenliOfs.toFixed() ÇAĞIRMIYOR (null'da çökerdi)",
+            notBlok.indexOf("guvenliOfs.toFixed") === -1,
+            "Referans null iken TypeError fırlar ve senkronun tamamı düşer.");
+
+      /* ⚠ REGRESYON NÖBETÇİSİ 2 — KAPSAM. Nöbetçi bir tur KOŞULSUZ yazıldı ve Craig'in
+         erken başlatıldığı GEÇERLİ senaryoda aykırı dosyayı 0'a çekip senkronu bozdu. */
+      dogru("doğrulanmış (saglam) negatif referansta kırpma DEVAM ediyor",
+            sim([-5.00, -5.10, -7.00], null) > 4.9,
+            "Nöbetçi kaynağa duyarlı değil — aykırı dosya 0'a çekilip komşularından kayıyor.");
+      dogru("doğrulanmamış (ceken) negatif referansta kırpma YOK",
+            sim([-5.00, -6.00], -5.40) === 0,
+            "Tek/doğrulanmamış sayıya dayanıp ses kesiliyor — korumanın asıl amacı buydu.");
+
+      /* KAPSAM KORUNUYOR: herkes birlikte negatif kaymışsa (Craig OBS'ten önce başlatılmış)
+         kimse aykırı olmaz ve kırpma NORMAL çalışmalı. Bu dalı bozmak, geçerli bir senaryoyu
+         kaybetmek olurdu — CLAUDE.md'de "KAPSAM BİLEREK DAR" diye yazılı. */
+      dogru("herkes birlikte negatifse kırpma çalışmaya DEVAM ediyor",
+            sim([-5.00, -5.02, -4.98], null) > 4.9,
+            "Kapsam genişledi — geçerli 'Craig önce başlatılmış' senaryosunda artık kırpma yapılmıyor.");
+    }
+
+    /* NÖBETÇİ app.js'te de duruyor mu? (Politika iki katmanlı: referans seçimi + koşulsuz fren.) */
+    dogru("app.js'te koşulsuz negatif nöbetçisi duruyor",
+          /kırpma YAPILMADI|kirpmaNobetci/.test(src),
+          "Referans hesabı bir gün yine negatif dönebilir; ikinci katman olmadan ses kesilir.");
 
     /* Kullanıcı bedeli EKRANDA görmeli — asıl şikâyet buydu ("herkeste + yazıyorken serada
        neden - diyor"). Eksi işaretinin ne demek olduğu onay metninde yazmazsa uyarı işe yaramaz. */
     dogru("onay metni eksi işaretinin ne demek olduğunu yazıyor",
           /kaydın BAŞINDAN o kadarı kesilecek/.test(src),
           "İşaret açıklaması yok — kullanıcı -123.48'in '2 dakikan gidiyor' demek olduğunu göremez.");
+  })();
+
+  /* ---- 21. installer.iss [InstallDelete] BAYAT MI (paketteki stili silmesin) ---- */
+  /* GERÇEK RİSK: [InstallDelete] "artık kullanılmıyor" diye stil dosyası siliyor, ama
+     varsayilan/stiller.json zamanla büyüyor ve aynı ad YENİDEN pakete giriyor. Bu gerçekten
+     oldu: blok stil07 (Turuncu) + stil08 (Sarı) siliyordu, oysa stiller.json ikisini de
+     listeliyor ve ikisi de pakette. Şu an zarar YOK çünkü Inno önce siler sonra [Files]
+     yeniden kurar — yani hata SESSİZ: sıra değişirse ya da dosya bir gün [Files]'tan
+     düşerse iki stil kullanıcıya hiç ulaşmaz ve kimse sebebini göremez.
+     KURAL: [InstallDelete] içindeki hiçbir "varsayilan\stiller\*" adı stiller.json'da
+     GEÇMEMELİ. (Silinen ad paketten gerçekten çıkmış olmalı.) */
+  baslik("installer.iss [InstallDelete] stil listesi bayat mı");
+  (function () {
+    var iss = "", stj = null;
+    try { iss = String(fs.readFileSync(path.join(KOK, "installer", "installer.iss"), "utf8")); } catch (e) {}
+    try {
+      stj = JSON.parse(String(fs.readFileSync(path.join(KOK, "varsayilan", "stiller.json"), "utf8"))
+                         .replace(/^﻿/, ""));
+    } catch (e) {}
+    dogru("installer.iss ve varsayilan/stiller.json okundu", !!iss && !!stj, "dosya okunamadı");
+    if (!iss || !stj) return;
+
+    /* [InstallDelete] bölümü: başlıktan bir sonraki [Bölüm] başlığına kadar. */
+    var blok = "";
+    var bm = iss.match(/^\[InstallDelete\]([\s\S]*?)^\[/m);
+    if (bm) blok = bm[1];
+    dogru("[InstallDelete] bölümü bulundu", !!blok);
+
+    /* Yorum satırlarını (;) at — açıklamada geçen stil adı silme EMRİ değildir. */
+    var emirler = blok.split(/\r?\n/).filter(function (s) { return !/^\s*;/.test(s); }).join("\n");
+
+    var silinen = (emirler.match(/varsayilan\\stiller\\([^"\s]+)/g) || []).map(function (x) {
+      return x.replace(/^varsayilan\\stiller\\/, "");
+    });
+    var pakette = stj.map(function (s) { return s.dosya; });
+    var catisan = silinen.filter(function (d) { return pakette.indexOf(d) >= 0; });
+    esit("silinen stil dosyalarının hiçbiri stiller.json'da yok", catisan, []);
+  })();
+
+  /* ================= 22. 18 AĞUSTOS 2026 DENETİMİNİN NÖBETÇİLERİ =================
+     Bu bölümdeki her kontrol o denetimde bulunup düzeltilmiş GERÇEK bir hataya ait.
+     ⚠ ÇOĞU KONUM (SIRA) ÖLÇÜYOR, varlık değil: bu projede "blok duruyor ama yanlış
+     yerde, dolayısıyla sessizce etkisiz" sınıfı iki kez yaşandı (senkron güvenlik bloğu
+     ve emoji temizliği). Sözdizimi geçerli kaldığı için hiçbir araç uyarmıyor. */
+  baslik("18 Ağustos denetiminin düzeltmeleri (nöbetçiler)");
+  (function () {
+    var src = "";
+    try { src = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+    var host = "";
+    try { host = fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"); } catch (e) {}
+    dogru("app.js ve host.jsx okunabildi", src.length > 1000 && host.length > 1000);
+
+    /* --- AutoCut bayatlık freni oturumdan geri gelmeli ---
+       Bayrak yalnız bellekteydi: panel kapanıp açılınca sıfırlanıyor ve kesim sonrası
+       kaymış altyazılar hiç sorulmadan basılıyordu. */
+    dogru("cuesStale oturum dosyasına YAZILIYOR", /cuesStale:\s*!!state\.cuesStale/.test(src),
+          "saveSession bayrağı yazmıyor — panel kapanınca fren kayboluyor.");
+    dogru("cuesStale oturumdan GERİ OKUNUYOR", /o\.cuesStale\s*\|\|\s*kaymis/.test(src),
+          "restoreSession freni kurmuyor — geri yüklenen kaymış altyazılar sorulmadan basılır.");
+    dogru("restoreSession kayma bilgisini parametre olarak alıyor",
+          /function restoreSession\(o,\s*kaymis\)/.test(src) && /restoreSession\(o,\s*kaymis\)/.test(src),
+          "offerSessionRestore kaymayı hesaplayıp çöpe atıyor.");
+
+    /* --- Senkron planı yeniden kurulunca 'uygulandı' düşmeli ---
+       Bayrak bir kez true olunca hiç sıfırlanmıyordu: ikinci videoda AutoCut'ın
+       "Craig kayıtları konmadı" kapısı sessizce devre dışı kalıyor ve arkadaşların
+       konuştuğu bölümler sessizlik sanılıp KESİLİYORDU. */
+    /* ⚠ SIFIRLAMA snkDosyalariOku'DA OLMALI, snkEslestir'DE DEĞİL. Bir tur snkEslestir'e
+       konuldu ve YANLIŞ POZİTİF üretti: o fonksiyon uygulamadan SONRA da çağrılıyor (kişi
+       listesi kaydı, "Bilinmeyen kişi" seçimi, çeken değişimi), yani kayıtlar timeline'da
+       dururken AutoCut "Uygula'ya basılmamış" diye uyarıyordu. Bu kapıda yanlış pozitif
+       özellikle pahalı: kullanıcı onu görmezden gelmeyi öğrenir. */
+    var iOku = src.indexOf("function snkDosyalariOku");
+    var okuBlok = iOku > -1 ? src.slice(iOku, iOku + 1800) : "";
+    dogru("snkDosyalariOku 'uygulandi' bayrağını sıfırlıyor", /snk\.uygulandi\s*=\s*false/.test(okuBlok),
+          "Yeni klasör okunduğu hâlde bayrak true kalıyor — AutoCut kapısı sessizce kapanır.");
+    var iEsl = src.indexOf("function snkEslestir");
+    var eslBlok = iEsl > -1 ? src.slice(iEsl, iEsl + 1400) : "";
+    dogru("snkEslestir bayrağı sıfırlaMIYOR (uygulamadan sonra da çağrılıyor)",
+          !/snk\.uygulandi\s*=\s*false/.test(eslBlok),
+          "Uygula başarılı olduktan sonra kişi listesi düzenlenince AutoCut yanlış uyarır.");
+
+    /* --- Ad normalleştirmesi TEK kural olmalı ---
+       app.js kendi _kn'ini taşıyordu ve küçük noktasız 'ı'yı çevirmiyordu: listede "Tofı"
+       yazan çekenin kendi kaydı eşleşmeyip TIMELINE'A konuyor, videoda ses çift çıkıyordu. */
+    dogru("_kn, KISI.norm'a delege ediyor", /_kn\s*=\s*\(KISI\s*&&\s*KISI\.norm\)/.test(src),
+          "app.js kendi normalleştirmesini taşıyor — dosya eşleşmesiyle iki farklı kural olur.");
+    var KIS = null;
+    try { KIS = require(path.join(KOK, "js", "kisiler.js")); } catch (e) {}
+    dogru("KISI.norm dışa açık", !!(KIS && typeof KIS.norm === "function"));
+    if (KIS && KIS.norm) {
+      dogru("noktasız 'ı' ile yazılan ad, noktalı hâliyle eşleşiyor",
+            KIS.norm("Tofı") === KIS.norm("Tofi") && KIS.norm("TOFİ") === KIS.norm("tofi"),
+            "Craig dosyası çekenin adıyla eşleşmez; kendi kaydı timeline'a konur (çift ses).");
+    }
+
+    /* --- Emoji: İPTAL KAPISI TEMİZLİKTEN ÖNCE OLMAK ZORUNDA ---
+       Eski sıra: yapay zekâ isteği -> eski katmanları SİL -> parça döngüsü -> iptali gör.
+       Kullanıcı iptal ettiğinde timeline'da hiç emoji kalmıyordu (yenisi konmadı, eskisi
+       silinmişti) ve ödenmiş istek de çöpe gidiyordu.
+       ⚠ SIRA ÖLÇÜLÜYOR: kapı temizlikten sonraya taşınırsa sözdizimi geçerli kalır ve
+       koruma sessizce etkisiz olur — senkron güvenlik bloğuyla birebir aynı tuzak. */
+    var iKapi = src.indexOf("İPTAL KAPISI — TEMİZLİKTEN ÖNCE");
+    var iTemiz = src.indexOf("ESKİ KATMANLARI TEMİZLE");
+    var iYukle = src.indexOf("RESİMLERİ TEK SEFERDE PROJEYE AL");
+    dogru("emoji iptal kapısı duruyor", iKapi > -1);
+    dogru("iptal kapısı temizlikten ÖNCE", iKapi > -1 && iTemiz > -1 && iKapi < iTemiz,
+          "Kapı temizlikten sonra — iptal edildiğinde kullanıcının eski emojileri silinmiş olur.");
+    dogru("resim yükleme temizlikten ÖNCE", iYukle > -1 && iTemiz > -1 && iYukle < iTemiz,
+          "Yükleme başarısız olursa eski emoji katmanı zaten silinmiş olur — geri dönüşü yok.");
+
+    /* --- Emoji meşguliyet bayrağı: KOŞULSUZ inmeli ---
+       Bayrak fonksiyonun başında kurulsaydı, araya giren onlarca erken `return`
+       (klasör yok, eşleme kararı yok, onay iptal...) paneli KALICI kilitlerdi. */
+    var iBayrak = src.indexOf("state.emojiCalisiyor = true");
+    var iFinally = src.indexOf("state.emojiCalisiyor = false");
+    dogru("emoji meşguliyet bayrağı kuruluyor", iBayrak > -1);
+    dogru("emoji meşguliyet bayrağı indiriliyor", iFinally > -1 && iFinally > iBayrak,
+          "Bayrak inmiyor — panel kendini kalıcı olarak kilitler.");
+    var arasi = (iBayrak > -1 && iFinally > -1) ? src.slice(iBayrak, iFinally) : "";
+    dogru("bayrak ile finally arasında try var (koşulsuz iniş)", /\btry\s*\{/.test(arasi),
+          "try/finally yoksa hata durumunda bayrak true kalır ve panel kilitlenir.");
+
+    /* --- Emoji varyant kilidi ---
+       Boyutu okunamayan tek bir PNG sırayı kilitliyordu: o duygu+karakter ikilisi
+       videoda BİR DAHA hiç çıkmıyordu ("Mimi hiç gülmüyor"). */
+    dogru("bozuk varyant sırayı ilerletiyor", /varyantSay\[vAnah\]\s*=\s*vSira\s*\+\s*denendi/.test(src),
+          "Sayaç yalnız başarıda artıyorsa bozuk bir PNG o duygu+karakteri kalıcı olarak öldürür.");
+
+    /* --- Hazır içerik atomik yazılmalı ---
+       Yarım yazılan bir PNG "kullanıcı elle değiştirmiş" sayılıp KALICI korunuyordu. */
+    dogru("emoji/stil kopyalama atomik", /function _atomikKopyala/.test(src) &&
+          !/fs\.writeFileSync\(dst,\s*fs\.readFileSync\(src\)\)/.test(src),
+          "Doğrudan writeFileSync kalmış — yarım dosya kalıcı olarak 'kullanıcının dosyası' sanılır.");
+
+    /* --- Öğretilmiş preset'ler fabrika paketiyle ezilmemeli ---
+       Ana dosya yoksa ama .tmp/.bak.yeni/.bak içinde kayıt varsa, paket YAZILMAMALI. */
+    dogru("varsayilanlariKur kurtarma zincirini soruyor", /kurtarmaVar/.test(src),
+          "Yalnız ana dosyaya bakılıyor — yarım kalmış bir yazmadan sonra tüm preset'ler fabrika paketiyle ezilir.");
+    var iKurt = src.indexOf("var yed = presetDosyaOku");
+    var kurtBlok = iKurt > -1 ? src.slice(iKurt, iKurt + 260) : "";
+    dogru("preset kurtarma sırası TAZELİĞE göre (.tmp önce)",
+          kurtBlok.indexOf(".tmp") > -1 && kurtBlok.indexOf(".tmp") < kurtBlok.indexOf("YedekYolu()"),
+          "En eski yedek önce deneniyor — aradaki en yeni preset'ler kaybolur.");
+
+    /* --- preset kaldır/yeniden adlandır: diske yazamazsa YALAN SÖYLEMESİN --- */
+    dogru("presetKaldir yazma hatasını kontrol ediyor",
+          (src.match(/if\s*\(CEP\s*&&\s*presetYiginlarYaz\(\)\s*===\s*false\)/g) || []).length >= 2,
+          "Dönüş yutuluyor — panel 'kaldırıldı' diyor ama kart sonraki açılışta geri geliyor.");
+
+    /* --- AutoCut kesim aşaması da meşgul saymalı --- */
+    var iCut = src.indexOf("$(\"acCut\").addEventListener");
+    /* Pencere 6000: onay metni + uyarilar uzun; bayrak ~4400 karakter sonra geliyor. */
+    var cutBlok = iCut > -1 ? src.slice(iCut, iCut + 6000) : "";
+    dogru("AutoCut kesim aşaması meşguliyet bayrağı kuruyor", /state\.acRunning\s*=\s*true/.test(cutBlok),
+          "Kesim sırasında Senkron/Altyazı çalıştırılabiliyor — timeline kesim altındayken okunur.");
+    dogru("AutoCut kesiminde senkron kapısı var", /snk\.calisiyor/.test(cutBlok));
+
+    /* --- host.jsx _popIn: ÜÇ keyframe'in de dönüşü sayılmalı ---
+       İlk key (Scale 0) tutup sonrakiler düşerse klip 0'da donuyor, yani GÖRÜNMEZ oluyor
+       ve panel yine "ok" diyordu. */
+    var iPop = host.indexOf("function _popIn");
+    var popBlok = iPop > -1 ? host.slice(iPop, iPop + 2600) : "";
+    dogru("_popIn üç keyframe'i de sayıyor", /scOk\s*===\s*3/.test(popBlok),
+          "Yalnız ilk keyframe kontrol ediliyor — klip Scale 0'da donup görünmez kalabilir.");
+    dogru("_popIn tutmayan parametreyi geri sarıyor", /_keyGeriAl\(sc,\s*scOnce\)/.test(popBlok),
+          "Yarım yazılmış animasyon klipte kalıyor.");
+    dogru("_popIn süreyi klibe sığdırıyor", /klipSure/.test(popBlok),
+          "0,2 sn'lik AutoCut klibinde keyframe'ler klip dışına düşer ve sınıra yığılır.");
+
+    /* --- host.jsx: aynı adlı parametreler ayrı hedeflere yazılmalı ---
+       Camera Shake'in beş katmanının adı aynı; _paramBul hep ilkini döndürüyordu. */
+    dogru("indeks kapısı 'adı boş' şartına bağlı DEĞİL",
+          /if\s*\(typeof kayit\.ix === "number"\)/.test(host),
+          "Yalnız adsız parametreler indeksle eşleniyor — aynı adlı katmanlar tek hedefe yazılır.");
+    dogru("indeks kullanılmadan önce AD doğrulanıyor", /adayAd === String\(kayit\.ad \|\| ""\)/.test(host),
+          "Bileşen sürümü değişip indeksler kayarsa yanlış özelliğe yazılır.");
+  })();
+
+  /* ============ 23. DÜZELTMELERİN DÜZELTMELERİ (regresyon turu, 18 Ağustos 2026) ============
+     Bu bölümdeki her kontrol, ÖNCEKİ bölümdeki bir düzeltmenin DOĞURDUĞU hatadan geldi.
+     Bu projede düzeltmeler düzenli olarak yeni hata üretiyor; ayrı bir regresyon turu şart. */
+  baslik("Düzeltmelerin düzeltmeleri (regresyon nöbetçileri)");
+  (function () {
+    var src = "", pipe = "", wrk = "";
+    try { src  = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+    try { pipe = fs.readFileSync(path.join(KOK, "js", "pipeline.js"), "utf8"); } catch (e) {}
+    try { wrk  = fs.readFileSync(path.join(KOK, "sunucu", "worker.js"), "utf8"); } catch (e) {}
+    dogru("kaynaklar okunabildi", src.length > 1000 && pipe.length > 1000 && wrk.length > 1000);
+
+    /* --- AutoCut birleştirme: VARSAYILAN KAPALI ---
+       Dal yıllarca ölüydü (matematik yanlıştı) ve panel öyle çalışıyordu. Matematik
+       düzeltildi ama açık bırakmak DAVRANIŞ değişikliği: zincirleme birleşme, aralarda
+       kalan DUYULUR sesi siliyor. Ölçüldü: 0.12 sn'lik 6 gülme patlaması -> 5'i siliniyor.
+       Kullanıcının gerçek kaydında ölçülmeden varsayılan açılmamalı. */
+    dogru("AutoCut birleştirme varsayılanı KAPALI (0)",
+          /opts\.mergeGap != null\) \? opts\.mergeGap : 0;/.test(pipe),
+          "Varsayılan açık — ölçülmemiş bir davranış değişikliği duyulur ses siliyor.");
+
+    /* --- 'altyazı basıldı' bayrağı: SÜRE kimliğe girmemeli, ESKİ anahtar okunmalı ---
+       Süre girince AutoCut kesimi bayrağı orphan bırakıyor; eksik bayrak = uyarı YOK =
+       ikinci basışta her altyazı ekranda İKİ KEZ (panel caption track silemiyor). */
+    dogru("capBasildi anahtarı SÜRESİZ kimlik kullanıyor", /capBasildi_" \+ \(sekansKimlikSabit\(\)/.test(src),
+          "Süre kimliğe giriyor — timeline kısalınca çift-basış koruması kayboluyor.");
+    dogru("sekansKimlikSabit süreyi KATMIYOR",
+          /function sekansKimlikSabit\(\)[\s\S]{0,240}return \(_oturum\.proje/.test(src) &&
+          !/function sekansKimlikSabit\(\)[\s\S]{0,240}_oturum\.end/.test(src));
+    /* ⚠ REGEX GEVŞEK OLMAMALI: yalnız değişken ADINI aramak yetmiyor — adı duruyor ama
+       OKUNMUYOR olabilir (kasıtlı bozmayla ölçüldü: değişkeni yeniden adlandırmak testi
+       kırmızı yapmadı). Anahtarın gerçekten lsGet ile SORGULANDIĞINI ara. */
+    dogru("eski (proje adsız) anahtar da OKUNUYOR", /lsGet\(capAnahtarEski/.test(src),
+          "Mevcut kullanıcıların bayrağı orphan kalır ve koruma YANLIŞ yönde düşer.");
+
+    /* --- cuesStale: temizlendikten SONRA da diske yazılmalı ---
+       saveSessionAuto üretimin son satırında, bayrağı temizleyen satır ondan SONRA:
+       taze bir üretimde diske cuesStale:true yazılıp yanlış uyarı kalıcılaşıyordu. */
+    var iTemiz = src.indexOf("state.cuesStale = false");
+    var temizBlok = iTemiz > -1 ? src.slice(iTemiz, iTemiz + 200) : "";
+    dogru("cuesStale temizlendikten sonra oturum yeniden kaydediliyor", /saveSession\(\)/.test(temizBlok),
+          "Diske true yazılı kalıyor — panel açılışta yanlış 'kesim öncesi üretildi' diyor.");
+
+    /* --- Proje adı değişirse oturum kaybolmasın --- */
+    dogru("oturum araması proje adı değişimini de tarıyor", /__" \+ guvAd \+ "\.json/.test(src),
+          "Save As / yeniden adlandırma sonrası 30 dakikalık iş sessizce görünmez oluyor.");
+
+    /* --- Emoji klasör uyarısı: düzelince TEMİZLENMELİ --- */
+    dogru("emoji klasör uyarısı başarı dalında temizleniyor", /klasorUyari/.test(src),
+          "Kullanıcı eksik resimleri kurduğu hâlde uyarı ekranda asılı kalıyor.");
+    /* --- Bozuk PNG sayacı dosya başına bir kez --- */
+    dogru("bozuk PNG sayacı dosya başına sayıyor", /bozukSayildi/.test(src),
+          "Tek bir bozuk dosya yüzlerce kez sayılıp teşhis değerini yok ediyor.");
+
+    /* --- Yönetim sayfası: hız freni cevabı görünür olmalı --- */
+    dogru("yönetim sayfası 429 (cok_deneme) cevabını gösteriyor", /cok_deneme"\)\)\{|cok_deneme"\)\) \{/.test(wrk) || /j\.hata === "cok_deneme"/.test(wrk),
+          "Fren devreye girince 'Gir' düğmesi sessiz bir no-op oluyor.");
   })();
 
   /* ---- ÖZET ---- */

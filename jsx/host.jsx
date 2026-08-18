@@ -90,7 +90,15 @@ function getSequenceInfoJSON() {
         dolu.push(n);
     }
     var olcu = _seqOlcu(seq);
-    return '{"sequenceName":"' + _jsonEsc(seq.name) + '","audioTracks":' + av +
+    /* PROJE ADI — sekans adi TEK BASINA kimlik DEGIL. Premiere'in varsayilan adlari
+       ("Video Sequence") projeler arasinda tekrar ediyor; panel oturum dosyasini ve
+       "altyazi basildi" bayragini yalniz sekans adiyla anahtarliyordu, yani BASKA bir
+       projenin oturumu okunabiliyordu. CLAUDE.md bu bosluga isaret edip kokten cozumu
+       de yaziyordu: "oturum dosyasina proje adini da katmak". Okunamazsa bos doner,
+       panel eski davranisa duser (tahmin ETMEZ). */
+    var pAd = "";
+    try { pAd = String(app.project.name || ""); } catch (eP) {}
+    return '{"projectName":"' + _jsonEsc(pAd) + '","sequenceName":"' + _jsonEsc(seq.name) + '","audioTracks":' + av +
            ',"videoTracks":' + vv + ',"durationSec":' + sure.toFixed(3) +
            ',"frameWidth":' + olcu.w + ',"frameHeight":' + olcu.h +
            ',"dikey":' + (olcu.h > olcu.w ? "true" : "false") +
@@ -605,12 +613,28 @@ function _binAdBul(bin, yol) {
        Ust klasor adini da katmak ikisini kesin ayiriyor ("ayna/..." ile "emoji/...").
        ⚠ Bu fonksiyon zaten YALNIZ emoji bin'i icinde ariyor — proje genelinde ad eslesmesi
        yanlis klibi koydurur (bkz. _binYolBul'un basindaki not). */
+    /* ⚠ SON IKI PARCA IKI FARKLI EMOJI KOKUNU AYIRT EDEMIYOR (18 Agustos 2026 denetimi).
+       ".../Edit/Emoji/Mutlu Tofi.png" ile ".../Yedek/Emoji/Mutlu Tofi.png" ayni anahtari
+       uretiyor: projede eski bir Emoji klasorunden kalma oge varsa yeni resim yerine ESKISI
+       konuyor ve panel "basarili" diyor. Bu yuzden UCUNCU parca (buyuk klasor) da —
+       IKISINDE DE varsa — esitlenir.
+       ⚠ Neden tam yol karsilastirmasi DEGIL: bu fonksiyon zaten tam-yol eslesmesi
+       (_haritadaBul) TUTMADIGINDA devreye giren gevsek yedek; tam yola cevirmek onu
+       _binYolBul'un kopyasi yapar ve tek bir yol bicimi farki (surucu harfi buyuk/kucuk,
+       OneDrive onegi, UNC) yuzlerce emojiyi gereksizce yeniden import ettirir. */
     var hedef = _sonIkiParca(yol), i, ch, p;
+    var hParca = String(yol).replace(/\\/g, "/").toLowerCase().split("/");
+    var hUst = (hParca.length >= 3) ? hParca[hParca.length - 3] : "";
     try {
         for (i = 0; i < bin.children.numItems; i++) {
             ch = bin.children[i];
             p = ""; try { p = String(ch.getMediaPath()); } catch (e0) { p = ""; }
-            if (p && _sonIkiParca(p) === hedef) return ch;
+            if (!p || _sonIkiParca(p) !== hedef) continue;
+            var pParca = p.replace(/\\/g, "/").toLowerCase().split("/");
+            var pUst = (pParca.length >= 3) ? pParca[pParca.length - 3] : "";
+            /* Ikisinden biri bilinmiyorsa (kisa yol) eski davranis: yalniz son iki parca. */
+            if (hUst && pUst && hUst !== pUst) continue;
+            return ch;
         }
     } catch (e) {}
     return null;
@@ -1236,7 +1260,13 @@ function stilleriProjeyeAl(klasor) {
         if (!kondu && hata.length) return "err:Ice aktarilamadi — " + hata[0];
 
         if (kondu <= 0) return "err:Premiere bu dosyalari proje ogesi olarak kabul etmedi";
-        return "ok:" + kondu + " stil projeye eklendi" + (zaten ? (" (" + zaten + " zaten vardi)") : "");
+        /* ⚠ KISMI BASARI SESSIZ KALMASIN (18 Agustos 2026 denetimi). Dosyalar BILEREK tek tek
+           import ediliyor (biri reddedilirse digerleri yine eklensin) ama basari mesaji
+           reddedilenleri hic saymiyordu: 8 stilden 5'i eklendiginde panel yesil "5 stil
+           projeye eklendi" diyor, kullanici eksik ikisini ancak Premiere'de arayinca fark
+           ediyordu. Emsal kodda var: emojiYerlestir kismi basariyi sariya cekiyor. */
+        return "ok:" + kondu + " stil projeye eklendi" + (zaten ? (" (" + zaten + " zaten vardi)") : "") +
+               (hata.length ? (" · UYARI: " + hata.length + " dosya eklenemedi — " + hata[0]) : "");
     } catch (e) { return "err:" + e.toString(); }
 }
 
@@ -1850,20 +1880,54 @@ function _popIn(ti, sure) {
     if (!sc && !opp) return "olcek/opaklik parametresi yok — icerik: " + _icerikDokumu(ti);
 
     var t0 = _klipBas(ti);          // klibin sekanstaki baslangici
+
+    /* ⚠ SURE KLIBE SIGDIRILIR (18 Agustos 2026 denetimi). AutoCut'tan cikan klipler
+       0,2-0,5 sn olabiliyor; 0,4 sn'lik bir pop klibin DISINA tasiyor ve Premiere disarida
+       kalan keyframe'i SESSIZCE klip sinirina yigiyor. presetYaz'da bu sigdirma zaten var
+       (_yiginOlcekle); panelin kendi yazdigi animasyon o disiplinin disindaydi. */
+    var klipSure = 0;
+    try { klipSure = _zamanSn(ti.end) - _zamanSn(ti.start); } catch (eKS) { klipSure = 0; }
+    if (isNaN(klipSure) || klipSure <= 0) klipSure = 0;
+    if (klipSure > 0 && sure > klipSure * 0.9) sure = klipSure * 0.9;
+
     var yazildi = 0;
+    /* ⚠⚠ UC KEYFRAME'IN DE DONUSU SAYILIR — ONCEDEN YALNIZ ILKI KONTROL EDILIYORDU.
+       _keyEkle hata FIRLATMADAN basarisiz olabiliyor (zaman klip araliginin disindaysa
+       Premiere key'i sessizce yutuyor ya da sinira kirpiyor). Eski kodda ilk key (Scale 0)
+       tuttugu anda `yazildi++` oluyordu: 2. ve 3. key dusen bir klipte Scale 0'DA KALIYOR,
+       yani klip GORUNMEZ oluyor ve panel yine "ok" diyordu. Kullanici bunu ancak videoyu
+       izlerken fark eder. Artik ucu de tutmazsa parametre eski haline GERI SARILIR:
+       animasyonsuz klip, gorunmez klipten iyidir. */
     if (sc) {
+        var scOnce = _keySnapshot(sc);
+        var scTv = true;
+        try { scTv = sc.isTimeVarying(); } catch (eTv) { scTv = true; }
         try { sc.setTimeVarying(true); } catch (eT) {}
         /* 0 -> 112 -> 100: klasik "pop". Ortadaki asma (overshoot) olmadan cansiz duruyor. */
-        if (_keyEkle(sc, t0, 0)) {
-            _keyEkle(sc, t0 + sure * 0.55, 112);
-            _keyEkle(sc, t0 + sure, 100);
-            yazildi++;
+        var scOk = 0;
+        if (_keyEkle(sc, t0, 0)) scOk++;
+        if (_keyEkle(sc, t0 + sure * 0.55, 112)) scOk++;
+        if (_keyEkle(sc, t0 + sure, 100)) scOk++;
+        if (scOk === 3) yazildi++;
+        else {
+            _keyGeriAl(sc, scOnce);
+            if (!scTv) { try { sc.setTimeVarying(false); } catch (eT3) {} }
         }
     }
     // Opaklik tek basina da anlamli: olcek yoksa en azindan yumusak giris olur.
     if (opp) {
+        var opOnce = _keySnapshot(opp);
+        var opTv = true;
+        try { opTv = opp.isTimeVarying(); } catch (eTv2) { opTv = true; }
         try { opp.setTimeVarying(true); } catch (eT2) {}
-        if (_keyEkle(opp, t0, 0)) { _keyEkle(opp, t0 + sure * 0.3, 100); yazildi++; }
+        var opOk = 0;
+        if (_keyEkle(opp, t0, 0)) opOk++;
+        if (_keyEkle(opp, t0 + sure * 0.3, 100)) opOk++;
+        if (opOk === 2) yazildi++;
+        else {
+            _keyGeriAl(opp, opOnce);
+            if (!opTv) { try { opp.setTimeVarying(false); } catch (eT4) {} }
+        }
     }
     if (!yazildi) return "keyframe yazilamadi (zaman birimi tutmadi) — icerik: " + _icerikDokumu(ti);
     return "ok";
@@ -2237,10 +2301,13 @@ function presetOkuJSON() {
                 for (j = 0; j < ps.numItems; j++) {
                     var pr = null; try { pr = ps[j]; } catch (e4) { continue; }
                     var po = { ad: "", kf: false, ix: j };
-                    /* ix = ozellik INDEKSI. Adi BOS olan parametreler var (kullanicinin
-                       "Pop In RGB" preset'indeki VR bileseninde iki tane) ve _paramBul
-                       ada gore aradigi icin ikisi de AYNI ozellige esleniyor: ikinci kayit
-                       birincinin uzerine yaziyordu. Ad bossa indeks kullanilir. */
+                    /* ix = ozellik INDEKSI. _paramBul ada gore arayip ILK eslesen ozelligi
+                       donduruyor; ayni adi tasiyan (ya da adi BOS olan) parametrelerde bu,
+                       hepsini AYNI hedefe yazmak demek — sonraki oncekinin uzerine yaziyor.
+                       Iki gercek ornek: kullanicinin "Pop In RGB" preset'indeki VR bileseninde
+                       iki ADSIZ parametre, "Camera Shake"te ise ayni adi tasiyan BES katman.
+                       ⚠ Yazma tarafi (_paramlariYaz) indeksi ARTIK ADI OLAN kayitlarda da
+                       kullaniyor; indeksteki ozelligin adi tutmazsa ada gore aramaya duser. */
                     try { po.ad = String(pr.displayName); } catch (e5) {}
                     try { po.kf = !!pr.isTimeVarying(); } catch (e6) {}
                     if (po.kf) {
@@ -2477,7 +2544,19 @@ function _bilesenAraGenis(ti, match, ad) {
    OLCULDU: getSelection() (ve _tazeKlip) BAYAT nesne donduruyor — QE ile efekt
    eklendikten sonra o nesnenin components'inde yeni efekt GORUNMUYOR ("eklendi ama
    okunamadi" hatasi tam olarak buydu). Sekans->track->clips zinciri taze veri veriyor. */
-function _klipYenidenBul(trackIdx, nodeId, basSn) {
+/* Son bulunan klip indeksi — _klipYenidenBul kendi ipucunu buraya yazar, cagiran onu
+   bir sonraki tura gecirir. Global olmasi ES3'te en ucuz yol; yanlis deger yalniz bir
+   fazladan okumaya mal olur (dogruluk ipucuya BAGLI DEGIL). */
+var _klipSonIx = -1;
+/* ipucuIx (4. arguman, istege bagli): son bulunan klibin INDEKSI.
+   ⚠ NEDEN VAR: presetYaz emoji kanalinda BUTUN kliplere uygulaniyor (300 emoji) ve bu
+   fonksiyon klip BASINA cagriliyor; her cagri track'i indeks 0'dan tariyor ve her klipte
+   nodeId okuyordu — yani O(n^2). 300 emojide yuz binlerce Premiere okumasi demek ve
+   emoji akisinin maliyeti TAM DA bu turlarla olculuyor. Emoji klipleri zaman sirasinda
+   oldugu ve dongu de sirayla ilerledigi icin aranan klip neredeyse her zaman bir
+   oncekinin hemen ARDINDA: ipucundan basla, tutmazsa MEVCUT TAM TARAMAYA dus.
+   Davranis degismez, yalniz sira degisir — ipucu yanlissa tek bir fazladan okuma olur. */
+function _klipYenidenBul(trackIdx, nodeId, basSn, ipucuIx) {
     try {
         var seq = app.project.activeSequence;
         if (!seq) return null;
@@ -2485,10 +2564,19 @@ function _klipYenidenBul(trackIdx, nodeId, basSn) {
         if (isNaN(ti) || ti < 0 || ti >= seq.videoTracks.numTracks) return null;
         var tr = seq.videoTracks[ti], i, c, nid, s;
         if (nodeId) {
+            /* IPUCU: once bir onceki indeks ve hemen ardindaki birkac klip. */
+            var ip = parseInt(ipucuIx, 10);
+            if (!isNaN(ip) && ip >= 0) {
+                for (i = ip; i < tr.clips.numItems && i < ip + 3; i++) {
+                    c = tr.clips[i];
+                    nid = ""; try { nid = String(c.nodeId); } catch (eIp) {}
+                    if (nid === nodeId) { _klipSonIx = i; return c; }
+                }
+            }
             for (i = 0; i < tr.clips.numItems; i++) {
                 c = tr.clips[i];
                 nid = ""; try { nid = String(c.nodeId); } catch (e0) {}
-                if (nid === nodeId) return c;
+                if (nid === nodeId) { _klipSonIx = i; return c; }
             }
         }
         /* nodeId tutmazsa baslangic zamanina dus (bir kareden genis tolerans).
@@ -2732,11 +2820,25 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
     if (!ps) { if (rapor) rapor.push("properties-bos"); return 0; }
     for (i = 0; i < plist.length; i++) {
         var kayit = plist[i], pr = null;
-        /* ADI BOS parametrede INDEKSE dus (bkz. presetOkuJSON'daki `ix` notu): ada gore
-           arama iki adsiz parametreyi ayni ozellige esliyor ve ikincisi birincinin
-           uzerine yaziyordu. Eski kayitlarda `ix` yok -> eski davranis. */
-        if (!kayit.ad && typeof kayit.ix === "number") {
-            try { if (kayit.ix >= 0 && kayit.ix < ps.numItems) pr = ps[kayit.ix]; } catch (eIx) { pr = null; }
+        /* INDEKSE DUS (bkz. presetOkuJSON'daki `ix` notu): ada gore arama ayni adi tasiyan
+           parametreleri AYNI ozellige esliyor ve sonraki oncekinin uzerine yaziyordu.
+           ⚠ KAPI ARTIK "ADI BOS" SARTINA BAGLI DEGIL (18 Agustos 2026 denetimi). Eski hali
+           yalniz adsiz parametreleri indeksle esliyordu; oysa ayni sorun ADI OLAN ama TEKRAR
+           EDEN parametrelerde de var ve orada bedeli daha buyuk: "Camera Shake" gibi cok
+           katmanli efektlerde bes katmanin da adi ayni (Strafe/Stride/Roll), _paramBul hep
+           ILK eslesen ozelligi donduruyor ve besinin degeri tek hedefe yaziliyordu — klipte
+           yalniz SONUNCUSUNUN degeri kaliyor, preset sessizce yanlis uygulaniyordu.
+           GUVENLIK: indeksteki ozelligin ADI kayittakiyle AYNI degilse indekse GUVENMIYORUZ
+           ve ada gore aramaya dusuyoruz — bilesen surumu degismis, indeksler kaymis olabilir.
+           Adi bos kayitlarda eski davranis birebir korunur (ad karsilastirmasi da bos-bos). */
+        if (typeof kayit.ix === "number") {
+            try {
+                if (kayit.ix >= 0 && kayit.ix < ps.numItems) {
+                    var aday = ps[kayit.ix], adayAd = "";
+                    try { adayAd = String(aday.displayName || ""); } catch (eAd) { adayAd = ""; }
+                    if (adayAd === String(kayit.ad || "")) pr = aday;
+                }
+            } catch (eIx) { pr = null; }
         }
         if (!pr) pr = _paramBul(ps, kayit.ad);
         if (!pr) {
@@ -3250,7 +3352,7 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
                     if (n0) { nedenler[g.ad || "?"] = n0; break; }   // katalogda yoksa tekrar deneme
                 }
             }
-            var taze = _klipYenidenBul(trIdx, nid, basSn) || ti;
+            var taze = _klipYenidenBul(trIdx, nid, basSn, _klipSonIx) || ti;
 
             /* Kullanilmis bilesen indeksleri: ayni hedef bileseni iki kayit icin kullanma.
                Klipte ayni efektten iki tane olabiliyor ve ikisi de ayni matchName'i tasiyor. */

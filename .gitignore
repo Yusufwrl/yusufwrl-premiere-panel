@@ -15,6 +15,10 @@ installer/YusufwrlKur.exe
 /kisiler.json
 /presetler.json
 /presetler.bak.json
+# Atomik yazmanin ara dosyalari (js/app.js presetYiginlarYaz). Normalde saniyeler icinde
+# yok olurlar; yazma yarida kalirsa diskte kalir ve kurtarma kaynagi OLURLAR.
+/presetler.json.tmp
+/presetler.bak.json.yeni
 # lisans.json = bu makinenin lisansi (sifre BIR KEZ girilsin diye). Repoya girmemeli:
 # icinde HWID karmasi var ve her makinede farkli.
 /lisans.json

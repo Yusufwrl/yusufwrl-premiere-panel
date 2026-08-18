@@ -46,13 +46,17 @@ Write-Output ""
 Write-Output "Kopyalaniyor (birkac dakika surebilir)..."
 
 # robocopy: buyuk dosyalarda Copy-Item'dan cok daha hizli ve surdurulebilir.
-# /XD = dislanan klasorler (ad bazli, hangi derinlikte olursa olsun)
+# /XD = dislanan KLASORLER · /XF = dislanan DOSYALAR (ad bazli, hangi derinlikte olursa olsun)
 # /NFL /NDL = dosya/klasor listesini basma (9 GB'lik ciktiyi konsola dokmesin)
 # ayna/eski/.panel-emoji.json = PANELIN URETTIGI ONBELLEK. Teslim RAR'ina girerse arkadasa
 #   senin ayna kopyalarin + senin ESKI resimlerin + senin dosya boyutlarini iceren iz dosyan
 #   gider. Kirilmiyor (tara() alt klasorleri atliyor) ama gereksiz ve yaniltici.
-$dislanan = @("work", "faster-whisper-medium", "reverb-diarization-v2", ".cache", "ayna", "eski")
-$argv = @($Kaynak, $Hedef, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP", "/XD") + $dislanan
+# ⚠ .panel-emoji.json bir DOSYA, klasor degil: yorum ucunun de dislandigini soyluyordu ama
+#   listede yoktu ve /XD zaten yalnizca klasor disliyor -> iz dosyasi HER teslimde gidiyordu.
+#   Dosya icin /XF sart; ayri liste bu yuzden var.
+$dislanan      = @("work", "faster-whisper-medium", "reverb-diarization-v2", ".cache", "ayna", "eski")
+$dislananDosya = @(".panel-emoji.json")
+$argv = @($Kaynak, $Hedef, "/E", "/R:1", "/W:1", "/NFL", "/NDL", "/NJH", "/NP", "/XD") + $dislanan + @("/XF") + $dislananDosya
 & robocopy @argv | Out-Null
 
 # robocopy cikis kodlari: 0-7 basari (8+ hata). Bunu bilmeyen "hata var" saniyor.

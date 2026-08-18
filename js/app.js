@@ -9,6 +9,7 @@
 
   var state = { mode: "single", genMode: "single", track: "0", running: false, cancelled: false, styles: [],
     acRunning: false, acCancelled: false,   // AutoCut kendi bayrakları: altyazı işiyle karışmasın
+    emojiCalisiyor: false,                  // emoji yerleştirme sürüyor (kardeş akışlar buna bakar)
     cuesStale: false,            // AutoCut kesimi yapıldı ama altyazılar kesim ÖNCESİ zamanlarda
 
     singleCues: [], a1Cues: [], a2Cues: [], speakers: [], singleStyle: "",
@@ -224,6 +225,22 @@
         res(r);
       });
     });
+  }
+  /* ORTAK NÖBETÇİ ÜRETİCİ — `evalES(kod, izle)` mekanizması yazıldığında yalnız emoji
+     yerleştirmeye bağlanmıştı; oysa panelin Premiere'i uzun süre meşgul eden BAŞKA
+     çağrıları da var (preset uygulama, altyazı yerleştirme, senkron). Onlar donduğunda
+     panel sebepsiz kilitli görünüyordu — ParsMazi'nin "155/206'da takıldı" vakasının
+     teşhisi tam da bu satırla konmuştu (Premiere ekranda bir pencere bekliyordu).
+     ⚠ ZAMAN AŞIMI DEĞİL NÖBETÇİ: promise asla terk edilmez, pencere kapanınca iş kaldığı
+     yerden devam eder (gerekçe evalES'in üstünde yazılı). */
+  function nobetci(yazFn, etiket) {
+    return function (sn) {
+      var m = etiket + "… (" + sn + " sn)";
+      if (sn >= 60) {
+        yazFn(m + " · ⚠ Premiere yanıt vermiyor olabilir — ekranda açık bir pencere " +
+              "(Save Project / Import) var mı? Kapatınca kaldığı yerden devam eder.", "var(--warn)");
+      } else yazFn(m);
+    };
   }
   function speakerColor(i) { return SP_COLORS[i % SP_COLORS.length]; }
   function fmtShort(sec) { var m = Math.floor(sec / 60), s = Math.floor(sec % 60); return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s; }
@@ -773,6 +790,33 @@
     }
     return "";
   }
+  /* ATOMİK KOPYALA — yarım yazılmış dosya bırakmaz (18 Ağustos 2026 denetimi).
+     Hazır içerik (emoji PNG'leri, Track Style dosyaları) doğrudan writeFileSync ile
+     yazılıyordu. Yazma yarıda kalırsa (OneDrive kilidi, disk dolması, panel kapanması)
+     hedefte KESİK bir dosya kalıyor. Emoji tarafında bedeli kalıcı: tazeleme kuralı boyut
+     karşılaştırmasına dayandığı için kesik dosya "boyut farklı ve iz kaydımızla uyuşmuyor"
+     dalına düşüp "kullanıcı elle değiştirmiş" sayılıyor ve BİR DAHA hiç tazelenmiyordu.
+     Aynı desen js/pngayna.js'te zaten var. */
+  function _atomikKopyala(src, dst) {
+    var tmp = dst + ".tmp";
+    fs.writeFileSync(tmp, fs.readFileSync(src));
+    /* Windows'ta var olan dosyanın üzerine rename atılamıyor; önce sil. Aradaki an
+       dosyanın HİÇ olmaması, YARIM olmasından iyidir (yokluk bir sonraki kurulumda
+       kendiliğinden düzelir, yarım dosya "kullanıcının dosyası" sanılıp kalıcılaşır). */
+    try { if (fs.existsSync(dst)) fs.unlinkSync(dst); } catch (eU) {}
+    fs.renameSync(tmp, dst);
+  }
+  /* PNG gerçekten PNG mi? (ilk 8 bayt imzası) — "korundu" dalının sağlamlık kapısı.
+     Boyutu farklı diye korunan bir dosya bozuk olabilir; imza tutmuyorsa o dosya
+     kullanıcının değil, yarım yazılmış bir artıktır ve tazelenmelidir. */
+  function _pngSaglam(yol) {
+    try {
+      var fd = fs.openSync(yol, "r"), b = Buffer.alloc ? Buffer.alloc(8) : new Buffer(8);
+      var n = fs.readSync(fd, b, 0, 8, 0);
+      fs.closeSync(fd);
+      return n === 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+    } catch (e) { return true; }   // okuyamadıysak KARAR VERME: dokunma (eski davranış)
+  }
   function varsayilanlariKur() {
     if (!CEP) return;
     /* ⚠ LİSANS KAPISININ ARKASINDA. Bu fonksiyon wirePreset() üzerinden çağrılıyor ve
@@ -790,7 +834,24 @@
     // 1) Preset'ler — yalnız kullanıcının hiç kaydı yoksa
     try {
       var hedef = presetDosyaYolu();
-      if (!fs.existsSync(hedef)) {
+      /* ⚠ "ANA DOSYA YOKSA KUR" YETMİYOR — KURTARMA ZİNCİRİNİ DE SOR (18 Ağustos 2026).
+         presetler.json ATOMİK yazılıyor: önce .tmp, sonra eskisi .bak.yeni'ye, sonra .tmp
+         ana dosya olur. OneDrive/antivirüs kilidi yüzünden ORTADAKİ adım patlarsa diskte
+         ana dosya YOK ama kullanıcının bütün preset'leri .bak.yeni / .tmp / .bak içinde
+         duruyor olur. Eski koşul yalnız ana dosyaya baktığı için panel "hiç preseti yok"
+         deyip FABRİKA PAKETİNİ yazıyordu — ve o yazma kurtarma adaylarının okunacağı anı
+         geçiriyordu, yani kullanıcının öğrettiği her şey sessizce gidiyordu.
+         Öğretilmiş preset tek tek elle üretiliyor (her biri Premiere'de bir sürükleme);
+         bu projede kaybı en pahalı veri. */
+      var kurtarmaVar = !!(presetDosyaOku(hedef) ||
+                           presetDosyaOku(hedef + ".tmp") ||
+                           presetDosyaOku(presetYedekYolu() + ".yeni") ||
+                           presetDosyaOku(presetYedekYolu()));
+      if (kurtarmaVar && !fs.existsSync(hedef)) {
+        logLine("Hazır preset paketi KURULMADI: ana dosya yok ama yedeklerde kayıt var — " +
+                "kurtarma zinciri devrede (presetler.json.tmp / .bak.yeni / .bak).");
+      }
+      if (!fs.existsSync(hedef) && !kurtarmaVar) {
         /* DOSYA ADI BİLEREK "presetler.json" DEĞİL — ADI DEĞİŞTİRME.
            Korunan kullanıcı dosyalarını atlayan üç mekanizma da adı KLASÖR FARK ETMEKSİZİN
            eşliyor (.gitignore · pack-panel.ps1 · updater.js copyDir). Aynı adı kullanınca
@@ -852,7 +913,7 @@
         try {
           var src = path.join(kok, "stiller", s.dosya), dst = path.join(klasor, s.ad);
           if (!fs.existsSync(src) || fs.existsSync(dst)) return;   // ÜZERİNE YAZMA
-          fs.writeFileSync(dst, fs.readFileSync(src));
+          _atomikKopyala(src, dst);
           kondu.push(s.ad.replace(/\.prtextstyle$/i, ""));
         } catch (eS) { sBasarisiz++; }   // sessiz yutma: aşağıda sayılıp bildiriliyor
       });
@@ -926,12 +987,14 @@
               if (!fs.existsSync(src)) return;
               var sBoy = fs.statSync(src).size;
               if (!fs.existsSync(dst)) {
-                fs.writeFileSync(dst, fs.readFileSync(src));
+                _atomikKopyala(src, dst);
                 iz[x.ad] = sBoy; eKondu++; return;
               }
               var dBoy = fs.statSync(dst).size;
               if (dBoy === sBoy) { eVar++; iz[x.ad] = sBoy; return; }   // içerik zaten aynı
-              if (izVarMi && iz[x.ad] !== dBoy) { eKorunan++; return; } // kullanıcı elle değiştirmiş
+              /* ⚠ SAĞLAMLIK KAPISI: boyutu farklı diye korunan dosya BOZUK olabilir (yarım yazma).
+                 PNG imzası tutmuyorsa o dosya kullanıcının değil, artıktır — tazelensin. */
+              if (izVarMi && iz[x.ad] !== dBoy && _pngSaglam(dst)) { eKorunan++; return; } // kullanıcı elle değiştirmiş
               /* ⚠ İZ DOSYASI YOKKEN (bu sürümden ÖNCE kurulmuş HER panel) "bizim mi, kullanıcının
                  mı" ayrımı yapılamıyor — o yüzden üzerine yazılıyor. Bu, düzeltilmiş resimlerin
                  herkese ulaşması için gerekli AMA kullanıcının kendi çizdiği bir resmi de
@@ -950,7 +1013,7 @@
                   eYedek++;
                 } catch (eY) {}
               }
-              fs.writeFileSync(dst, fs.readFileSync(src));
+              _atomikKopyala(src, dst);
               iz[x.ad] = sBoy; eYeni++;
               if (eYeniAd.length < 8) eYeniAd.push(x.ad.replace(/\.png$/i, ""));
             } catch (eE) { eBasarisiz++; }
@@ -1034,11 +1097,35 @@
     var ozet = t.dosyalar.length + " resim · " + t.karakterler.length + " karakter (" +
                t.karakterler.map(function (k) { return k.ad; }).join(", ") + ") · " +
                t.duygular.length + " tepki";
+    /* ⚠ UYARI GÖRÜNEN EKRANA DA YAZILIR (18 Ağustos 2026 denetimi).
+       #emojiKlasorDurum AYARLAR görünümünde duruyor; kullanıcı Emoji ekranındayken o eleman
+       `.view[hidden]` altında olduğu için "6 resim bu klasörde YOK" uyarısı HİÇ görünmüyordu.
+       Emoji ekranındaki "Yenile" düğmesi tam da bu fonksiyonu çağırıyor, yani kullanıcı
+       uyarıyı tetikliyor ama sonucunu göremiyordu; ekranda kalan tek şey yeşil kanal özetiydi.
+       Yalnız EKSİK durumunda yazılır — her tazelemede Emoji ekranını bilgi mesajıyla
+       doldurmak, gerçek uyarıyı gürültüye boğardı. */
     if (paketSay && t.dosyalar.length < paketSay) {
-      yaz("⚠ " + ozet + " — pakette " + paketSay + " resim var, " + (paketSay - t.dosyalar.length) +
-          " tanesi bu klasörde YOK. “Emojileri Yeniden Kur”a bas.", "var(--warn)");
+      var eksikMsj = "⚠ " + ozet + " — pakette " + paketSay + " resim var, " + (paketSay - t.dosyalar.length) +
+                     " tanesi bu klasörde YOK. Ayarlar → “Emojileri Yeniden Kur”a bas.";
+      yaz(eksikMsj, "var(--warn)");
+      var eD = $("emojiDurum");
+      /* İşaretle: temizlerken YALNIZ kendi yazdığımızı silelim — emojiEkle de aynı elemanı
+         kullanıyor ve onun sonuç mesajını ("✓ 118 emoji kondu") ezmek olmaz. */
+      /* Bayrak yerine METNIN KENDISI saklanir: temizlerken "hala bizim yazdigimiz mi duruyor"
+         diye karsilastirilir. Bayrak yeterli DEGILDI — emojiEkle ayni elemani kullaniyor ve
+         kendi sonucunu yazdiktan sonra bayrak "1" olarak kaliyordu; sonraki "Yenile" basisi
+         basari dalina girip kullanicinin "118 emoji kondu" sonucunu SILIYORDU. */
+      if (eD) { eD.textContent = eksikMsj; eD.style.color = "var(--warn)"; eD.dataset.klasorUyari = eksikMsj; }
     } else {
       yaz("✓ " + ozet + (paketSay ? (" · paketle uyumlu") : ""), "var(--muted)");
+      /* ⚠ UYARI TEMİZLENMELİ. Eksik resimler kurulduktan sonra "Yenile"ye basılınca uyarı
+         ekranda ASILI kalıyordu: kullanıcı sorunu çözdüğü hâlde panel hâlâ "6 resim YOK"
+         diyordu ve doğru olan mesaj (yeşil özet) gizli Ayarlar ekranındaydı. */
+      var eD2 = $("emojiDurum");
+      if (eD2 && eD2.dataset && eD2.dataset.klasorUyari &&
+          eD2.textContent === eD2.dataset.klasorUyari) {          // hala BIZIM uyarimiz duruyorsa
+        eD2.textContent = ""; eD2.style.color = "var(--muted)"; eD2.dataset.klasorUyari = "";
+      }
     }
   }
 
@@ -1071,11 +1158,16 @@
     } else {
       /* Ana dosya yok/bozuk → YEDEKTEN kurtar. Sessizce boş başlamak, tek bir yeni
          öğretmeyle kalan presetleri kalıcı silmek demekti. */
-      /* Kurtarma adayları sırayla: .bak → .bak.yeni → .tmp. Son ikisi yarıda kalmış bir
-         yazmadan artakalan ama SAĞLAM olabilen dosyalar (bkz. presetYiginlarYaz). */
-      var yed = presetDosyaOku(presetYedekYolu()) ||
+      /* ⚠ SIRA TAZELİĞE GÖRE: .tmp → .bak.yeni → .bak  (18 Ağustos 2026 denetiminde çevrildi).
+         Yazma sırası `.tmp` yaz → ana dosyayı `.bak.yeni`'ye al → `.tmp`'yi ana yap →
+         `.bak.yeni`'yi `.bak` yap. Bu sıra gereği tazelik HER ZAMAN .tmp ≥ .bak.yeni ≥ .bak.
+         Kurtarma ise tam TERS öncelikle deniyordu: en ESKİ geçerli dosya seçilip üzerine
+         yazılıyor, aradaki en yeni preset'ler sessizce kayboluyordu.
+         "Yarım yazılmış .tmp" riski yok: presetDosyaOku bozuk/boş/yanlış tipli dosyayı
+         zaten eliyor — parse edilebiliyorsa yazma tamamlanmış demektir. */
+      var yed = presetDosyaOku(presetDosyaYolu() + ".tmp") ||
                 presetDosyaOku(presetYedekYolu() + ".yeni") ||
-                presetDosyaOku(presetDosyaYolu() + ".tmp");
+                presetDosyaOku(presetYedekYolu());
       if (yed) {
         _presetYigin = yed;
         _presetKurtarildi = "presetler.json okunamadı — YEDEKTEN kurtarıldı (" +
@@ -1166,7 +1258,7 @@
        presetUygulaAd girişteki `if (_presetMesgul) return;` ile SESSİZCE dönüyor —
        panel bir daha hiçbir preset uygulamıyordu ("basıyorum bir şey olmuyor"). */
     try {
-      var d = JSON.parse(String(await evalES("presetOkuJSON()")));
+      var d = JSON.parse(String(await evalES("presetOkuJSON()", nobetci(durumYaz, "preset okunuyor"))));
       if (!d || !d.ok) { durumYaz((d && d.hata) ? d.hata : "klip okunamadı", "var(--bad)"); return; }
 
       /* Keyframe sayımı YAZMADAN ÖNCE. Eskiden önce diske yazılıyor, uyarı sonra
@@ -1266,13 +1358,15 @@
            değilse preset özelliği motorla ilgisiz bir hatayla patlıyordu. */
         yol = path.join(extRoot, "preset_gecici.json");
         fs.writeFileSync(yol, yigin, "utf8");
-        r = String(await evalES('presetYaz("' + esPath(yol) + '", "' + (kafaya ? "1" : "0") + '")'));
+        r = String(await evalES('presetYaz("' + esPath(yol) + '", "' + (kafaya ? "1" : "0") + '")',
+                                nobetci(durumYaz, "preset uygulanıyor")));
       } else if (sira >= 0) {
-        r = String(await evalES("efektUygula(" + sira + ")"));
+        r = String(await evalES("efektUygula(" + sira + ")", nobetci(durumYaz, "efekt uygulanıyor")));
         // Hangi yolun çalıştığı SÖYLENİR: öğretilmiş kayıt yokken "başarılı" demek yanıltıcı.
         if (r.indexOf("ok:") === 0) r += " | (Premiere'in hazır efekti — öğretilmiş kayıt YOK)";
       } else {
-        r = String(await evalES('animasyonUygula("' + anim + '", 0.4)'));
+        r = String(await evalES('animasyonUygula("' + anim + '", 0.4)',
+                                nobetci(durumYaz, "animasyon uygulanıyor")));
         if (r.indexOf("ok:") === 0) r += " | (panelin kendi animasyonu — öğretilmiş kayıt YOK)";
       }
       sonucGoster(ad, r);
@@ -1367,8 +1461,24 @@
     if (k !== -1) _presetSecili.splice(k, 1);
     presetSeciliYaz();
     // Öğrenilmiş yığın da gitsin — adı olmayan yığın dosyada çöp olarak birikirdi.
+    /* ⚠ DİSKE YAZMA BAŞARISIZLIĞI YUTULUYORDU. presetYiginlarYaz() false dönebiliyor
+       (OneDrive kilidi, salt-okunur klasör) ve bu proje onu İKİ yerde doğru kullanıyor
+       (presetOgren · presetTersiUret: belleği geri alıp kullanıcıya "DİSKE YAZILAMADI" diyor).
+       Burada dönüş hiç okunmuyordu: panel yeşil "kaldırıldı" diyor, kart sonraki açılışta
+       geri geliyor ve kullanıcı panelin kendi kendine preset ürettiğini sanıyordu. */
     var y = presetYiginlar();
-    if (y[ad]) { delete y[ad]; presetYiginlarYaz(); }
+    var yedekYigin = y[ad];
+    if (y[ad]) {
+      delete y[ad];
+      if (CEP && presetYiginlarYaz() === false) {
+        y[ad] = yedekYigin;                       // belleği geri al: disk ile tutarlı kalsın
+        if (k !== -1) _presetSecili.splice(k, 0, ad);
+        presetSeciliYaz();
+        presetBtnlarCiz();
+        durumYaz("“" + ad + "” KALDIRILAMADI — presetler.json diske yazılamadı.", "var(--bad)");
+        return;
+      }
+    }
     presetBtnlarCiz();
     durumYaz("“" + ad + "” kaldırıldı");
   }
@@ -1384,8 +1494,20 @@
     presetSeciliYaz();
     /* Öğrenilmiş yığın ADLA anahtarlanıyor — ad değişince yığın da TAŞINMALI, yoksa kart
        yeniden "öğretilmemiş" görünür ve kullanıcının elle yaptığı sürükleme boşa gider. */
+    /* Dönüş KONTROL EDİLİR — kardeş fonksiyon presetKaldir ile aynı gerekçe: yazma
+       başarısızsa panel yeşil mesaj verip yalan söylüyor, ad sonraki açılışta geri dönüyor. */
     var y = presetYiginlar();
-    if (y[eski]) { y[yeni] = y[eski]; delete y[eski]; presetYiginlarYaz(); }
+    if (y[eski]) {
+      y[yeni] = y[eski]; delete y[eski];
+      if (CEP && presetYiginlarYaz() === false) {
+        y[eski] = y[yeni]; delete y[yeni];         // belleği geri al
+        if (k !== -1) _presetSecili[k] = eski;
+        presetSeciliYaz();
+        presetBtnlarCiz();
+        durumYaz("Ad DEĞİŞTİRİLEMEDİ — presetler.json diske yazılamadı.", "var(--bad)");
+        return;
+      }
+    }
     presetBtnlarCiz();
     durumYaz("“" + eski + "” → “" + yeni + "”");
   }
@@ -1751,7 +1873,23 @@
        onu kullan, yoksa kimlik "<ad>_0"a çöker ve koruma kalkardı. */
     var sn = (_oturum.end > 0) ? Math.round(_oturum.end)
                                : ((_oturum.seqDur > 0) ? Math.round(_oturum.seqDur) : 0);
-    return String(_oturum.name) + "_" + sn;
+    /* PROJE ADI DA KİMLİĞE GİRER (18 Ağustos 2026). Süre eklemek çakışmayı zorlaştırıyordu
+       ama kaldırmıyordu: aynı şablondan üretilmiş iki proje aynı ada VE yakın süreye sahip
+       olabiliyor. Proje adı okunamazsa (eski host) kimlik eski biçime döner — koruma azalır
+       ama hiçbir şey bozulmaz. */
+    var pr = _oturum.proje ? (String(_oturum.proje) + "|") : "";
+    return pr + String(_oturum.name) + "_" + sn;
+  }
+  /* SÜRESİZ KİMLİK — "bu sekansa altyazı BASILDI" bayrağı için (18 Ağustos regresyon turu).
+     `sekansKimlik()` süreyi de katıyor ve bu EMOJİ tarafında doğru: kadro/timeline değişince
+     kanal→karakter seçiminin unutulması İSTENEN davranış. Ama altyazı bayrağı için yıkıcı:
+     `_oturum.end` her üretimde yeniden okunuyor, yani AutoCut kesimi ya da bir klip kırpması
+     kimliği değiştirip bayrağı ORPHAN bırakıyor. Panel caption track sayamadığı/silemediği
+     için bu bayrak ikinci basışı yakalayan TEK mekanizma — kaybolması "her altyazı ekranda
+     İKİ KEZ" demek ve temizliği tamamen elle. Proje adı çakışma sorununu zaten çözüyor. */
+  function sekansKimlikSabit() {
+    if (!_oturum || !_oturum.name) return "";
+    return (_oturum.proje ? (String(_oturum.proje) + "|") : "") + String(_oturum.name);
   }
 
   /* Emoji eşleşme kaydının anahtarı — İKİ FARKLI ÖMÜR.
@@ -2210,6 +2348,19 @@
     var secUyari = "";
     function yaz(m, renk) { if (dur) { dur.textContent = m || ""; dur.style.color = renk || "var(--muted)"; } }
     if (!CEP) { yaz("Premiere'de çalışır", "var(--warn)"); return; }
+    /* ⚠ MEŞGULİYET DÜZENİNE KATILDI (18 Ağustos 2026 denetimi). Emoji yerleştirme,
+       Premiere'i dakikalarca meşgul eden en uzun işlerden biri ama ne bayrak KURUYOR ne
+       bayrak OKUYORDU: emoji konarken AutoCut kesimi ya da Senkron başlatılabiliyordu ve
+       ikisi de timeline'ı değiştirir — emoji planı ESKİ zamanlara göre hesaplanmıştır.
+       Kardeş akışların (altyazı üretimi, senkron, AutoCut) hepsinde bu kapı zaten vardı. */
+    if (state.running) { yaz("Altyazı üretimi sürüyor — bitmesini bekle.", "var(--warn)"); return; }
+    if (state.acRunning) { yaz(acMesguMetni(), "var(--warn)"); return; }
+    if (snk.calisiyor) { yaz("Senkron işlemi sürüyor — bitmesini bekle.", "var(--warn)"); return; }
+    if (state.emojiCalisiyor) { yaz("Emoji yerleştirme zaten sürüyor.", "var(--warn)"); return; }
+    /* ⚠ BAYRAK BURADA KURULMAZ — bu satirla asagidaki try/finally arasinda ONLARCA
+       erken `return` var (klasor yok, esleme karari yok, onay iptal, cuesStale...). Orada
+       kurulsaydi bayrak true kalir ve panel kendi kendini KALICI olarak kilitlerdi.
+       finally'si olan blogun hemen ONUNDE kuruluyor (asagida). */
     if (!EMJ || !VUR) { yaz("Emoji modülü yüklenemedi — paneli yeniden kur", "var(--bad)"); return; }
 
     var kok = String(($("emojiKlasor") || {}).value || "").trim();
@@ -2417,6 +2568,9 @@
     _emojiIptal = false;
     var _btnIptal = $("btnEmojiIptal"); if (_btnIptal) _btnIptal.hidden = false;
     yaz("duygular seçiliyor… (" + cumleler.length + " cümle)");
+    /* Mesguliyet bayragi: buradan itibaren is GERCEKTEN basliyor ve asagidaki finally
+       kosulsuz indiriyor. Kardes akislar (AutoCut kesimi, Senkron, Timeline'a Ekle) buna bakar. */
+    state.emojiCalisiyor = true;
     try {
       /* 3) DUYGU SEÇİMİ. İPTAL DAMGASI ŞART — null GEÇİLMEZ (iptalEdildiMi "sayaç !== damga"
          diye bakıyor ve sayaç 0 ile başlıyor: null geçilirse her istek gönderilmeden
@@ -2483,6 +2637,11 @@
          `yakin`e katılsaydı iki taraflı seçimin gerçekten çalışıp çalışmadığı log'da görünmezdi. */
       var atlanan = { yakin: 0, dosyaYok: 0, boyutYok: 0, tarafDolu: 0 };
       var sureTop = 0, kisaltilan = 0, varyantSay = {}, tarafSay = { sag: 0, sol: 0 };
+      /* Bozuk (boyutu okunamayan) dosyalar DOSYA BASINA bir kez sayilsin — ayni dosya her
+         cumle denemesinde yeniden sayilirsa sayac sisip teshis degerini kaybediyor.
+         ⚠ Bildirim, kullanildigi dongunun USTUNDE kalmak zorunda (var hoisting: v1.9.20
+         emoji cokmesi tam da bir bildirimin kullanimdan SONRAYA kaymasindan cikti). */
+      var bozukSayildi = {};
       /* KAÇ FARKLI RESİM KULLANILDI — "45 emojim var ama projede 24 tane görüyorum, kalanı
          kullanmıyor mu?" sorusunun cevabı (kullanıcı sordu, 8 Ağustos 2026).
          Cevap çoğu zaman masum: videoda OLMAYAN karakterin resmi kullanılamaz. Ama panel
@@ -2571,13 +2730,29 @@
         if (!vList || !vList.length) { atlanan.dosyaYok++; return false; }
         var vAnah = duygu + "|" + c.kar.key;
         var vSira = varyantSay[vAnah] || 0;
-        var png = vList[vSira % vList.length];
-        /* Boyutu okunamayan PNG'yi ALMA: ölçek doğru hesaplanamaz ve resim ekranı
-           kaplayabilir. Sessizce atlanmaz, sayılır ve log'a yazılır.
-           ⚠ varyantSay bu kontrolden SONRA artar: plana girmeyen aday varyant sırasını
-           ilerletmemeli (eski kodda ilerletiyordu — zararsızdı ama yanlıştı). */
-        if (!png.h) { atlanan.boyutYok++; return false; }
-        varyantSay[vAnah] = vSira + 1;
+        /* Boyutu okunamayan PNG'yi ALMA: ölçek doğru hesaplanamaz ve resim ekranı kaplayabilir.
+           Sessizce atlanmaz, sayılır ve log'a yazılır.
+           ⚠⚠ İKİ FARKLI "PLANA GİRMEDİ" VAR, AYIRMAK ŞART (18 Ağustos 2026 denetimi):
+             • çeşitlilik/fren elemesi → aday SAĞLAM, yalnız o an uygun değil  → sıra İLERLEMEZ.
+             • boyutu okunamıyor      → dosyanın KENDİSİ kullanılamaz          → sıra İLERLEMELİ.
+           Eski kod ikisini de "ilerletme" sayıyordu: bozuk tek bir varyant aynı sıraya sonsuza
+           kadar geri dönüyor ve o duygu+karakter ikilisi videoda BİR DAHA HİÇ çıkmıyordu
+           (kullanıcı bunu ancak "Mimi hiç gülmüyor" diye fark eder). Artık bozuk varyant
+           atlanıp sıradaki deneniyor; hepsi bozuksa aday gerçekten düşer. */
+        var png = null, denendi = 0;
+        while (denendi < vList.length) {
+          var aday = vList[(vSira + denendi) % vList.length];
+          denendi++;
+          if (aday && aday.h) { png = aday; break; }
+          /* ⚠ DOSYA BAŞINA BİR KEZ SAY. Aynı bozuk PNG her cümle denemesinde yeniden
+             sayılırsa "boyut okunamadı: 240" gibi bir sayı çıkıyor ve kullanıcı 240 bozuk
+             dosyası olduğunu sanıyor — oysa tek bir dosya 240 kez denenmiş oluyor.
+             Sayaç bir TEŞHİS aracı; şişerse teşhis değerini kaybeder. */
+          var bAnah = String((aday && aday.yol) || (aday && aday.ad) || (vAnah + "#" + denendi));
+          if (!bozukSayildi[bAnah]) { bozukSayildi[bAnah] = 1; atlanan.boyutYok++; }
+        }
+        varyantSay[vAnah] = vSira + denendi;   // kullanılan (ya da elenen) varyantların ötesine geç
+        if (!png) return false;
         /* EMOJİ CÜMLE BOYUNCA KALIR. Taban/tavan yalnız emniyet — ölçülen cümlelerin hepsi
            zaten bu aralıkta (0.80-6.41 sn). Tavana çarpan varsa SAYILIR, sessiz kalmaz. */
         var sure = c.bit - c.bas;
@@ -2773,29 +2948,7 @@
               cesGerekBaska + " başka karakter + " + CES_AYNI + " aynı karakterin farklı emojisi" +
               (cesGerekBaska === 0 ? " (planda tek karakter — 'başka karakter' koşulu uygulanamıyor)" : "") + ".");
 
-      /* 5) ESKİ KATMANLARI TEMİZLE. Aynı kanalı yeniden kullanıyoruz; temizlemeden yazmak
-         host'un ilk-parça kuralına (kanal BOŞ olmalı) takılırdı — bilerek: sessizce üst üste
-         binmektense yüksek sesle durmak yeğdir. Birden çok katman birikmişse hepsi gider. */
-      var tsil, silYol, rt;
-      for (tsil = 0; tsil < temizlenecekler.length; tsil++) {
-        silYol = emojiYolListesiYaz(ek, temizlenecekler[tsil]);
-        rt = String(await evalES('emojiTemizle(' + temizlenecekler[tsil] +
-                                 (silYol ? ',"' + esPath(silYol) + '"' : "") + ')'));
-        try { if (silYol) fs.unlinkSync(silYol); } catch (eSu) {}
-        logLine("Emoji: eski katman temizlendi (V" + (temizlenecekler[tsil] + 1) + ") → " + rt);
-        /* ⚠ İKİ HEDEF KANAL DA KORUNUR. Kontrol yalnız `=== kanal` idi; ikinci emoji kanalı
-           (kanal2) sonradan eklendi ama guard güncellenmemişti. kanal2 temizlenemezse içinde
-           eski emoji klipleri kalıyor, yerleştirmede o kanalın İLK parçası host'un
-           "kanal BOŞ olmalı" kuralına takılıp "V<n> BOŞ DEĞİL" ile reddediliyor ve kullanıcı
-           ödenmiş bir yapay zekâ isteğinden sonra hiç emoji alamıyordu. Erken ve net dur. */
-        if (rt.indexOf("ok:") !== 0 &&
-            (temizlenecekler[tsil] === kanal || temizlenecekler[tsil] === kanal2)) {
-          yaz("Eski emoji katmanı temizlenemedi (V" + (temizlenecekler[tsil] + 1) + "): " +
-              rt.replace(/^err:/, ""), "var(--bad)"); return;
-        }
-      }
-
-      /* 5.5) RESİMLERİ TEK SEFERDE PROJEYE AL — YERLEŞTİRMEDEN AYRI BİR ÇAĞRIDA.
+      /* 5) RESİMLERİ TEK SEFERDE PROJEYE AL — YERLEŞTİRMEDEN AYRI BİR ÇAĞRIDA.
          ⚠ ARKADAŞIN MAKİNESİNDE KİLİTLENEN ŞEY BUYDU (ParsMazi, 8 Ağustos 2026): host
          plan PARÇASI başına (40 emoji) kendi eksik resimlerini import ediyordu. 117 emojilik
          bir plan 3 parça, yani ÜÇ ayrı import demek; Premiere `suppressUI=true` verilse bile
@@ -2840,6 +2993,41 @@
           /* Host eskiyse (emojiResimYukle yok) yerleştirme yine çalışır: host'taki YEDEK
              import dalı devreye girer. Sessiz geçme, söyle. */
           logLine("Emoji ön yükleme atlandı (host eski olabilir): " + (eImp.message || eImp));
+        }
+      }
+
+      /* ⚠ İPTAL KAPISI — TEMİZLİKTEN ÖNCE OLMAK ZORUNDA (18 Ağustos 2026 denetimi).
+         Eski sıra şuydu: yapay zekâ isteği -> ESKİ KATMANLARI SİL -> parça döngüsü -> ilk
+         satırda iptali gör ve dur. Kullanıcı "duygular seçiliyor…" yazısını görüp yanlış
+         karakter seçtiğini fark ederse İptal'e bastığında timeline'da HİÇ emoji kalmıyordu:
+         yenisi konmadı, eskisi silinmişti. Ödenmiş istek de çöpe gidiyordu.
+         Resim yükleme de artık BUNDAN ÖNCE (5.5 yukarı taşındı): yükleme başarısız olursa
+         kullanıcının mevcut emojilerine hiç dokunulmamış olur. */
+      if (_emojiIptal) {
+        yaz("İptal edildi — mevcut emojilere dokunulmadı.", "var(--warn)");
+        logLine("Emoji: temizlikten önce iptal edildi; eski katmanlar korundu.");
+        return;
+      }
+
+      /* 5.5) ESKİ KATMANLARI TEMİZLE. Aynı kanalı yeniden kullanıyoruz; temizlemeden yazmak
+         host'un ilk-parça kuralına (kanal BOŞ olmalı) takılırdı — bilerek: sessizce üst üste
+         binmektense yüksek sesle durmak yeğdir. Birden çok katman birikmişse hepsi gider. */
+      var tsil, silYol, rt;
+      for (tsil = 0; tsil < temizlenecekler.length; tsil++) {
+        silYol = emojiYolListesiYaz(ek, temizlenecekler[tsil]);
+        rt = String(await evalES('emojiTemizle(' + temizlenecekler[tsil] +
+                                 (silYol ? ',"' + esPath(silYol) + '"' : "") + ')'));
+        try { if (silYol) fs.unlinkSync(silYol); } catch (eSu) {}
+        logLine("Emoji: eski katman temizlendi (V" + (temizlenecekler[tsil] + 1) + ") → " + rt);
+        /* ⚠ İKİ HEDEF KANAL DA KORUNUR. Kontrol yalnız `=== kanal` idi; ikinci emoji kanalı
+           (kanal2) sonradan eklendi ama guard güncellenmemişti. kanal2 temizlenemezse içinde
+           eski emoji klipleri kalıyor, yerleştirmede o kanalın İLK parçası host'un
+           "kanal BOŞ olmalı" kuralına takılıp "V<n> BOŞ DEĞİL" ile reddediliyor ve kullanıcı
+           ödenmiş bir yapay zekâ isteğinden sonra hiç emoji alamıyordu. Erken ve net dur. */
+        if (rt.indexOf("ok:") !== 0 &&
+            (temizlenecekler[tsil] === kanal || temizlenecekler[tsil] === kanal2)) {
+          yaz("Eski emoji katmanı temizlenemedi (V" + (temizlenecekler[tsil] + 1) + "): " +
+              rt.replace(/^err:/, ""), "var(--bad)"); return;
         }
       }
 
@@ -2960,12 +3148,14 @@
                ve tarafSay.sag 0 olsa bile bu dal çalışmak zorunda. */
             var prSag = "ok:(kanal yok)";
             if (tarafSay.sag > 0 || kanal2 < 0) {
-              prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")'));
+              prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")',
+                                          nobetci(yaz, "emoji animasyonu (sağ)")));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + prSag);
             }
             var prSol = "ok:(kanal yok)";
             if (kanal2 >= 0 && tarafSay.sol > 0) {
-              prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")'));
+              prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")',
+                                          nobetci(yaz, "emoji animasyonu (sol)")));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal2 + 1) + " → " + prSol);
             }
             var pr = (prSag.indexOf("ok:") === 0 && prSol.indexOf("ok:") === 0) ? "ok:" : (prSag.indexOf("ok:") === 0 ? prSol : prSag);
@@ -3034,6 +3224,7 @@
       var _bi = $("btnEmojiIptal");
       if (_bi) { _bi.hidden = true; _bi.disabled = false; }
       _emojiIptal = false;
+      state.emojiCalisiyor = false;
     }
   }
 
@@ -3743,7 +3934,7 @@
      ama asıl değerli veri kaydedilmiyordu.
      AutoCut sonrası timeline zamanları kaydığı için içerik süresi de yazılır; fark varsa
      geri yüklerken uyarılır — yanlış zamanlı listeyle çalışmak sessiz hataya yol açar. */
-  var _oturum = { name: "", end: 0 };
+  var _oturum = { name: "", end: 0, proje: "" };   // proje adı: sekans adı tek başına kimlik DEĞİL
   function clipsEnd(clips) {
     var e = 0;
     for (var i = 0; i < (clips || []).length; i++) {
@@ -3752,9 +3943,25 @@
     }
     return e;
   }
-  function sessionPath(seqName) {
-    var guv = String(seqName || "sekans").replace(/[^A-Za-z0-9ğüşıöçĞÜŞİÖÇ_ -]/g, "_").slice(0, 60);
-    return path.join(cfg.workDir, "oturum_" + guv + ".json");
+  /* Dosya adında güvenli hâle getir (oturum dosyası + kimlik anahtarları aynı kuralı kullanır). */
+  function _adGuvenli(s, uz) {
+    return String(s || "").replace(/[^A-Za-z0-9ğüşıöçĞÜŞİÖÇ_ -]/g, "_").slice(0, uz || 60);
+  }
+  /* ⚠ OTURUM DOSYASI ARTIK PROJE ADIYLA DA ANAHTARLANIYOR (18 Ağustos 2026 denetimi).
+     Premiere'in varsayılan sekans adları ("Video Sequence") projeler arasında TEKRAR EDİYOR;
+     dosya yalnız sekans adıyla adlandırıldığı için BAŞKA bir projenin oturumu okunabiliyordu
+     ve panel onu bu videonun altyazısı sanıyordu. CLAUDE.md bu boşluğu işaretleyip kökten
+     çözümü de yazmıştı: "oturum dosyasına proje adını da katmak".
+     ⚠ ESKİ DOSYALAR KAYBOLMAZ: `eski` yolu da döndürülür ve okuma tarafı ona düşer —
+     yoksa bu değişiklik kullanıcının o an elinde duran kaydedilmiş oturumunu görünmez yapardı
+     (30 dakikalık GPU işi). Yazma her zaman YENİ yola yapılır. */
+  function sessionPath(seqName, projeAd) {
+    var guv = _adGuvenli(seqName || "sekans");
+    var pr = _adGuvenli(projeAd != null ? projeAd : _oturum.proje, 40);
+    return path.join(cfg.workDir, "oturum_" + (pr ? pr + "__" : "") + guv + ".json");
+  }
+  function sessionPathEski(seqName) {
+    return path.join(cfg.workDir, "oturum_" + _adGuvenli(seqName || "sekans") + ".json");
   }
   function saveSession() {
     if (!CEP || !cfg || !_oturum.name) return;
@@ -3767,6 +3974,11 @@
            gerekçe CLAUDE.md'de presetler.json için yazılı). Panel yeniden kurulunca adın
            sessizce gider ve emoji özelliği bir sonraki videoda yine "A1'e adını yaz" der. */
         a1Ad: a1Adi(),
+        /* AutoCut BAYATLIK FRENİ de oturuma girer. Bayrak yalnız bellekte duruyordu: panel
+           kapanıp açılınca sıfırlanıyor ve kesim sonrası kaymış altyazılar hiç sorulmadan
+           basılıyordu. Sekans uzunluğu farkı (`kaymis`) bunu ancak KABA olarak yakalar —
+           kısa kesimlerde 1 sn eşiğinin altında kalır. Bayrağın kendisi kesin bilgidir. */
+        cuesStale: !!state.cuesStale,
         singleCues: state.singleCues, a1Cues: state.a1Cues, a2Cues: state.a2Cues,
         speakers: state.speakers.map(function (s) {
           return { id: s.id, sample: s.sample, start: s.start, style: s.styleSel ? s.styleSel.value : "" };
@@ -3814,6 +4026,7 @@
     try {
       var si = JSON.parse(String(await evalES("getSequenceInfoJSON()")));
       if (si && si.sequenceName) seqAdi = String(si.sequenceName);
+      if (si && si.projectName) _oturum.proje = String(si.projectName);
       if (si && si.durationSec > 0) seqSure = Number(si.durationSec);
     } catch (eSi) {}
     try {
@@ -3840,7 +4053,7 @@
     saveSession();
     logLine("Oturum kaydedildi — panel kapansa da liste durur.");
   }
-  function restoreSession(o) {
+  function restoreSession(o, kaymis) {
     state.genMode = o.genMode || "single";
     /* A1 adını oturumdan geri koy (localStorage silinmiş ya da başka makineye taşınmış
        olabilir). renderChannelMap'ten ÖNCE olmak ZORUNDA: kutu değerini lsGet ile dolduruyor. */
@@ -3862,6 +4075,16 @@
       state.genMode = "single";
       logLine("Eski konuşmacı ayrımlı oturum tek listeye birleştirildi (" + state.singleCues.length + " altyazı).");
     }
+    /* BAYATLIK FRENİNİ GERİ KUR — iki kaynaktan, ikisi de gerekli:
+         • `o.cuesStale`  : kesim yapıldığı hâlde sekans uzunluğu 1 sn'den az değiştiyse
+                            (kısa kesimler) `kaymis` yakalayamaz; bayrağı diskten okuruz.
+         • `kaymis`       : oturum başka bir panel oturumunda kaydedilmiş ve arada AutoCut
+                            yapılmış olabilir; sekans uzunluğu farkı bunu yakalar.
+       Eskiden ikisi de yoktu: geri yükleyen kullanıcıya "Timeline'a Ekle"de hiç sorulmuyordu. */
+    if (o.cuesStale || kaymis) {
+      state.cuesStale = true;
+      logLine("⚠ Geri yüklenen altyazılar KESİM SONRASI olabilir — yerleştirmeden önce onay istenecek.");
+    }
     redrawTranscript();
     modGorunumUygula();
     progressDone("Kaydedilmiş oturum geri yüklendi — " + allCues().length + " altyazı");
@@ -3869,26 +4092,71 @@
   /* Oturum dosyasını okur; ana dosya bozuksa .bak yedeğine düşer.
      Eskiden parse hatasında SESSİZCE dönülüyordu: ne log, ne uyarı — kullanıcı 30 dakikalık
      işi baştan yapıyor ve panelin oturum kaydettiğinden şüphe ediyordu. */
+  var _oturumKaynakNot = "";   // oturumOku farkli bir dosyadan kurtardiysa onay ekranina eklenir
   function oturumOku(seqName) {
-    var p = sessionPath(seqName);
-    if (fs.existsSync(p)) {
-      try { return JSON.parse(fs.readFileSync(p, "utf8")); }
-      catch (e) { logLine("Kaydedilmiş oturum dosyası okunamadı (bozuk olabilir): " + p); }
-    }
-    if (fs.existsSync(p + ".bak")) {
-      try {
-        var y = JSON.parse(fs.readFileSync(p + ".bak", "utf8"));
-        logLine("Oturumun YEDEĞİ kullanıldı (" + p + ".bak) — son birkaç düzeltme eksik olabilir.");
-        return y;
-      } catch (e2) { logLine("Oturum yedeği de okunamadı: " + p + ".bak"); }
+    _oturumKaynakNot = "";
+    /* Sıra: yeni (proje+sekans) → yedeği → ESKİ (yalnız sekans) → onun yedeği.
+       Eski yol, proje adının katılmasından önce kaydedilmiş oturumlar için duruyor; onsuz
+       bu değişiklik kullanıcının elindeki kaydı görünmez yapardı. */
+    var adaylar = [sessionPath(seqName)];
+    var eski = sessionPathEski(seqName);
+    if (eski !== adaylar[0]) adaylar.push(eski);
+    /* ⚠ ÜÇÜNCÜ DAL: proje adı SONRADAN değişmişse (Save As / yeniden adlandırma) ne yeni ne
+       eski ad tutar ve oturum SESSİZCE görünmez olurdu — kullanıcı 25-30 dakikalık GPU işini
+       kaybettiğini sanır. Eski kodda dosya yalnız sekans adıyla anahtarlandığı için proje
+       yeniden adlandırması oturumu hiç etkilemiyordu; proje adını eklemek bu yan etkiyi
+       doğurdu. Aynı sekans adıyla biten başka bir projenin dosyası varsa onu da aday yap;
+       en yenisi seçilir ve kullanıcıya HANGİ dosyadan geldiği söylenir (sessiz kurtarma yok). */
+    try {
+      var guvAd = _adGuvenli(seqName || "sekans");
+      var hepsiDosya = fs.readdirSync(cfg.workDir);
+      var ekAdaylar = [];
+      for (var h = 0; h < hepsiDosya.length; h++) {
+        var ad = hepsiDosya[h];
+        if (ad.indexOf("oturum_") !== 0 || ad.slice(-5) !== ".json") continue;
+        if (ad.indexOf("__" + guvAd + ".json") < 0) continue;
+        var tamY = path.join(cfg.workDir, ad);
+        if (adaylar.indexOf(tamY) >= 0) continue;
+        var mt = 0; try { mt = fs.statSync(tamY).mtimeMs || 0; } catch (eSt) {}
+        ekAdaylar.push({ y: tamY, t: mt });
+      }
+      ekAdaylar.sort(function (x, z) { return z.t - x.t; });   // en yeni önce
+      for (var e2 = 0; e2 < ekAdaylar.length; e2++) adaylar.push(ekAdaylar[e2].y);
+    } catch (eTara) {}
+
+    for (var a = 0; a < adaylar.length; a++) {
+      var p = adaylar[a];
+      if (fs.existsSync(p)) {
+        try {
+          var v = JSON.parse(fs.readFileSync(p, "utf8"));
+          if (a > 0) {
+            logLine("Başka bir adlandırmayla kaydedilmiş oturum bulundu ve kullanıldı: " + p);
+            /* ⚠ NOT ONAY EKRANINA DA CIKAR. Yalniz log'a yazmak yetmez: log varsayilan olarak
+               KAPALI ve kullanici "Geri yuklensin mi?" sorusuna bakarak karar veriyor. Dosya
+               baska bir proje adiyla kaydedilmisse bunu SORUDA gormeli, sonradan degil. */
+            _oturumKaynakNot = "\n\n⚠ Bu kayıt farklı bir dosya adıyla bulundu (" +
+                               p.replace(/^.*[\\\/]/, "") + ") — proje adı değişmiş olabilir.";
+          }
+          return v;
+        }
+        catch (e) { logLine("Kaydedilmiş oturum dosyası okunamadı (bozuk olabilir): " + p); }
+      }
+      if (fs.existsSync(p + ".bak")) {
+        try {
+          var y = JSON.parse(fs.readFileSync(p + ".bak", "utf8"));
+          logLine("Oturumun YEDEĞİ kullanıldı (" + p + ".bak) — son birkaç düzeltme eksik olabilir.");
+          return y;
+        } catch (e2) { logLine("Oturum yedeği de okunamadı: " + p + ".bak"); }
+      }
     }
     return null;
   }
   function kayitliOturumVarMi() {
     try {
       if (!CEP || !cfg || !_oturum.name) return false;
-      var p = sessionPath(_oturum.name);
-      return fs.existsSync(p) || fs.existsSync(p + ".bak");
+      var p = sessionPath(_oturum.name), pe = sessionPathEski(_oturum.name);
+      return fs.existsSync(p) || fs.existsSync(p + ".bak") ||
+             fs.existsSync(pe) || fs.existsSync(pe + ".bak");   // eski adlandırma da sayılır
     } catch (e) { return false; }
   }
   async function offerSessionRestore() {
@@ -3896,6 +4164,12 @@
     var d;
     try { d = await getClips(0); } catch (e) { return; }     // sekans yoksa sessizce çık
     _oturum.name = d.sequenceName; _oturum.end = clipsEnd(d.clips);
+    /* Proje adı oturum dosyasının adına giriyor; oturumOku'dan ÖNCE okunmalı. Okunamazsa
+       `proje` boş kalır ve sessionPath eski (yalnız sekans adlı) yola döner — kayıp yok. */
+    try {
+      var _si = JSON.parse(await evalES("getSequenceInfoJSON()"));
+      if (_si && _si.projectName) _oturum.proje = String(_si.projectName);
+    } catch (eSip) {}
     var o = oturumOku(d.sequenceName);
     if (!o) return;
     var toplam = (o.singleCues || []).length + (o.a1Cues || []).length + (o.a2Cues || []).length;
@@ -3907,9 +4181,15 @@
     var msg = "Bu sekans için kaydedilmiş " + toplam + " altyazı var (" + ne + " önce).\n\n" +
       (kaymis ? "⚠ DİKKAT: sekansın uzunluğu o zamandan beri değişmiş (muhtemelen AutoCut yapıldı).\n" +
                 "Altyazı zamanları KAYMIŞ olabilir.\n\n" : "") +
-      "Geri yüklensin mi?";
+      _oturumKaynakNot +
+      "\n\nGeri yüklensin mi?";
     if (!(await uiConfirm(msg, "Kaydedilmiş oturum"))) return;
-    restoreSession(o);
+    /* ⚠ `kaymis` BİLGİSİ BURADA ÖLÜYORDU. Panel kaymayı hesaplayıp yukarıdaki soruya yazıyor,
+       sonra restoreSession'a geçirmiyordu: `state.cuesStale` false kalıyor ve "Timeline'a Ekle"
+       bir daha SORMUYORDU. Oysa bayatlık freninin var olma sebebi tam olarak bu senaryo —
+       AutoCut'tan sonra altyazılar dakikalarca kayıyor. Paneli kapatıp açmak (bu projede
+       olağan; oturum kaydının var olma sebebi bu) freni sessizce devre dışı bırakıyordu. */
+    restoreSession(o, kaymis);
   }
 
   // ---------- yerleştirme ----------
@@ -3981,6 +4261,25 @@
      ve sonuç mesajına yazılır — yoksa kullanıcı hangi track'e hangi stili vereceğini bilemez.
      Tek kaynak seçiliyken (A1 ya da A2) tek grup olur, davranış eskisiyle aynıdır. */
   async function placeCaptions(range) {
+    /* ⚠ AKTİF SEKANS DOĞRULAMASI — ALTYAZI "AÇIK OLAN" SEKANSA BASILIYOR.
+       host.jsx addCaptionsToTimeline hedefi `app.project.activeSequence` olarak alıyor; panel
+       ise elindeki cue'ların HANGİ sekans için üretildiğini hiç sormuyordu. Kullanıcı üretimden
+       sonra Premiere'de başka bir sekansa geçerse (iki sekanslı proje olağan) bütün caption
+       track'ler YANLIŞ sekansa yazılıyor, üstelik "basıldı" bayrağı eski sekansın adına
+       düşüyordu. Panel caption track SİLEMEDİĞİ için temizlik tamamen elle yapılıyor.
+       Emsal kodda zaten var: emoji akışı aynı soruyu `sekansKimlik()` ile soruyor.
+       Okunamazsa sessizce devam edilir — eski davranış, yeni bir engel değil. */
+    try {
+      var _sbi = JSON.parse(await evalES("getSequenceInfoJSON()"));
+      if (_sbi && _sbi.sequenceName && _oturum.name && _sbi.sequenceName !== _oturum.name) {
+        var devamSeq = await uiConfirm(
+          "Altyazılar \"" + _oturum.name + "\" sekansı için üretildi, ama Premiere'de şu an " +
+          "\"" + _sbi.sequenceName + "\" açık.\n\n" +
+          "Devam edersem altyazılar AÇIK OLAN sekansa yazılır ve panel onları geri silemez " +
+          "(caption kanallarını Premiere'de elle silmen gerekir).\n\nYine de ekleyeyim mi?", "Altyazı");
+        if (!devamSeq) return null;
+      }
+    } catch (eSeqK) {}
     /* AUTOCUT SONRASI BAYATLIK FRENİ. Boşluklar kesilince timeline kısalıyor ama elde duran
        cue'lar eski zamanlarda kalıyor — yerleştirilirse hepsi kesilen toplam süre kadar kayar.
        Kullanıcı kendi akışında önce kesip sonra üretiyor, yani bu yola normalde girmiyor;
@@ -4002,8 +4301,18 @@
        önceki basıştan kalan track'ler o hesabın tümüyle dışındadır.
        Panel track sayısını okuyamadığı için tek yol SORMAK. Bayrak sekans adına bağlı ve
        kalıcı: her yerleştirme yeni track yarattığı için soru her tekrarda sorulmalı. */
-    var capAnahtar = "capBasildi_" + (_oturum.name || "sekans");
-    if (lsGet(capAnahtar, "") === "1") {
+    /* ⚠ ANAHTAR sekansKimlik() ile: yalnız sekans ADI kullanmak iki yönlü hata üretiyordu —
+       sekans yeniden adlandırılınca uyarı HİÇ çıkmıyor, iki farklı proje aynı varsayılan adı
+       ("Video Sequence") taşıyınca da birinin bayrağı ötekini YANLIŞ uyarıyordu. sekansKimlik()
+       proje adı + sekans adı + süreyi birleştiriyor; aynı ders emoji tarafında zaten alınmıştı. */
+    var capAnahtar = "capBasildi_" + (sekansKimlikSabit() || _oturum.name || "sekans");
+    /* ⚠ ESKİ ANAHTAR DA OKUNUR. Anahtara proje adı eklenince mevcut kullanıcıların ELİNDEKİ
+       bayrak orphan kalıyor ve bu YANLIŞ YÖNDE bir kayıp: bayrak yoksa panel "daha basılmamış"
+       sanıp UYARMIYOR, kullanıcı ikinci kez basıyor ve her altyazı ekranda İKİ KEZ çiziliyor
+       (panel caption track silemediği için temizlik tamamen elle). Okuma iki anahtarı da
+       dener, yazma YENİ anahtara yapılır — bir sonraki sürümde eski dal düşürülebilir. */
+    var capAnahtarEski = "capBasildi_" + (_oturum.name || "sekans");
+    if (lsGet(capAnahtar, "") === "1" || lsGet(capAnahtarEski, "") === "1") {
       var devamTekrar = await uiConfirm(
         "Bu sekansa daha önce altyazı eklendi.\n\n" +
         "Panel eski altyazı kanallarını SİLEMİYOR (Premiere script'ten izin vermiyor). " +
@@ -4332,12 +4641,20 @@
     /* AYNI ANDA TEK İŞ: İptal butonları pipeline.cancelAll() çağırıyor ve o, kayıtlı BÜTÜN
        süreçleri öldürüyor (hangi işe ait olduğuna bakmadan). İki iş aynı anda çalışırsa
        birinin iptali diğerini de öldürüyordu — 25 dakikalık altyazı işi böyle çöpe gidiyordu. */
-    if (state.acRunning) { uiAlert("AutoCut analizi sürüyor. Bitmesini bekle ya da onu iptal et.", "Altyazı"); return; }
+    if (state.acRunning) { uiAlert(acMesguMetni(), "Altyazı"); return; }
     if (snk.calisiyor) { uiAlert("Senkron işlemi sürüyor. Bitmesini bekle ya da onu iptal et.", "Altyazı"); return; }
     state.running = true; state.cancelled = false;
     var btn = this; btn.disabled = true; $("result").hidden = true;
     // Üretim sürerken kanal listesi yenilenemez (biten kanalların altyazıları kaybolur)
     var kt = $("btnKanalTara"); if (kt) kt.disabled = true;
+    /* SÜRE ARALIĞI DA KİLİTLENİR. `prepAudio` aralığı her kanal için CANLI okuyor
+       (getRange), `runChannels` ise onu kanal başına bir kez çağırıyor — yani 20-30 dakikalık
+       üretimin ortasında kutu değişirse KALAN kanallar başka bir aralıkla işlenir. Panel bunu
+       ne engelliyor ne karşılaştırıyordu: arkadaşların ilk dakikaları sessizce altyazısız
+       kalıyor, ekranda yine yeşil "Bitti" yazıyordu. Kardeş kilit (kanal listesi) zaten vardı. */
+    var rgS = $("rangeStart"), rgE = $("rangeEnd");
+    if (rgS) rgS.disabled = true;
+    if (rgE) rgE.disabled = true;
     $("log").textContent = ""; progressReset("Başlıyor…");
     $("btnCancel").hidden = false;
     try {
@@ -4348,8 +4665,15 @@
       else await runSingle();
       /* Üretim BAŞARIYLA bitti: cue'lar artık güncel timeline'a ait, AutoCut bayatlık freni
          kalkar. Hata/iptal durumunda buraya hiç gelinmez ve bayrak bilerek AÇIK kalır —
-         yarım kalmış üretimin cue'ları da bayattır. */
+         yarım kalmış üretimin cue'ları da bayattır.
+         ⚠ BAYRAK DİSKE DE YAZILDIĞI İÇİN BURADA KALMASI YETMİYOR: `saveSessionAuto()`
+         üretimin SON satırında, yani bu temizlemeden ÖNCE çalışıyor. Kesim sonrası yapılan
+         TAZE bir üretimde diske `cuesStale:true` yazılıyor ve panel kapanıp açılınca
+         "bu altyazılar kesimden ÖNCE üretildi" diye YANLIŞ uyarı kalıcılaşıyordu — üstelik
+         bayrağı silmenin tek yolu yeni bir üretim olduğu için uyarı her basışta çıkıyordu.
+         Bu yüzden temizledikten SONRA oturumu bir kez daha yaz. */
       state.cuesStale = false;
+      try { saveSession(); } catch (eCs) {}
     }
     catch (e) {
       if (state.cancelled) progressFail("İptal edildi", "warn");
@@ -4358,6 +4682,8 @@
     finally {
       state.running = false; btn.disabled = false; $("btnCancel").hidden = true;
       if (kt) kt.disabled = false;
+      if (rgS) rgS.disabled = false;
+      if (rgE) rgE.disabled = false;
       modGorunumUygula();
       /* Renk Değiştir sekmesindeyken iş bittiyse üretim alanı yeniden gizleniyor; son durumu
          bu sekmenin kendi durum satırına taşı — yoksa "Bitti" mesajı hiç görünmeden yok olur.
@@ -4386,6 +4712,11 @@
     
   $("btnAddTimeline").addEventListener("click", async function () {
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de timeline'a eklenir."); return; }
+    /* Meşguliyet kapıları — bu düğme de düzenin dışındaydı. AutoCut/Senkron/Emoji sürerken
+       altyazı basmak, timeline değişirken caption track yazmak demektir. */
+    if (state.acRunning) { uiAlert(acMesguMetni(), "Altyazı"); return; }
+    if (snk.calisiyor) { uiAlert("Senkron işlemi sürüyor. Bitmesini bekle.", "Altyazı"); return; }
+    if (state.emojiCalisiyor) { uiAlert("Emoji yerleştirme sürüyor. Bitmesini bekle.", "Altyazı"); return; }
     var btn = this; if (btn.disabled) return; btn.disabled = true;   // çift-tık koruması (mükerrer yerleştirmeyi önler)
     try {
       // Yerleştirmeden önce kaydet (Geri Al için). Sonuç log'lanır: kaydetme başarısızsa
@@ -4578,6 +4909,13 @@
       return;
     }
     snkLog(snk.dosyalar.length + " ses dosyası bulundu: " + snk.dosyalar.map(function (d) { return d.ad; }).join(", "));
+    /* YENİ KLASÖR OKUNDU = YENİ VİDEO -> henüz uygulanmadı. Bayrak bir kez true olduktan
+       sonra hiçbir yerde false'a dönmüyordu: aynı panel oturumunda ikinci videoya geçilince
+       AutoCut'ın "Craig kayıtları daha timeline'a konmadı" kapısı sessizce devre dışı
+       kalıyordu. Bedeli ağır — arkadaşların sesi timeline'da yokken onların konuştuğu
+       bölümler "sessizlik" sayılıp KESİLİYOR (ParsMazi'de gerçekten yaşandı).
+       ⚠ SIFIRLAMA BURADA, snkEslestir'DE DEĞİL: orası uygulamadan SONRA da çalışıyor. */
+    snk.uygulandi = false;
     $("snkCekenCard").hidden = false;
     snkEslestir();
   }
@@ -4592,6 +4930,13 @@
     // Hizalama/yerleştirme sürerken planı yeniden kurma: snkCalistir plan NESNELERİNE
     // referans tutuyor, yeniden kurulursa yerleştirme eski plana göre yapılır.
     if (snk.calisiyor) { snkLog("İşlem sürerken liste yenilenmez."); return; }
+    /* ⚠ snk.uygulandi BURADA SIFIRLANMAZ — sıfırlama snkDosyalariOku'da (yeni klasör okunduğu an).
+       Bir tur burada denendi ve YANLIŞ POZİTİF üretti: snkEslestir yalnız "yeni video" anında
+       değil, senkron BAŞARIYLA UYGULANDIKTAN sonra da çağrılıyor (kişi listesi kaydedilince,
+       "Bilinmeyen kişi" satırından kişi seçilince, "Videoyu kim çekiyor?" değişince). Orada
+       sıfırlamak, kayıtlar timeline'da DURURKEN AutoCut'a "Uygula'ya BASILMAMIŞ" dedirtiyordu.
+       Yanlış pozitif bu kapıda özellikle pahalı: kapı gerçek bir felaketi önlemek için var ve
+       boş yere çıkarsa kullanıcı onu görmezden gelmeyi öğrenir. */
     var ceken = snkCekenKim();
     var karsi = (ceken === "Tofi") ? "Moni" : "Tofi";
     var eslesen = [], bilinmeyen = [];
@@ -4631,8 +4976,15 @@
        Karşılaştırma KISI._norm ile aynı kuralda olmalı: dosya eşleşmesi de öyle yapılıyor,
        yoksa "mimi" ile "Mimi" ayrı sanılır. */
     var siraListesi = [], gorulenKarakter = {};
-    // NOT: _kn bu fonksiyonun her yerinde ayni kurali uygulamali (dosyaOf anahtari dahil).
-    var _kn = function (s) { return String(s == null ? "" : s).replace(/İ/g, "i").replace(/I/g, "i").toLowerCase(); };
+    /* NOT: _kn bu fonksiyonun her yerinde ayni kurali uygulamali (dosyaOf anahtari dahil).
+       ⚠ ARTIK KISI.norm'a DELEGE EDİYOR — kendi kopyası yalnız BÜYÜK "İ/I"yı çeviriyordu,
+       küçük noktasız "ı" olduğu gibi kalıyordu. Yani dosya eşleştirmesi (KISI._norm) ile
+       kanal sırası filtresi (buradaki _kn) İKİ FARKLI KURALDI: listede "Tofı" yazan çekenin
+       kendi kaydı eşleşmeyip timeline'a konuyor, videoda ses çift çıkıyordu. Aşağıdaki yorum
+       bu tuzağı zaten tarif ediyordu; eksik olan tek şey kuralın gerçekten aynı olmasıydı.
+       Yedek (KISI yüklenemezse) eski davranışı korur, sessizce çökmez. */
+    var _kn = (KISI && KISI.norm) ? KISI.norm
+            : function (s) { return String(s == null ? "" : s).replace(/[İIı]/g, "i").toLowerCase().replace(/[.\-_\s]/g, ""); };
     (state.kisiler || []).forEach(function (k) {
       if (!k || !k.karakter) return;
       if (_kn(k.karakter) === _kn(ceken) || _kn(k.karakter) === _kn(karsi)) return;
@@ -4941,7 +5293,7 @@
     if (!CEP) { uiAlert("Önizleme modu — Premiere'de çalışır."); return; }
     // Aynı anda tek iş: iptal düğmeleri pipeline.cancelAll() ile TÜM süreçleri öldürüyor (bkz. "İPTAL" bölümü)
     if (state.running) { uiAlert("Altyazı üretimi sürüyor. Bitmesini bekle ya da onu iptal et.", "Senkron"); return; }
-    if (state.acRunning) { uiAlert("AutoCut analizi sürüyor. Bitmesini bekle ya da onu iptal et.", "Senkron"); return; }
+    if (state.acRunning) { uiAlert(acMesguMetni(), "Senkron"); return; }
 
     var yerlesecek = [], seqAd = "";
     _snkHazirlik = true;
@@ -5043,6 +5395,17 @@
       }
 
       // --- hizalama ---
+      /* TUR BAŞI TEMİZLİK: plan nesneleri çalıştırmalar arasında YAŞIYOR (snk.plan'da duruyorlar).
+         `offset` / `guven` / `hizaHata` her turda yeniden yazılıyor ama güvenlik bloğunun
+         yazdığı alanlar yazılmıyordu: ikinci denemede onay ekranında bu turda olmayan bir
+         "ölçüm güvenilmez, kullanılmadı" notu çıkıyordu. `aykiri` da tutarlilikKontrol yalnız
+         GEÇERLİ sonuçlar için kurduğundan, hizalanamayan bir dosyada bayat kalabiliyor. */
+      for (var tz = 0; tz < yerlesecek.length; tz++) {
+        yerlesecek[tz].kirpmaIptalOlcum = null;
+        yerlesecek[tz].kirpmaIptalKaynak = null;
+        yerlesecek[tz].aykiri = false;
+        yerlesecek[tz].sapma = 0;
+      }
       var sonuclar = [];
       for (var i = 0; i < yerlesecek.length; i++) {
         if (snk.iptal) throw new Error("İptal edildi");
@@ -5147,19 +5510,52 @@
          ⚠ KAPSAM BİLEREK DAR: yalnız "aykırı VE negatif". Herkesin kayması birlikte negatifse
          (Craig OBS'ten önce başlatılmış) kimse aykırı olmaz ve kırpma normal çalışmaya devam
          eder — bu dal o senaryoya hiç dokunmaz. */
-      var guvenliOfs = (tut.medyan != null && isFinite(tut.medyan)) ? tut.medyan
-                     : ((snk.cekenKontrol != null && isFinite(snk.cekenKontrol)) ? snk.cekenKontrol : null);
+      /* ⚠ BU BLOK 18 AĞUSTOS 2026 DENETİMİNDE DÜZELTİLDİ — ÖNCEKİ HÂLİ YALNIZ 3+ DOSYADA
+         ÇALIŞIYORDU. Referans doğrudan `tut.medyan`dı; o da AYKIRI ölçümleri içerdiği için
+         gerçek `hizala.js` ile ölçüldüğünde şunlar çıktı:
+           4 dosya [7.72, 7.76, 7.82, -123.48] -> +7.74   ✔ kesme yok (belgelenen vaka)
+           3 dosya [7.72, 7.76, -123.48]       -> +7.72   ✔ kesme yok
+           2 dosya [7.72, -123.48]             -> -57.88  ✘ 57.88 sn KESİYORDU
+           2 dosya [-100.00, -123.48]          -> -111.74 ✘ ölçülenden 11.74 sn FAZLA kesiyordu
+           1 dosya [-123.48] + çapraz +7.76    -> -123.48 ✘ 123.48 sn KESİYORDU
+         Tek dosyada `tut.medyan` güvenilmez ölçümün TA KENDİSİ olduğu için (hizala.js tekDosya
+         dalı) `cekenKontrol` yedeği hiç devreye girmiyordu. Üç ekran da "KESİLMEDİ" diyordu;
+         kullanıcı tam da bu yüzden Devam'a basıyor. Tek arkadaşla çekim EN SIK kurulum.
+         Referans seçimi artık `HIZ.guvenliKayma`da — saf fonksiyon, gerçek sayılarla test edilir. */
+      var guvSecim = HIZ.guvenliKayma(sonuclar, snk.cekenKontrol);
+      var guvenliOfs = guvSecim.ofs;          /* yalnız AYKIRI OLMAYAN ölçümlerin medyanı, yoksa çekenin ölçümü */
       var kirpmaIptal = 0;
-      if (guvenliOfs != null) {
-        yerlesecek.forEach(function (p) {
-          if (!p.aykiri || !(p.offset < -0.01)) return;
-          p.kirpmaIptalOlcum = p.offset;
-          p.offset = guvenliOfs;
-          kirpmaIptal++;
-          snkLog("GÜVENLİK: " + p.karakter + " ölçümü hem aykırı hem negatif (" +
-                 p.kirpmaIptalOlcum.toFixed(2) + " sn) — dosya KESİLMEDİ, güvenli referansa (" +
-                 guvenliOfs.toFixed(2) + " sn) kondu.");
-        });
+      var kirpmaNobetci = 0;
+      yerlesecek.forEach(function (p) {
+        if (!p.aykiri || !(p.offset < -0.01)) return;
+        p.kirpmaIptalOlcum = p.offset;
+        var yeni = (guvenliOfs != null) ? guvenliOfs : 0;
+        /* NÖBETÇİ — ama KAYNAĞA DUYARLI (18 Ağustos regresyon turunda düzeltildi).
+           İlk hâli koşulsuzdu ve GEÇERLİ bir senaryoyu bozuyordu: Craig OBS'ten önce
+           başlatıldığında herkesin kayması negatiftir ve "saglam" medyan (aykırı OLMAYAN
+           ölçümlerin medyanı) meşru şekilde negatif çıkar. Koşulsuz kelepçe o dosyayı 0'a
+           koyup komşularından medyan kadar KAYDIRIYORDU — üstelik düzeltmesi sürüklemekle
+           olmuyor (klip 0'dan öncesine gidemez). Ölçüldü: [-5.0, -5.1, -7.0] -> ikisi
+           kırpılıp yerine otururken üçüncüsü 5 sn geç kalıyordu.
+           KURAL: "saglam" = en az bir AYKIRI OLMAYAN ölçüm bunu doğruladı -> negatif meşru,
+           kırpma yapılır. "ceken"/"yok" = tek ya da hiç doğrulanmamış sayı -> KESME YOK.
+           Asıl korunmak istenen şey buydu: doğrulanmamış bir sayıya dayanıp ses silmek. */
+        if (yeni < -0.01 && guvSecim.kaynak !== "saglam") {
+          snkLog("GÜVENLİK (nöbetçi): " + p.karakter + " için güvenli referans da negatif (" +
+                 yeni.toFixed(2) + " sn) ve doğrulanmamış (" + guvSecim.kaynak +
+                 ") — kırpma YAPILMADI, klip 0'a kondu.");
+          yeni = 0;
+          kirpmaNobetci++;
+        }
+        p.offset = yeni;
+        p.kirpmaIptalKaynak = (yeni === 0 && guvSecim.kaynak === "yok") ? "yok" : guvSecim.kaynak;
+        kirpmaIptal++;
+        snkLog("GÜVENLİK: " + p.karakter + " ölçümü hem aykırı hem negatif (" +
+               p.kirpmaIptalOlcum.toFixed(2) + " sn) — dosya KESİLMEDİ, " +
+               (yeni === 0 ? "klip 0 anına" : "güvenli referansa (" + yeni.toFixed(2) + " sn)") + " kondu.");
+      });
+      if (kirpmaNobetci) {
+        snkLog("NÖBETÇİ: " + kirpmaNobetci + " dosyada güvenli referans da negatifti — hiçbiri kesilmedi.");
       }
 
       /* Kanal durumunu ONAYDAN HEMEN ÖNCE tazele. Oyun sesini artık kullanıcı elle taşıyor ve
@@ -5223,12 +5619,32 @@
       var isaretNot = kesilecekVar
         ? "\n\n(− işareti: kaydın BAŞINDAN o kadarı kesilecek. + işareti: klip o saniyeye konacak.)"
         : "";
-      var kirpNot = kirpmaIptal
-        ? ("\n\n⚠ " + kirpmaIptal + " dosyanın ölçümü hem diğerlerinden farklı hem NEGATİF çıktı. " +
-           "Negatif kayma “kaydın başından o kadarını kes” demek; ölçüme güvenilmediği için " +
-           "KESİLMEDİ, diğerleriyle aynı kaymaya (" + guvenliOfs.toFixed(2) + " sn) kondu. " +
-           "Uyguladıktan sonra o kanalı dinle; gerekirse klibi elle kaydır.")
-        : "";
+      /* ⚠ METİN guvenliOfs'tan DEĞİL, GERÇEKTEN YAZILAN DEĞERDEN üretilir.
+         İki hata birden buradaydı (18 Ağustos regresyon turu):
+         (1) ÇÖKME: `guvenliOfs.toFixed(2)` — hiçbir kaynak yoksa guvenliOfs null olur ama
+             kirpmaIptal yine de artar; TypeError senkronun tamamını düşürüyordu (dakikalarca
+             süren ffmpeg + korelasyon işi çöpe). Ölçüldü: [-100, -123.48] ve [7.72, -123.48]
+             çapraz kontrol yokken tam olarak buraya düşüyordu.
+         (2) YALAN: nöbetçi devreye girdiğinde dosyaya 0 yazılıyor ama metin hâlâ negatif
+             referansı söylüyordu — tabloda "+0.00", uyarıda "-5.40 sn kondu". Kullanıcıya
+             aynı ekranda iki çelişkili sayı; üstelik eksi işareti "kesildi" demek olduğu
+             için hiç kesilmediği hâlde kesilmiş izlenimi veriyordu. */
+      var kirpNot = "";
+      if (kirpmaIptal) {
+        var konanlar = [];
+        yerlesecek.forEach(function (p) {
+          if (p.kirpmaIptalOlcum == null) return;
+          konanlar.push(p.karakter + " (" + (p.offset >= 0 ? "+" : "") + p.offset.toFixed(2) + " sn)");
+        });
+        kirpNot = "\n\n⚠ " + kirpmaIptal + " dosyanın ölçümü hem diğerlerinden farklı hem NEGATİF çıktı. " +
+                  "Negatif kayma “kaydın başından o kadarını kes” demek; ölçüme güvenilmediği için " +
+                  "o dosyalar KESİLMEDİ: " + konanlar.join(" · ") + ". " +
+                  "Uyguladıktan sonra o kanalları dinle; gerekirse klibi elle kaydır.";
+        if (kirpmaNobetci) {
+          kirpNot += "\n(" + kirpmaNobetci + " tanesinde güvenilir bir referans hiç bulunamadı — " +
+                     "klip 0 anına kondu, hiçbir ses kesilmedi.)";
+        }
+      }
       /* Uyarı SAYI değil AD versin: "1 dosyanın kayması farklı" cümlesi kullanıcıyı tabloya
          geri gönderip hangisi olduğunu aratıyordu. */
       var aykiriAdlar = [];
@@ -5461,6 +5877,19 @@
 
   // ---------- AUTOCUT ----------
   var acCuts = [], acLast = null, _acMax = 0;
+  /* `state.acRunning` artık İKİ aşamada da kuruluyor (analiz + kesim), ama ikisi aynı şey değil:
+     analiz iptal edilebilir, kesim edilemez. Mesajı İKİNCİ bir bayrakla değil, ekrandaki iptal
+     düğmesinin görünürlüğünden TÜRETİYORUZ — iki bayrağı senkron tutmak, çözdüğünden büyük bir
+     hata kaynağı olurdu (bu projede `snk.uygulandi` tam da öyle bayatlamıştı).
+     ⚠ Fonksiyon BİLDİRİMİ (var değil): yukarıdaki çağrı yerlerinden önce tanımlı olmalı;
+     `var` ile yazılsaydı hoisting yüzünden çağrı anında undefined olurdu (v1.9.20 emoji çökmesi). */
+  function acMesguMetni() {
+    var c = $("acCancel");
+    var iptalVar = !!(c && !c.hidden);
+    return iptalVar
+      ? "AutoCut analizi sürüyor. Bitmesini bekle ya da AutoCut kartındaki İptal'e bas."
+      : "AutoCut kesim yapıyor. Bitmesini bekle — kesim başladıktan sonra durdurulamaz.";
+  }
   function acSetProgress(pct, label) {
     var box = $("acProgress"); box.hidden = false; box.classList.remove("done", "error", "warn");
     var sp = $("acSpinner"); if (sp) sp.hidden = false; var bd = $("acBadge"); if (bd) bd.hidden = true;
@@ -5691,6 +6120,10 @@
     if (!CEP) { uiAlert("Önizleme modu. Premiere'de boşluklar kesilir."); return; }
     // Üretim sürerken kesim yapılırsa timeline zamanları kayar; hazırlanan altyazılar yanlış yere düşer.
     if (state.running) { uiAlert("Altyazı üretimi sürerken kesim yapılamaz — zamanlar kayar ve altyazılar yanlış yere düşer.", "AutoCut"); return; }
+    /* SENKRON KAPISI — kardeş akışlarda vardı, burada YOKTU. Senkron kayıtları timeline'a
+       yerleştirirken kesim yapılırsa yerleştirme zamanları kayar ve Craig kayıtları yanlış
+       yere düşer. Kesme, panelin en yıkıcı adımı; en az kardeşleri kadar korunmalı. */
+    if (snk.calisiyor) { uiAlert("Senkron işlemi sürerken kesim yapılamaz — kayıtlar yanlış yere düşer.", "AutoCut"); return; }
     if (!acCuts.length) { uiAlert("Önce Analiz Et."); return; }
     var _sec = acLast ? acLast.totalCut : 0;
     var _secTxt = _sec >= 1 ? Math.round(_sec) + " sn" : _sec.toFixed(1) + " sn";
@@ -5735,6 +6168,12 @@
     if (!(await uiConfirm(acCuts.length + " boşluk kesilecek (~" + _secTxt + " kısalır)." + _uyari +
         "\n\nSekans dışı / kayıt boşluğu olanlar otomatik atlanır. Kesimden ÖNCE kaydet; geri almak için Ctrl+Z (birden çok kez gerekebilir).", "Boşlukları Kes"))) return;
     btn.disabled = true;   // çift-tık koruması: kesim sürerken tekrar tetiklenmesin
+    /* ⚠ MEŞGULİYET BAYRAĞI — kesim aşaması panelin EN YIKICI adımı ama tek koruması kendi
+       düğmesiydi. Analiz aşaması `state.acRunning` kuruyor ve Altyazı/Senkron akışları ona
+       bakıyor; kesim aşaması kurmuyordu, yani dakikalarca süren ripple-delete sırasında
+       "Uygula" ya da "Timeline'a Ekle" çalıştırılabiliyordu — ikisi de timeline'ı kesim
+       altındayken okur. Bayrak burada kurulur, finally'de KOŞULSUZ indirilir. */
+    state.acRunning = true;
     try {
       _acMax = 0; $("acLabel").style.color = "";
       /* Kardeş akış acAnalyze bunu yapıyor, burada yoktu: work klasörü yoksa aşağıdaki
@@ -5802,7 +6241,7 @@
          acAnalyze'daki `state.acCancelled` dalı KOPYALANMADI: acCut'ta iptal düğmesi yok. */
       acFail("❌ " + friendlyError(e), "bad");
       acLogLine("HATA: " + (e.message || e));
-    } finally { btn.disabled = false; }
+    } finally { btn.disabled = false; state.acRunning = false; }
   });
 
   // ---------- MOCK (tarayıcı önizleme) ----------

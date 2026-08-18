@@ -296,8 +296,14 @@ async function buildTimelineAudio(clips, ffmpegExe, outWav, onLog, streamIndex) 
       _btIptalKontrol();   // her parçadan ÖNCE: iptal sonrası yeni ffmpeg doğmasın
       const chunk = valid.slice(start, start + chunkN);
       const partWav = path.join(dir, base + "__part" + ci + ".wav");
-      await _renderTimelineChunk(chunk, ffmpegExe, partWav, sIdx);
+      /* ⚠ ADI LİSTEYE RENDER'DAN ÖNCE YAZ — "üreteceğimiz dosyayı baştan sahiplen".
+         Eskiden push render'dan SONRAYDI: o an üretilen parça hata alır ya da iptal edilirse
+         (ffmpeg taskkill ile ölür ama yarım .wav'ı diskte bırakır) dosya adı listeye HİÇ
+         girmiyor, aşağıdaki finally temizliği de onu görmüyordu. Her iptalde yüzlerce MB
+         work klasöründe kalıyordu. Önce eklemek güvenli: temizlik yalnız var olan dosyayı
+         siler, hiç oluşmamış dosyada unlinkSync zaten sessizce catch'e düşüyor. */
       parts.push(partWav);
+      await _renderTimelineChunk(chunk, ffmpegExe, partWav, sIdx);
       if (onLog) onLog("[ffmpeg] parça " + (ci + 1) + "/" + Math.ceil(valid.length / chunkN) + " (" + chunk.length + " klip)\n");
     }
     _btIptalKontrol();
@@ -1626,8 +1632,24 @@ async function transcribe(cfg, wavPath, onLog, opts) {
     var ciktiYok = !String((e && e.cikti) || "").trim();
     if (!fs.existsSync(jsonPath) && hot && (_hotwordsTaninmadi(e) || ciktiYok)) {
       if (onLog) onLog("[whisper] motor isim ipucunu (--hotwords) tanımadı, ipucusuz tekrar deneniyor...\n");
-      try { await run(cfg.engineExe, argsNoHot, onLog, runOpts); } catch (e2) {}
+      /* ⚠ İKİNCİ DENEMENİN HATASI SAKLANIR, YUTULMAZ.
+         Eskiden `catch (e2) {}` ile tamamen atılıyor ve iki satır sonra BİRİNCİ hata
+         fırlatılıyordu; oysa bu dala ancak birinci denemenin çıktısı BOŞ olduğunda
+         giriliyor (ciktiYok), yani kullanıcıya gösterilen hata neredeyse her zaman
+         sebepsiz oluyordu. Gerçek sebep (CUDA belleği, bozuk WAV, disk dolu) ikinci
+         koşunun çıktısındaydı ve görünmüyordu. Artık çıktısı DOLU olan deneme fırlatılır.
+         Ayrı log dosyası: ikinci koşu aynı runOpts ile engine_last.log'un üzerine yazıyor,
+         birinci denemenin izini siliyordu. */
+      var ikinciHata = null;
+      var runOpts2 = { cwd: engDir, pathDirs: pathDirs, logFile: path.join(outDir, "engine_last_ipucusuz.log") };
+      try { await run(cfg.engineExe, argsNoHot, onLog, runOpts2); } catch (e2) { ikinciHata = e2; }
       if (iptalEdildiMi(damga)) throw new Error("İptal edildi");
+      if (!fs.existsSync(jsonPath) && ikinciHata) {
+        // Hangisinde gerçek çıktı varsa onu göster; ikisi de boşsa birinci hata (eski davranış).
+        var birinciDolu = !!String((e && e.cikti) || "").trim();
+        var ikinciDolu = !!String((ikinciHata && ikinciHata.cikti) || "").trim();
+        if (ikinciDolu && !birinciDolu) throw ikinciHata;
+      }
     }
     if (!fs.existsSync(jsonPath)) throw e;
     if (onLog) onLog("[whisper] çıkışta uyardı ama transkript hazır.\n");
@@ -1771,8 +1793,11 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
   while ((m = re.exec(sd))) {
     if (m[1] === "start") curStart = parseFloat(m[2]);
     else if (m[1] === "end" && curStart != null) {
-      const s = curStart + tailOut, e = parseFloat(m[2]) - leadIn;
-      if (e - s >= minCut) cuts.push({ start: s, end: e, dur: e - s });
+      const hamSon = parseFloat(m[2]);
+      const s = curStart + tailOut, e = hamSon - leadIn;
+      /* hamBas/hamSon = silencedetect'in HAM sessizlik sınırları (dolgu payları uygulanmadan).
+         Birleştirme kararı bunlarla verilir; sebebi hemen aşağıda. */
+      if (e - s >= minCut) cuts.push({ start: s, end: e, dur: e - s, hamBas: curStart, hamSon: hamSon });
       curStart = null;
     }
   }
@@ -1782,19 +1807,57 @@ async function analyzeSilence(cfg, voiceWav, onLog, opts) {
      yani kesim sayısı yarıya inerken kazanç sadece %0.8 azalıyor.
      Ayrıca KALİTE de artıyor: 0.15 sn'lik konuşma kırıntıları zaten makineli tüfek gibi
      jump-cut üretiyordu. Değer muhafazakâr tutuldu — anlamlı bir kelime 0.15 sn'ye sığmaz. */
-  const MERGE_GAP = (opts.mergeGap != null) ? opts.mergeGap : 0.15;
+  /* ⚠ KARŞILAŞTIRMA HAM SESSİZLİK SINIRLARIYLA YAPILIR — eskiden DOLGU PAYLI kesim
+     aralığıyla yapılıyordu ve bu dal varsayılan ayarda MATEMATİKSEL OLARAK hiç çalışmıyordu.
+     Hesap: cuts[q].start = hamBas_q + tailOut · son.end = hamSon_(q-1) - leadIn
+            cuts[q].start - son.end = (hamBas_q - hamSon_(q-1)) + tailOut + leadIn
+     Yani ölçülen fark, gerçek konuşma parçasının üstüne (tailOut + leadIn) ekliyordu.
+     Varsayılanlarda (minSilence 0.5): tailOut = 0.09 · leadIn = 0.15 -> toplam 0.24.
+     Gerçek konuşma parçası hiçbir zaman negatif olamayacağı için fark daima >= 0.24 ve
+     MERGE_GAP 0.15'in ALTINA hiç inemiyordu; yorumda anlatılan "1137 -> 606 kesim" ölçümü
+     bu koddan çıkamazdı. Artık iki sessizlik ARASINDA kalan konuşma parçasının ham süresi
+     ölçülüyor: hamBas_q - hamSon_(q-1). Bu dal artık gerçekten çalıştığı için kesim SAYISI
+     değişir; kaç kesimin birleştirildiği aşağıda log'a yazılır. */
+  /* ⚠⚠ VARSAYILAN 0 = BIRLESTIRME KAPALI (18 Agustos 2026 regresyon turu).
+     Bu dal uzun sure OLU kaldi: karsilastirma dolgu paylari CIKARILMIS kesim araligi ile
+     yapiliyordu ve varsayilan paylarla matematiksel olarak esigin altina hic inemiyordu.
+     Denetimde matematik DUZELTILDI (ham sessizlik sinirlari) ve 1000 rastgele senaryoda
+     sira/cakisma hatasi uretmedigi olculdu. AMA calisir hale gelmesi bir DAVRANIS
+     degisikligi: iki sessizlik arasinda kalan ve esigin USTUNDE olan (yani DUYULAN)
+     kisa parcalar artik kesim araligina giriyor ve SILINIYOR. Birlesme zincirleme:
+     her birlesmede karsilastirma noktasi ileri tasiniyor, halka sayisina tavan yok.
+     Olculdu (simulasyon): 0.12 sn'lik 6 gulme patlamasi, aralarinda 0.6 sn sessizlik ->
+     eski davranis 6 ayri kesim ve patlamalarin hepsi KALIYOR; birlestirme acikken TEK
+     kesim ve 5 patlamanin TAMAMI siliniyor. Kullanici bunu ancak videoyu izlerken fark eder.
+     Yorumdaki '1137 -> 606 kesim' olcumu ise bu koddan CIKAMAZ (dal zaten oluydu), yani
+     0.15 esigi kullanicinin gercek kaydinda HIC dogrulanmadi.
+     KARAR: varsayilan 0 (kapali) — panel bugunku davranisini birebir korur. Deger
+     `opts.mergeGap` ile acilabilir; acmadan once KULLANICININ GERCEK KAYDINDA olculmeli
+     ve acCut onay metnine 'aralardaki kisa sesler de silinecek' satiri eklenmeli.
+     ⚠ Bu sayiyi varsayilan olarak buyutmeden once yukaridaki olcumu tekrarla. */
+  const MERGE_GAP = (opts.mergeGap != null) ? opts.mergeGap : 0;
   let merged = cuts, birlesen = 0;
   if (MERGE_GAP > 0 && cuts.length > 1) {
     merged = [cuts[0]];
     for (let q = 1; q < cuts.length; q++) {
       const son = merged[merged.length - 1];
-      if (cuts[q].start - son.end <= MERGE_GAP) { son.end = cuts[q].end; son.dur = son.end - son.start; birlesen++; }
+      // Ham sınır yoksa (beklenmedik) birleştirme YAPMA — eski, kesin davranışta kal.
+      const araHam = (cuts[q].hamBas != null && son.hamSon != null) ? (cuts[q].hamBas - son.hamSon) : Infinity;
+      if (araHam <= MERGE_GAP) {
+        son.end = cuts[q].end; son.dur = son.end - son.start;
+        // hamSon da taşınmalı: sonraki karşılaştırma birleşmiş boşluğun GERÇEK bitişine bakmalı.
+        son.hamSon = cuts[q].hamSon;
+        birlesen++;
+      }
       else merged.push(cuts[q]);
     }
   }
   let total = 0; for (let c = 0; c < merged.length; c++) total += merged[c].dur;
   if (onLog) onLog("[autocut] " + merged.length + " boşluk, " + total.toFixed(1) + " sn" +
-    (birlesen ? (" (" + birlesen + " yakın boşluk birleştirildi — kesim hızlanır)") : "") + ".\n");
+    /* Sayı ham sayıdan farklıysa SEBEBİ yazılır: kullanıcı kesim sayısının neden düştüğünü
+       görebilmeli (bu dal düzeltilmeden önce hiç çalışmıyordu, yani sayı artık değişiyor). */
+    (birlesen ? (" (birleştirildi: " + birlesen + " yakın boşluk, " + cuts.length +
+                 " -> " + merged.length + " kesim — kesim hızlanır)") : "") + ".\n");
   return { mean: mean, threshold: threshold, cuts: merged, count: merged.length, totalCut: total,
            merged: birlesen, rawCount: cuts.length };
 }

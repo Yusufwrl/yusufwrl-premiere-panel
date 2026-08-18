@@ -14,7 +14,7 @@
 
 #define AppName    "Yusufwrl Premiere"
 #define AppId      "com.yusufwrl.premierepanel"
-#define AppVersion "1.28.2"
+#define AppVersion "1.29.0"
 
 [Setup]
 AppId={{7C9E6B10-3A42-4F58-9D21-A6B4E8C0F312}
@@ -68,10 +68,14 @@ Type: files; Name: "{app}\js\emojikonum.js"
 ; config.pkg.json: v1.13'te eklenen TEK KULLANIMLIK ayar dosyasi. v1.9.21'de onu okuyup
 ; silen kod YOK, yani birakilirsa klasorde sonsuza kadar kalir.
 Type: files; Name: "{app}\config.pkg.json"
-; v1.11+ ile gelen ek Track Style dosyalari. v1.9.21'in stiller.json'i yalniz ilk 6'yi
-; listeliyor, fazlalari zaten okunmuyor.
-Type: files; Name: "{app}\varsayilan\stiller\stil07.prtextstyle"
-Type: files; Name: "{app}\varsayilan\stiller\stil08.prtextstyle"
+; v1.11+ ile gelen ek Track Style dosyalari.
+; ⚠ stil07 (Turuncu Text) ve stil08 (Sari Text) BU LISTEDEN CIKARILDI: bugun
+;   varsayilan\stiller.json SEKIZ stil listeliyor ve ikisi de HALA pakette. Silme satiri
+;   bayat kalmisti. Su an zararsizdi (Inno once siler, sonra [Files] yeniden kurar) ama
+;   sira degisirse ya da [Files] o dosyayi bir gun getirmezse iki stil sessizce giderdi.
+;   KURAL: [InstallDelete] icindeki hicbir "varsayilan\stiller\*" adi stiller.json'da
+;   GECMEMELI. Nobetci testi var (testler\tumtest.js).
+; stil09-13: paketten gercekten cikti (stiller.json'da yoklar), silinmeye devam ediyorlar.
 Type: files; Name: "{app}\varsayilan\stiller\stil09.prtextstyle"
 Type: files; Name: "{app}\varsayilan\stiller\stil10.prtextstyle"
 Type: files; Name: "{app}\varsayilan\stiller\stil11.prtextstyle"
@@ -106,7 +110,11 @@ Type: files; Name: "{app}\varsayilan\stiller\stil13.prtextstyle"
 ;   ✅ KAPATILDI: asagidaki ikinci Source satiri ayni dosyayi "config.pkg.json" adiyla da
 ;   kuruyor ve panel acilista (js\app.js initCEP) birlestirip dosyayi SILIYOR. Birlestirme
 ;   JS tarafinda, zaten test edilmis kodla yapiliyor.
-Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,lisans.json,lisans.json.bak,config.json"; \
+; ⚠ presetler.json.tmp / presetler.bak.json.yeni de DISLANIR: atomik yazmanin ara dosyalari.
+;   Yazma yarida kalirsa preset verisi YALNIZ onlarda kalir ve panel acilista oradan
+;   kurtariyor (js\app.js presetYiginlar). Dislanmazlarsa yeniden kurulum tam da kurtarmanin
+;   gerektigi anda onlari ezer/siler ve kurtarma yolu kapanir.
+Source: "staging\panel\*"; DestDir: "{app}"; Excludes: "engine-root.txt,diarize-device.txt,sozluk.json,kisiler.json,assemblyai-key.txt,anthropic-key.txt,presetler.json,presetler.bak.json,presetler.json.tmp,presetler.bak.json.yeni,lisans.json,lisans.json.bak,config.json"; \
   Flags: recursesubdirs createallsubdirs ignoreversion
 ; config.json: temiz kurulumda gelir, yeniden kurulumda kullanicininki KORUNUR.
 Source: "staging\panel\config.json"; DestDir: "{app}"; Flags: onlyifdoesntexist

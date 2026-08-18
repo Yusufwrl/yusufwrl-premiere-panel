@@ -22,7 +22,8 @@ $PanelInclude = @("index.html", "config.json", "update.json", "version.json",
 
 # Kullaniciya/makineye ozel dosyalar: pakete GIRMEZ, kurulu kopyada ASLA ezilmez.
 #
-# BU BES DOSYA HER YERDE AYNI. Listenin tekrarlandigi YERLER:
+# BU LISTE BES YERDE AYNI OLMAK ZORUNDA (dosya SAYISI degil, YER sayisi bes).
+# Listenin tekrarlandigi YERLER:
 #   1) .gitignore
 #   2) burasi ($PanelUserFiles)  <- pack-panel.ps1 ($exclude) ve deploy-dev.ps1 ($koru)
 #                                   ayri liste TUTMAZ, ikisi de buradan okur
@@ -37,11 +38,19 @@ $PanelInclude = @("index.html", "config.json", "update.json", "version.json",
 #
 # lisans.json: sifre BIR KERE girilir (kullanicinin acik istegi). Guncelleme ya da
 # yeniden kurulum bu dosyayi ezerse arkadas her seferinde sifreyi tekrar girer ve
-# sunucuya gereksiz bir aktivasyon daha duser -> BES LISTEDE DE bulunmasi SART.
+# sunucuya gereksiz bir aktivasyon daha duser -> BES YERIN HEPSINDE bulunmasi SART.
 $PanelUserFiles = @("engine-root.txt", "diarize-device.txt", "sozluk.json",
                     "kisiler.json", "assemblyai-key.txt", "anthropic-key.txt",
                     "presetler.json",
                     "presetler.bak.json",
+                    # presetler.json.tmp / presetler.bak.json.yeni: ATOMIK yazmanin ARA
+                    # dosyalari (js\app.js presetYiginlarYaz: .tmp yaz -> eskisini .bak.yeni'ye
+                    # al -> rename). Yazma yarida kalirsa (OneDrive kilidi, Premiere cokmesi)
+                    # veri YALNIZ bu ikisinde kalabiliyor ve presetYiginlar() kurtarmayi tam
+                    # buradan yapiyor. Korunmazlarsa yeniden kurulum/guncelleme tam da
+                    # kurtarmanin gerektigi anda onlari siliyor ve kurtarma yolu kapaniyor.
+                    "presetler.json.tmp",
+                    "presetler.bak.json.yeni",
                     "lisans.json",
                     # lisans.json.bak: js\lisans.js kayitYaz artik ATOMIK yaziyor ve eskisini
                     # .bak'a aliyor; kayitOku ana dosya bozuksa oradan kurtariyor. Korunmazsa

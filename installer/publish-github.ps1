@@ -9,11 +9,18 @@
 
   -Overwrite : tag zaten yayindaysa uzerine yaz. SADECE yarim kalmis bir yayini
                tamamlamak icin. Yeni bir duzeltme yayinlarken KULLANMA - surumu yukselt.
+
+  -GeriDonusOnayla : yayindaki en yuksek surumden KUCUK/ESIT bir surum cikarmaya izin ver.
+               Normalde bu yasak, cunku panel guncellemeleri SAYISAL karsilastiriyor
+               (js\updater.js cmpVer) ve "uzak <= yerel" olan bir yayin kimsenin
+               panelinde GORUNMEZ - betik yine de "BITTI" derdi. Bilincli bir geri
+               donus yapiyorsan bu anahtari ekle (bkz. CLAUDE.md, v1.15.0 / v1.9.21 notu).
 #>
 param(
   [string]$RepoName = "yusufwrl-premiere-panel",
   [switch]$Private,
-  [switch]$Overwrite
+  [switch]$Overwrite,
+  [switch]$GeriDonusOnayla
 )
 $ErrorActionPreference = "Stop"
 $proj = Split-Path -Parent $PSScriptRoot   # PremiereExtension koku
@@ -25,6 +32,34 @@ function Invoke-Gh {
   $old = $ErrorActionPreference; $ErrorActionPreference = "Continue"
   & gh @Args 2>&1 | Out-Null
   $code = $LASTEXITCODE; $ErrorActionPreference = $old; return $code
+}
+
+# Invoke-Gh ciktiyi yutuyor; --json okumak icin ciktiyi da dondurur.
+function Invoke-GhOut {
+  param([Parameter(ValueFromRemainingArguments=$true)]$Args)
+  $old = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+  $out = (& gh @Args 2>&1 | Out-String)
+  $code = $LASTEXITCODE; $ErrorActionPreference = $old
+  return (New-Object psobject -Property @{ Kod = $code; Cikti = $out })
+}
+
+# js\updater.js cmpVer'in BIREBIR ayni mantigi: major.minor.patch SAYISAL karsilastirma.
+# Metin karsilastirmasi olsaydi 1.9.9 -> 1.9.10 gecisi "kucuk" gorunurdu.
+# Donus: 1 = a buyuk, -1 = b buyuk, 0 = esit.
+function Compare-Surum {
+  param([string]$a, [string]$b)
+  $pa = ($a -replace '^[vV]', '').Split('.')
+  $pb = ($b -replace '^[vV]', '').Split('.')
+  for ($i = 0; $i -lt 3; $i++) {
+    $sa = "0"; if ($i -lt $pa.Count -and $pa[$i]) { $sa = $pa[$i] }
+    $sb = "0"; if ($i -lt $pb.Count -and $pb[$i]) { $sb = $pb[$i] }
+    $na = 0; $nb = 0
+    [void][int]::TryParse(($sa -replace '[^0-9].*$', ''), [ref]$na)
+    [void][int]::TryParse(($sb -replace '[^0-9].*$', ''), [ref]$nb)
+    if ($na -gt $nb) { return 1 }
+    if ($na -lt $nb) { return -1 }
+  }
+  return 0
 }
 
 # 0) Giris kontrolu
@@ -65,6 +100,57 @@ if ($tagVar -and -not $Overwrite) {
   throw ("$tag zaten yayinda. Once surumu YUKSELT (version.json + CSXS\manifest.xml + " +
          "installer\installer.iss), yoksa kimsenin panelinde guncelleme cikmaz.`n" +
          "Yarim kalan bir yayini tamamliyorsan: -Overwrite ekle.")
+}
+
+# 0.6) SURUM GERCEKTEN EN BUYUK MU?
+# Yukaridaki kapi yalnizca AYNI etiketin yayinda olup olmadigina bakiyordu. Daha YUKSEK
+# numarali bir surum zaten yayindaysa fark etmiyordu - ama panel guncellemesi SAYISAL
+# karsilastiriyor (js\updater.js cmpVer: "uzak <= yerel" ise guncelleme TEKLIF ETMIYOR),
+# yani dusuk numarali bir yayin HICBIR kullaniciya ulasmaz. Betik yine de "BITTI" der ve
+# gelistirici surumun cikip ulastigini sanir. Bu gercekten yasandi: CLAUDE.md'nin en
+# ustunde "surum numarasi 1.15.0 ama kod v1.9.21" notu tam bu tuzagin yara izidir.
+$enYuksek = ""
+$rlSonuc = Invoke-GhOut release list --repo $repo --limit 100 --json "tagName,isDraft"   # TIRNAK SART: tirnaksizken PowerShell bunu IKI argumana boluyor ve gh reddediyor
+if ($rlSonuc.Kod -eq 0) {
+  # Cikti stderr ile karismis olabilir; JSON dizisini icinden ayikla.
+  $jm = [regex]::Match($rlSonuc.Cikti, '\[[\s\S]*\]')
+  if ($jm.Success) {
+    try {
+      foreach ($r in ($jm.Value | ConvertFrom-Json)) {
+        # Taslak (draft) yayinlar API'de "latest" olarak gorunmez, panele hic ulasmaz.
+        if ($r.isDraft) { continue }
+        if (-not $r.tagName) { continue }
+        if (-not $enYuksek -or (Compare-Surum $r.tagName $enYuksek) -gt 0) { $enYuksek = $r.tagName }
+      }
+    } catch {
+      Write-Host "NOT: yayindaki surum listesi cozulemedi - geri donus kapisi calismadi." -ForegroundColor Yellow
+    }
+  }
+} else {
+  # Repo henuz yoksa (ilk yayin) release list basarisiz olur; karsilastiracak sey de yok.
+  # ⚠ AMA gh'in GERCEK ciktisini da yaz: bu dal bir kez, tirnaksiz --json yuzunden HER ZAMAN
+  # calisiyordu ve kapinin bozuk oldugu tam da bu masum notun altinda saklaniyordu.
+  # Sebebi gormeden "repo yeni olabilir" demek, sessiz basarisizligin ta kendisi.
+  Write-Host "NOT: yayindaki surumler okunamadi - geri donus kapisi ATLANDI." -ForegroundColor Yellow
+  Write-Host ("     gh cikti: " + ($rlSonuc.Cikti -replace "\s+", " ")) -ForegroundColor Yellow
+}
+
+if ($enYuksek) {
+  $kars = Compare-Surum $ver $enYuksek
+  if ($kars -le 0) {
+    if (-not $GeriDonusOnayla) {
+      throw ("Yayindaki en yuksek surum $enYuksek; cikarmak istedigin surum v$ver.`n" +
+             "Panel guncellemeleri SAYISAL karsilastiriyor (js\updater.js cmpVer), yani bu " +
+             "yayin HICBIR kullanicinin panelinde GORUNMEZ - bosuna yayinlamis olursun.`n" +
+             "Surumu $enYuksek'ten BUYUK yap (version.json + CSXS\manifest.xml + " +
+             "installer\installer.iss birlikte).`n" +
+             "Bilincli bir geri donus yapiyorsan: -GeriDonusOnayla ekle.")
+    }
+    Write-Host "UYARI: v$ver, yayindaki $enYuksek surumunden buyuk DEGIL." -ForegroundColor Yellow
+    Write-Host "       -GeriDonusOnayla verildi: bu paket mevcut kullanicilara OTOMATIK ULASMAZ." -ForegroundColor Yellow
+  } else {
+    Write-Host "Yayindaki en yuksek surum: $enYuksek  ->  yeni surum v$ver (buyuk, tamam)" -ForegroundColor Green
+  }
 }
 
 # 1) update.json'daki repo'yu gercek owner/repo ile guncelle (BOM'suz UTF-8 yaz!)
@@ -131,6 +217,10 @@ if ($commitKod -ne 0) { Write-Host "Commit edilecek degisiklik yok, devam." -For
 if ((Invoke-Gh repo view $repo) -ne 0) {
   if ($Private) { gh repo create $repo --private --source "." --remote origin --push }
   else          { gh repo create $repo --public  --source "." --remote origin --push }
+  # ONCE DOGRULA, SONRA MUJDELE. Cocuk surecin basarisizligi ebeveyni durdurmaz ve
+  # $ErrorActionPreference="Stop" native komutlara GECMEZ: kontrol yokken betik repo hic
+  # olusmamisken "olusturuldu" yazip release adimina geciyordu.
+  if ($LASTEXITCODE -ne 0) { throw "gh repo create basarisiz (cikis kodu $LASTEXITCODE) - repo olusturulmadi, kod push edilmedi." }
   Write-Host "Repo olusturuldu ve push edildi." -ForegroundColor Green
 } else {
   # DIKKAT: burada da "2>$null" YOK — satir 85-88'deki tuzagin ta kendisi. PS 5.1'de
@@ -146,6 +236,15 @@ if ((Invoke-Gh repo view $repo) -ne 0) {
   $ErrorActionPreference = $eskiEAP2
   if (-not $hasOrigin) { git remote add origin "https://github.com/$repo.git" }
   git push -u origin main
+  # ⚠ CIKIS KODU KONTROLU SART. git push basarisiz olsa bile (reddedilen push, kimlik
+  # dogrulama, uzak dal ilerlemis) betik devam edip "push edildi" ve sonunda "BITTI"
+  # yaziyordu: GitHub'da yeni kod YOK, gelistirici ise surumun ciktigini saniyordu.
+  # Push ile release'in AYRI kalmasi ayrica en kotu durumu uretir: release panel.zip'i
+  # tasir ama repodaki kaynak eski kalir.
+  if ($LASTEXITCODE -ne 0) {
+    throw ("git push basarisiz (cikis kodu $LASTEXITCODE) - degisiklikler GitHub'a GITMEDI, " +
+           "release olusturulmadi.`nYukaridaki git ciktisini oku; duzeltip betigi tekrar calistir.")
+  }
   Write-Host "Degisiklikler push edildi." -ForegroundColor Green
 }
 
@@ -153,12 +252,35 @@ if ((Invoke-Gh repo view $repo) -ne 0) {
 if ($tagVar) {
   # Buraya yalnizca -Overwrite ile gelinir (yarim kalmis yayini tamamlama).
   gh release upload $tag $zip --clobber
+  if ($LASTEXITCODE -ne 0) { throw "gh release upload basarisiz (cikis kodu $LASTEXITCODE) - panel.zip YUKLENMEDI." }
   Write-Host "Release $tag UZERINE YAZILDI (-Overwrite)." -ForegroundColor Yellow
   Write-Host "NOT: Bu surumu daha once alanlar guncelleme gormez." -ForegroundColor Yellow
 } else {
   gh release create $tag $zip --title $tag --notes "Panel $tag"
+  # ⚠ ONCE DOGRULA, SONRA MUJDELE. Kontrol yokken gh basarisiz olsa bile ekranda yesil
+  # "Release olusturuldu" ve "BITTI" yaziyordu: GitHub'da release YOK, hicbir panel
+  # guncelleme gormuyor ve sebebi hicbir yerde gorunmuyordu.
+  if ($LASTEXITCODE -ne 0) {
+    throw ("gh release create basarisiz (cikis kodu $LASTEXITCODE) - $tag release'i OLUSMADI, " +
+           "guncelleme kimseye ulasmaz.`nYukaridaki gh ciktisini oku; duzeltip tekrar calistir " +
+           "(yarim kalmissa: -Overwrite).")
+  }
   Write-Host "Release $tag olusturuldu (panel.zip)." -ForegroundColor Green
 }
+
+# SON KAPI: release GERCEKTEN yayinda mi ve panel.zip icinde mi?
+# Cikis kodu 0 donmesi yetmiyor - "BITTI" yazmadan once yayinin varligini GERI OKUYORUZ.
+# Bu betigin butun bedeli sessiz basarisizlikta: gelistirici surumun ciktigini sanip
+# beklemeye baslar, kullanicilar ise hicbir sey gormez.
+$dogrula = Invoke-GhOut release view $tag --repo $repo --json "tagName,assets"   # TIRNAK SART (bkz. yukaridaki not)
+if ($dogrula.Kod -ne 0) {
+  throw "Release $tag yayinda GORUNMUYOR (gh release view basarisiz). Yayin tamamlanmadi."
+}
+if ($dogrula.Cikti -notmatch 'panel\.zip') {
+  throw ("Release $tag var ama icinde panel.zip YOK. Panel guncellemesi asset'i adiyla ariyor " +
+         "(update.json 'asset'), yani guncelleme cikmaz. Tekrar calistir: -Overwrite")
+}
+Write-Host "Dogrulandi: $tag yayinda ve panel.zip iceriyor." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "BITTI. Arkadasin panelinde bir sonraki acilista otomatik guncelleme cikacak." -ForegroundColor Cyan

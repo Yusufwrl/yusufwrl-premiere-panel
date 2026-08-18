@@ -404,5 +404,11 @@ module.exports = {
   yinelenenAdlar: yinelenenAdlar,
   parseText: parseText, toText: toText,
   adCikar: adCikar, bul: bul, karakterBul: karakterBul, ekKirp: _ekKirp,
+  /* norm: ad normalleştirmesi TEK KURAL olsun diye dışa açıldı (18 Ağustos 2026 denetimi).
+     app.js senkron planında kendi `_kn`'ini taşıyordu ve o yalnız BÜYÜK "İ/I"yı çeviriyordu;
+     küçük noktasız "ı" olduğu gibi kalıyordu. Sonuç: listede "Tofı" yazan çekenin kendi Craig
+     kaydı `dosyaOf` ile eşleşmiyor, "bilinmeyen" sayılıp TIMELINE'A konuyordu — videoda çift
+     ses. app.js'teki yorum bu tuzağı tarif ediyordu ama kod onu uygulamıyordu. */
+  norm: _norm,
   LABELLER: LABELLER, DOSYA: DOSYA,
 };

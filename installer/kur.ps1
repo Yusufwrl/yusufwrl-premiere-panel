@@ -61,8 +61,13 @@ New-Item -ItemType Directory -Path $extRoot -Force | Out-Null
 # pack-panel.ps1 ve deploy-dev.ps1 listeyi oradan okur), installer\installer.iss (Excludes),
 # js\updater.js (KULLANICI_DOSYALARI) ve burasi -> BESINI birden guncelle.
 # config.json bu listede DEGIL: pakette gelir, asagida BIRLESTIRILIYOR (bkz. satir ~90).
+# presetler.json.tmp / presetler.bak.json.yeni: atomik yazmanin ARA dosyalari. Yazma
+# yarida kalirsa (OneDrive kilidi, Premiere cokmesi) preset verisi YALNIZ onlarda kalir
+# ve panel acilista oradan kurtariyor. Korunmazlarsa yeniden kurulum tam da kurtarmanin
+# gerektigi anda onlari siliyordu.
 $koru  = @("engine-root.txt", "diarize-device.txt", "sozluk.json", "kisiler.json",
            "assemblyai-key.txt", "anthropic-key.txt", "presetler.json", "presetler.bak.json",
+           "presetler.json.tmp", "presetler.bak.json.yeni",
            "lisans.json", "lisans.json.bak")
 $yedek = Join-Path $env:TEMP ("panel_koru_" + [guid]::NewGuid().ToString("N"))
 $korunan = @()
@@ -76,7 +81,27 @@ if (Test-Path $PanelDst) {
   # config.json ayri: geri yazilmiyor, asagida yeni surumle BIRLESTIRILIYOR.
   $cfgVar = Join-Path $PanelDst "config.json"
   if (Test-Path $cfgVar) { Copy-Item $cfgVar $yedek -Force }
-  Remove-Item $PanelDst -Recurse -Force
+
+  # YEDEGIN YERINI SILMEDEN ONCE YAZ. Eskiden hic yazilmiyordu: asagidaki silme
+  # patlayinca (en sik sebep: PREMIERE ACIK, dosyalar kilitli) betik Ingilizce bir yigin
+  # iziyle oluyor ve kullanici sozluk/kisiler/preset/lisans dosyalarinin nerede oldugunu
+  # goremiyordu. Ikinci calistirma YENI bir guid uretir, eski yedek klasoru TEMP'te
+  # sonsuza kadar mahsur kalirdi.
+  Write-Host "      Kisisel dosyalarin yedegi: $yedek" -ForegroundColor Cyan
+
+  try {
+    Remove-Item $PanelDst -Recurse -Force -ErrorAction Stop
+  } catch {
+    throw ("Kurulu panel klasoru SILINEMEDI:`n" +
+           "  $PanelDst`n" +
+           "Sebep: " + $_.Exception.Message + "`n`n" +
+           "EN SIK SEBEP: Premiere Pro (ya da Media Encoder) ACIK ve panel dosyalarini " +
+           "kilitliyor. Hepsini tamamen kapat, sonra kurulumu TEKRAR calistir.`n`n" +
+           "Kisisel dosyalarin SILINMEDI - su klasorde duruyorlar:`n" +
+           "  $yedek`n" +
+           "Bu klasoru SILME. Kurulum basariyla bitince dosyalar oradan geri konur; " +
+           "istersen elle de kopyalayabilirsin.")
+  }
 }
 
 # panel\ ICERIGINI hedefe kopyala (panel klasorunu degil)
@@ -122,7 +147,13 @@ if ((Test-Path $cfgEski) -and (Test-Path $cfgYeni)) {
   }
 }
 
-if (Test-Path $yedek) { Remove-Item $yedek -Recurse -Force }
+# Yedek ancak dosyalar GERI KONDUKTAN sonra silinir. Yolu bir kez daha yaziyoruz:
+# geri koyma sirasinda bir sey ters gittiyse kullanici klasorun adini ekranda gormus olur
+# (silindikten sonra o bilgi hicbir yerde kalmiyor).
+if (Test-Path $yedek) {
+  Write-Host "      Yedek klasor siliniyor (dosyalar geri konuldu): $yedek"
+  Remove-Item $yedek -Recurse -Force
+}
 Write-Host "[2/5] Panel kuruldu: $PanelDst"
 if ($korunan.Count) {
   Write-Host "      Korunan kisisel dosyalar: $($korunan -join ', ')" -ForegroundColor Cyan

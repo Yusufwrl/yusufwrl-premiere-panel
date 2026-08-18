@@ -25,14 +25,28 @@ const p1=await post("/ping",{lisansId:id,hwid:PC1,imza:imza,makine:"PARSMAZI-PC"
 ok("ping 200 + iptal:false",p1.s===200&&p1.j.ok===true&&p1.j.iptal===false);
 const p0=await post("/ping",{lisansId:"usta",hwid:PC1,imza:"",panel:"1.9.4"});
 ok("USTA KODU (imza bos) -> iptal DEGIL",p0.s===200&&p0.j.iptal===false,p0.j.sebep);
+/* ⚠ ASAGIDAKI IKI TESTIN BEKLENTISI DEGISTI (eski hali "iptal:true" bekliyordu ve kirmiziydi).
+   SEBEP: Cloudflare KV eventually-consistent — yazma baska bir bolgeden okunana kadar kisa sure
+   "yok"/"eslesmedi" gorunebiliyor. O ani yakalayan panel `iptal:true`yu DISKE yaziyor ve kurulum
+   BIR DAHA acilmiyordu; yani gecici bir tutarsizlik CALISAN bir kurulumu kalici olarak olduruyor.
+   Sunucu bu yuzden bilerek `iptal:false, kesin:false` donuyor (worker.js /ping icindeki not) ve
+   panel `kesin` bayragi olmadan cevabi yok sayiyor. Guvenlik kaybi yok: panel ayni HWID kontrolunu
+   zaten YERELDE yapiyor. Test yanlisti, sunucu dogru — dusen bir test olmayan testten zararlidir,
+   bir dahaki sefere gercek bir hata "zaten kirmiziydi" diye elenir. */
 const p2=await post("/ping",{lisansId:id,hwid:PC2,imza:imza,panel:"1.9.4"});
-ok("jeton baska pc'ye tasindi -> 200 + iptal:true",p2.s===200&&p2.j.iptal===true&&p2.j.sebep==="baskapc");
+ok("jeton baska pc'ye tasindi -> KILITLEMEZ (kesin:false, panel yerelde zaten kontrol ediyor)",
+   p2.s===200&&p2.j.iptal===false&&p2.j.kesin===false&&p2.j.sebep==="baskapc",p2.j.sebep);
 const p3=await post("/ping",{lisansId:id,hwid:PC1,imza:imza.slice(0,-1)+"0",panel:"1.9.4"});
-ok("bozuk imza -> 200 + iptal:true",p3.s===200&&p3.j.iptal===true,p3.j.sebep);
+ok("bozuk imza -> KILITLEMEZ (KV tutarsizligi olabilir, kesin:false)",
+   p3.s===200&&p3.j.iptal===false&&p3.j.kesin===false,p3.j.sebep);
 
+/* ⚠ BU TEST AYNEN KALIYOR — TEK GERCEK IPTAL YOLU BU. Yoneticinin lisansi uzaktan kapatmasi
+   sistemin tek gercek kontrolu; `kesin:true` YALNIZ bu dalda donuyor ve panel yalnizca bu
+   bayrakla diske yaziyor. Yukaridaki gevsetme bu yolu KAPATMAMALI. */
 await post("/api/durum",{id,durum:"iptal"},admin);
 const p4=await post("/ping",{lisansId:id,hwid:PC1,imza:imza,panel:"1.9.4"});
-ok("yonetici iptal etti -> 200 + iptal:true + sebep:iptal",p4.s===200&&p4.j.iptal===true&&p4.j.sebep==="iptal");
+ok("yonetici GERCEKTEN iptal etti -> 200 + iptal:true + kesin:true + sebep:iptal",
+   p4.s===200&&p4.j.iptal===true&&p4.j.kesin===true&&p4.j.sebep==="iptal");
 await post("/api/durum",{id,durum:"aktif"},admin);
 
 const l=await call("/api/lisanslar",{headers:admin});
@@ -47,8 +61,13 @@ const p5=await post("/ping",{lisansId:id,hwid:PC1,imza:imza});
 ok("sifre yenileme kurulu cihazi DUSURMUYOR",p5.j.iptal===false);
 
 await post("/api/cihaz-sil",{id,kisa:k.cihazlar[0].kisa},admin);
+/* ⚠ BEKLENTI DEGISTI (eskiden "iptal:true" bekliyordu, kirmiziydi). Cihaz silindiginde jeton
+   gercekten olur (tokenCoz cihazi bulamaz) AMA sunucu bunu panele kalici kilit olarak yazdirmaz:
+   ayni cevap KV tutarsizligindan da gelebiliyor ve o an calisan kurulumu oldururdu. Arkadas
+   zaten yeniden sifre girip aktive oluyor — asagidaki test tam bunu olcuyor. */
 const p6=await post("/ping",{lisansId:id,hwid:PC1,imza:imza});
-ok("cihaz silindi -> 200 + iptal:true (arkadas yeniden sifre girer)",p6.s===200&&p6.j.iptal===true,p6.j.sebep);
+ok("cihaz silindi -> KILITLEMEZ (kesin:false; arkadas yeniden sifre girer)",
+   p6.s===200&&p6.j.iptal===false&&p6.j.kesin===false,p6.j.sebep);
 const a2=await post("/aktivasyon",{sifre:yeni.j.sifre,hwid:PC2,makine:"PARSMAZI-YENI",panel:"1.9.4"});
 ok("cihaz silindikten sonra yeni pc girebiliyor",a2.j.ok===true);
 

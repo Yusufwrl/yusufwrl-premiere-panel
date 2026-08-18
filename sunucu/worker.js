@@ -88,8 +88,14 @@ async function yonlendir(request, env, ctx) {
     /* Yetki kapısı TEK YERDE: aşağıdaki hiçbir uç kendi başına yetki kontrol etmez. */
     if (!(await adminMi(request, env))) {
       /* Hız freni YALNIZ başarısız denemede sayılır: gerçek yönetici hiç takılmaz,
-         şifre deneyen 60 saniyede 10 denemeden sonra duvara çarpar. */
-      await hizAsildiMi(env, "admin:" + istekIp(request));
+         şifre deneyen 60 saniyede 10 denemeden sonra duvara çarpar.
+         ⚠ DÖNÜŞ DEĞERİ KULLANILMAK ZORUNDA. Eskiden yalnız `await hizAsildiMi(...)` çağrılıyor,
+         sonucu hiçbir yere atanmıyordu: sayaç artıyor ama duvar HİÇ örülmüyordu, yani yönetici
+         anahtarı için sınırsız deneme mümkündü (fren "yazılmış ama çalışmıyor" hâlindeydi).
+         Aktivasyon kapısındaki desenin aynısı: aşıldıysa 429 + "cok_deneme". */
+      if (await hizAsildiMi(env, "admin:" + istekIp(request))) {
+        return cevap({ ok: false, hata: "cok_deneme", mesaj: "Cok fazla deneme. Bir dakika bekle." }, 429);
+      }
       return cevap({ ok: false, hata: "yetki", mesaj: "Yonetici anahtari gecersiz." }, 403);
     }
     if (yol === "/api/lisanslar" && met === "GET") return apiListe(env);
@@ -659,7 +665,15 @@ async function cagir(yol, yontem, govde){
   if (govde){ s.headers["content-type"] = "application/json"; s.body = JSON.stringify(govde); }
   var r = await fetch(yol, s);
   var j = await r.json().catch(function(){ return { ok:false, mesaj:"Cevap okunamadi" }; });
-  if (!j.ok && j.hata === "yetki"){ bas("panel").style.display="none"; bas("girisKutu").style.display="block"; alert("Anahtar yanlis."); }
+  /* ⚠ 429 (hiz freni) DALI DA BURAYA DUSMEK ZORUNDA. Fren gercekten calisir hale gelince
+     yeni bir sessiz basarisizlik dogdu: cevabin hata alani "cok_deneme" oldugu icin bu kosul
+     tutmuyor, cagiranlar da "if (!j.ok) return;" ile sessizce cikiyordu — "Gir" dugmesi hicbir
+     sey yapmiyor, ekranda tek satir yazmiyordu. Yonetici, anahtarinin yanlis mi yoksa frene mi
+     takildigini anlayamiyordu. */
+  if (!j.ok && (j.hata === "yetki" || j.hata === "cok_deneme")){
+    bas("panel").style.display="none"; bas("girisKutu").style.display="block";
+    alert(j.mesaj || "Anahtar yanlis.");
+  }
   return j;
 }
 
@@ -747,7 +761,17 @@ async function sifreYenile(id){
   if (!j.ok) return alert(j.mesaj || "Olmadi");
   bas("yeniSifre").innerHTML = "<div class='sifre'>" + esc(j.sifre) + "</div><div class='kucuk'>Yeni sifre — bir kere gorunur.</div>";
 }
-async function durum(id, d){ await cagir("/api/durum","POST",{ id:id, durum:d }); yenile(); }
+/* ⚠ ONAY SART: komsu dugmelerin hepsi (sifre / sil / cihaz sil) confirm() ile korunuyordu,
+   ucu icinde etkisi EN UZAGA giden "kapat" hicbir sey sormadan POST atiyordu. Yanlis satira
+   tiklamanin bedeli asimetrik: karsi taraftaki panel bir daha ACILMAZ ve arkadas montajin
+   ortasinda kalir; geri almak icin yoneticinin durumu fark etmesi gerekiyor. */
+async function durum(id, d){
+  var soru = (d === "iptal")
+    ? "Lisans KAPATILSIN mi? Karsi taraftaki panel bir daha acilmaz."
+    : "Lisans yeniden ACILSIN mi?";
+  if (!confirm(soru)) return;
+  await cagir("/api/durum","POST",{ id:id, durum:d }); yenile();
+}
 async function cihazSil(id, kisa){
   if (!confirm("Bu bilgisayarin baglantisi silinsin mi? Kisi ayni sifreyle yeniden giris yapabilir.")) return;
   await cagir("/api/cihaz-sil","POST",{ id:id, kisa:kisa }); yenile();

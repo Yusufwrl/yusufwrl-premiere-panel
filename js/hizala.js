@@ -314,4 +314,43 @@ function tutarlilikKontrol(sonuclar, toleransSn, caprazOffset) {
            yayilim: yayilim, capraz: capraz, caprazUyusmuyor: caprazUyusmuyor };
 }
 
-module.exports = { offsetBul: offsetBul, tutarlilikKontrol: tutarlilikKontrol, ORNEK_HZ: ORNEK_HZ };
+/* GÜVENLİ KAYMA — "bu ölçüme güvenmiyorum" denen bir dosya hangi kaymaya konsun?
+   (18 Ağustos 2026 denetiminde eklendi; politika app.js'ten BURAYA taşındı ki ölçülebilsin.)
+
+   ⚠ NEDEN app.js'te DEĞİL: eski hâlinde referans doğrudan `tut.medyan`dı ve nöbetçi test
+   yalnızca app.js'te "tut.medyan" ile "cekenKontrol" DİZGELERİNİ arıyordu. İkisi de yerinde
+   duruyordu, test yeşildi ve koruma yine de ÇALIŞMIYORDU. Politika saf bir fonksiyon olunca
+   gerçek sayılarla sınanabiliyor (tumtest 21. bölüm) — dizge aramak bir daha yeterli olmasın.
+
+   HATANIN KENDİSİ: `tut.medyan` AYKIRI ölçümleri de içeriyor.
+     • Çift sayıda sonuçta medyan iki ortanın ORTALAMASI (yukarıdaki MEDYAN TUZAĞI notu):
+       iki dosyada çöp ölçüm sonucu yarı yarıya kirletiyor -> [7.72, -123.48] -> -57.88.
+     • Tek dosyada `tut.medyan` = o dosyanın KENDİ güvenilmez ölçümü (tekDosya dalı), yani
+       "cekenKontrol yedeği" hiç devreye girmiyordu (medyan her zaman sonlu).
+   İkisinde de sonuç negatif kaldığı için app.js kırpma dalına giriyor ve dosyanın BAŞINDAN
+   ses siliyordu — üstelik ekranda "KESİLMEDİ" yazarken.
+
+   KURAL: referans yalnız AYKIRI OLMAYAN ölçümlerden gelir. Hiç sağlam ölçüm yoksa çekenin
+   kendi kaydıyla ölçülen bağımsız değere düşülür. O da yoksa referans YOKTUR (null) —
+   çağıran tarafın kırpma yapmaması gerekir. Uydurulmuş bir referans, kesilmiş sesten iyidir. */
+function guvenliKayma(sonuclar, cekenKontrol) {
+  var saglam = [];
+  var liste = sonuclar || [];
+  for (var i = 0; i < liste.length; i++) {
+    var s = liste[i];
+    if (s && !s.aykiri && isFinite(s.offset)) saglam.push(s.offset);
+  }
+  if (saglam.length) {
+    saglam.sort(function (a, b) { return a - b; });
+    var o = Math.floor(saglam.length / 2);
+    var m = (saglam.length % 2) ? saglam[o] : (saglam[o - 1] + saglam[o]) / 2;
+    return { ofs: m, kaynak: "saglam", saglamSayisi: saglam.length };
+  }
+  if (cekenKontrol != null && isFinite(cekenKontrol)) {
+    return { ofs: cekenKontrol, kaynak: "ceken", saglamSayisi: 0 };
+  }
+  return { ofs: null, kaynak: "yok", saglamSayisi: 0 };
+}
+
+module.exports = { offsetBul: offsetBul, tutarlilikKontrol: tutarlilikKontrol,
+                   guvenliKayma: guvenliKayma, ORNEK_HZ: ORNEK_HZ };
