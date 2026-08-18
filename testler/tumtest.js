@@ -1825,6 +1825,53 @@ function bitir() {
           "Damga 1'de kalmış — paketBirlestir bir daha çalışmaz ve varyantlar kimseye gitmez.");
   })();
 
+  /* ===== 25. EMOJİ PRESETİ: HIZ + YANLIŞ ALARM (ParsMazi bildirdi, 18 Ağustos 2026) =====
+     Belirti: emojilere animasyon uygulanırken 70. saniyede
+     "⚠ Premiere yanıt vermiyor olabilir" çıktı. Premiere DONMAMIŞTI — iş gerçekten
+     o kadar uzundu: her emoji klibi için QE öğeleri indeks 0'dan taranıyordu
+     (300 emoji ≈ 45.150 tur). İki ayrı hata: (a) iş çok yavaş, (b) nöbetçi eşiği bu iş
+     için yanlış ve mesaj kullanıcıyı boşuna korkutuyor. */
+  baslik("Emoji preseti: monoton imleç + nöbetçi eşiği");
+  (function () {
+    var host = "", app = "";
+    try { host = fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"); } catch (e) {}
+    try { app  = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+    dogru("kaynaklar okunabildi", host.length > 1000 && app.length > 1000);
+
+    /* --- HIZ: imleç var mı ve çağıran geçiriyor mu --- */
+    dogru("_qeKlipBul ipucu parametresi alıyor", /function _qeKlipBul\(qs, domItem, ipucuIx\)/.test(host),
+          "İmleç yok — her klip için QE taraması 0'dan başlar, iş O(n²) büyür.");
+    dogru("çağıran imleci geçiriyor", /_qeKlipBul\(qs, ti, _qeSonIx\)/.test(host),
+          "İmleç tanımlı ama kullanılmıyor — hız kazancı yok.");
+    dogru("imleç bulunan indeksi kaydediyor", /_qeSonIx = k;/.test(host));
+
+    /* ⚠⚠ EN ÖNEMLİ KONTROL: İPUCU YANLIŞSA 0'DAN TEKRAR DENENMELİ.
+       İpucu hedefin İLERİSİNDEyse zaman geçişi erken çıkışla hemen kırılır. İkinci deneme
+       olmazsa akış AD eşleşmesine düşer — ve emoji klipleri AYNI adı taşıdığı için orası
+       null döndürür, yani 'klibin QE karsiligi bulunamadi'. Yani ipucu bir hızlandırma
+       olmaktan çıkıp HATA kaynağı olur. Hız için doğruluktan ödün verilmemeli. */
+    var iQe = host.indexOf("function _qeKlipBul");
+    /* Pencere 3600: fonksiyon uzun (iki gecis + ad yedegi); olculdu, son capa +3292. */
+    var qeBlok = iQe > -1 ? host.slice(iQe, iQe + 3600) : "";
+    dogru("ipucu tutmazsa 0'dan TEKRAR deneniyor", /for \(_dene = 0; _dene < 2; _dene\+\+\)/.test(qeBlok),
+          "İkinci deneme yok — yanlış ipucu ad eşleşmesine düşürür ve emoji kliplerinde HATA verir.");
+    dogru("ikinci denemeden önce imleç sıfırlanıyor", /_qeSonIx = -1;/.test(qeBlok));
+    dogru("ad eşleşmesi yedeği hâlâ duruyor", /adSayi === 1/.test(qeBlok),
+          "Zaman eşleşmesi tutmayan klipler için son çare kaldırılmış.");
+
+    /* --- YANLIŞ ALARM: nöbetçi eşiği işe göre olmalı --- */
+    dogru("nöbetçi eşik parametresi alıyor", /function nobetci\(yazFn, etiket, esikSn\)/.test(app),
+          "Eşik sabit 60 — uzun ama NORMAL işlerde yanlış alarm verir.");
+    dogru("emoji preseti yükseltilmiş eşik kullanıyor", /EMOJI_PRESET_ESIK\)\)\)/.test(app),
+          "Emoji preseti hâlâ 60 sn'de 'Premiere donmuş olabilir' diyor — ParsMazi'nin bildirdiği hata.");
+    var iEsik = app.indexOf("var EMOJI_PRESET_ESIK");
+    var esikSat = iEsik > -1 ? app.slice(iEsik, iEsik + 40) : "";
+    dogru("eşik gerçekten 60'tan büyük", /=\s*(\d+)/.test(esikSat) && Number(esikSat.match(/=\s*(\d+)/)[1]) > 60,
+          "Eşik yükseltilmemiş.");
+    dogru("etiket kaç emoji işlendiğini yazıyor", /kondu \+ " emoji \(uzun sürer/.test(app),
+          "Kullanıcı beklemenin normal olduğunu göremiyor.");
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");

@@ -233,10 +233,19 @@
      teşhisi tam da bu satırla konmuştu (Premiere ekranda bir pencere bekliyordu).
      ⚠ ZAMAN AŞIMI DEĞİL NÖBETÇİ: promise asla terk edilmez, pencere kapanınca iş kaldığı
      yerden devam eder (gerekçe evalES'in üstünde yazılı). */
-  function nobetci(yazFn, etiket) {
+  /* esikSn (3. argüman, isteğe bağlı): "Premiere donmuş olabilir" uyarısının çıkacağı süre.
+     ⚠ VARSAYILAN 60 HER İŞ İÇİN DOĞRU DEĞİL — ParsMazi bildirdi (18 Ağustos 2026):
+     emojilere animasyon uygularken 70. saniyede "Premiere yanıt vermiyor olabilir" çıktı.
+     Premiere DONMAMIŞTI; iş gerçekten o kadar uzundu (yüzlerce klibe tek tek preset).
+     Yanlış alarm iki yönden pahalı: (1) kullanıcı çalışan bir işi kesiyor, (2) uyarıyı
+     görmezden gelmeyi öğreniyor ve GERÇEK donma anında da umursamıyor.
+     Kural: süresi işin BÜYÜKLÜĞÜNE bağlı olan çağrılarda eşiği yükselt ve etikete
+     KAÇ ÖĞE işlendiğini yaz — kullanıcı beklemenin normal olduğunu görebilsin. */
+  function nobetci(yazFn, etiket, esikSn) {
+    var esik = (esikSn > 0) ? esikSn : 60;
     return function (sn) {
       var m = etiket + "… (" + sn + " sn)";
-      if (sn >= 60) {
+      if (sn >= esik) {
         yazFn(m + " · ⚠ Premiere yanıt vermiyor olabilir — ekranda açık bir pencere " +
               "(Save Project / Import) var mı? Kapatınca kaldığı yerden devam eder.", "var(--warn)");
       } else yazFn(m);
@@ -1770,6 +1779,13 @@
      ⚠ DAHA AŞAĞI İNDİRME (2.0 ve altı) kazancı hızla azaltıyor — üst sınırı artık pencere
      değil çakışma freni (EMOJI_GAP) ve emojinin cümle boyunca ekranda kalması koyuyor. */
   var EMOJI_SECIM_PENCERE = 2.2;
+  /* Emoji preseti nöbetçisinin "Premiere donmuş olabilir" eşiği. 60 DEĞİL çünkü bu iş
+     büyüklüğe bağlı olarak dakikalarca sürebiliyor: yüzlerce klibe tek tek animasyon.
+     ParsMazi'de 70. saniyede yanlış alarm verdi (Premiere donmamıştı, iş uzundu).
+     ⚠ BU BİR AYAR DEĞİL, SADECE UYARI ZAMANLAMASI — emoji görünümüne etkisi YOK.
+     Aynı pakette işin kendisi de ~75 kat hızlandırıldı (host.jsx _qeKlipBul imleci),
+     yani eşiğe ulaşmak da artık çok daha zor. */
+  var EMOJI_PRESET_ESIK = 240;
 
   /* ── HANGİ KARAKTER HANGİ TARAFTA (kullanıcı kararı, 8 Ağustos 2026) ──
      "Tofi ve Moni her zaman emoji sağda olacak, diğer karakterler diğer tarafa."
@@ -3149,13 +3165,17 @@
             var prSag = "ok:(kanal yok)";
             if (tarafSay.sag > 0 || kanal2 < 0) {
               prSag = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal + '")',
-                                          nobetci(yaz, "emoji animasyonu (sağ)")));
+                                          nobetci(yaz, "emoji animasyonu uygulanıyor — sağ taraf, " +
+                                                       kondu + " emoji (uzun sürer, Premiere donuk görünür)",
+                                                  EMOJI_PRESET_ESIK)));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal + 1) + " → " + prSag);
             }
             var prSol = "ok:(kanal yok)";
             if (kanal2 >= 0 && tarafSay.sol > 0) {
               prSol = String(await evalES('presetYaz("' + esPath(pYol) + '","0","' + kanal2 + '")',
-                                          nobetci(yaz, "emoji animasyonu (sol)")));
+                                          nobetci(yaz, "emoji animasyonu uygulanıyor — sol taraf, " +
+                                                       kondu + " emoji (uzun sürer, Premiere donuk görünür)",
+                                                  EMOJI_PRESET_ESIK)));
               logLine("Emoji preset (" + presetAd + ") V" + (kanal2 + 1) + " → " + prSol);
             }
             var pr = (prSag.indexOf("ok:") === 0 && prSol.indexOf("ok:") === 0) ? "ok:" : (prSag.indexOf("ok:") === 0 ? prSol : prSag);

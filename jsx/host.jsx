@@ -1981,7 +1981,17 @@ function _zamanSn(x) {
     if (isNaN(s)) { try { s = parseFloat(String(x)); } catch (e3) {} }
     return s;
 }
-function _qeKlipBul(qs, domItem) {
+/* Son bulunan QE klip indeksi — _qeKlipBul kendi ipucunu buraya yazar.
+   ⚠ NEDEN VAR (ParsMazi bildirdi, 18 Agustos 2026): emoji akisinin son adimi emoji
+   kanalindaki HER klibe preset uyguluyor ve her klip icin bu fonksiyon QE ogelerini
+   INDEKS 0'DAN taramaya basliyordu. Erken cikis var (zaman sirasi) ama klip #N icin
+   yine ~N tur donuyor: 300 emojide 45.150 tur, her tur bir Premiere cagrisi.
+   Kullanicida 70 saniyeyi asip 'Premiere yanit vermiyor olabilir' nobetcisini
+   tetikledi — Premiere donmus DEGILDI, is gercekten o kadar uzundu.
+   Emoji klipleri zaman sirasinda oldugu ve dongu de sirayla ilerledigi icin imlec
+   asla geri gitmiyor: ipucundan basla, bulamazsan TAM TARAMAYA dus (davranis ayni). */
+var _qeSonIx = -1;
+function _qeKlipBul(qs, domItem, ipucuIx) {
     var ti = -1, bas = NaN, ad = "";
     try { ti = parseInt(domItem.parentTrackIndex, 10); } catch (e0) { return null; }
     if (isNaN(ti)) return null;
@@ -2004,14 +2014,28 @@ function _qeKlipBul(qs, domItem) {
        zamanlari tam ayni tick'e yuvarlanmayabiliyor ve 0.002 sn'lik eski tolerans
        eslesmeyi kacirip efektin hic eklenmemesine yol aciyordu. */
     if (!isNaN(bas)) {
-        for (k = 0; k < TAVAN; k++) {
-            it = null;
-            try { it = qt.getItemAt(k); } catch (e3) { break; }
-            if (!it) break;
-            s = _zamanSn(it.start);
-            if (isNaN(s)) continue;
-            if (Math.abs(s - bas) < 0.05) return it;
-            if (s > bas + 0.05) break;      // zaman sirasi: bundan sonrasi hep daha ileride
+        /* IPUCU: bir onceki klibin indeksinden basla, bulamazsan 0'DAN TEKRAR DENE.
+           ⚠ IKINCI DENEME SART: ipucu hedefin ILERISINDEyse erken cikis (zaman sirasi)
+           dongusu hemen kirar. Ikinci deneme olmasaydi akis 2. gecise (AD eslesmesi)
+           duserdi ve orasi emoji kliplerinde HATA uretir: hepsi ayni adi tasiyor
+           ('Mutlu Tofi.png'), adSayi > 1 oluyor ve fonksiyon null donuyor —
+           yani 'klibin QE karsiligi bulunamadi'. Ipucu bir HIZLANDIRMA; dogrulugu
+           degistirmemeli. Iki gecisli hali ile ipucusuz hal AYNI sonucu verir. */
+        var _dene, _bas0, _ip = parseInt(ipucuIx, 10);
+        var _ipVar = (!isNaN(_ip) && _ip > 0);
+        for (_dene = 0; _dene < 2; _dene++) {
+            _bas0 = (_dene === 0 && _ipVar) ? _ip : 0;
+            for (k = _bas0; k < TAVAN; k++) {
+                it = null;
+                try { it = qt.getItemAt(k); } catch (e3) { break; }
+                if (!it) break;
+                s = _zamanSn(it.start);
+                if (isNaN(s)) continue;
+                if (Math.abs(s - bas) < 0.05) { _qeSonIx = k; return it; }
+                if (s > bas + 0.05) break;   // zaman sirasi: bundan sonrasi hep daha ileride
+            }
+            if (!_ipVar) break;              // ipucu yoktu: ikinci gecis ayni seyi tekrarlar
+            _qeSonIx = -1;                   // ipucu tutmadi, imleci sifirla
         }
     }
     // 2) Yedek: ayni track'te ayni adli TEK klip varsa o. Birden coksa kullanma.
@@ -2616,7 +2640,7 @@ function _qeEfektEkle(ti, efektAdi) {
         }
         if (!ef) return "Premiere efekt katalogunda yok";
         var qs = qe.project.getActiveSequence();
-        var qc = _qeKlipBul(qs, ti);
+        var qc = _qeKlipBul(qs, ti, _qeSonIx);   // monoton imlec: emoji kanalinda 0dan tarama O(n2) yapiyordu
         if (!qc) return "klibin QE karsiligi bulunamadi";
         qc.addVideoEffect(ef);
         return "";
