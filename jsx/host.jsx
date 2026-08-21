@@ -1005,6 +1005,16 @@ function emojiTemizle(kanalNo, yolDosyasi) {
         var k = parseInt(kanalNo, 10);
         if (isNaN(k) || k < 0 || k >= seq.videoTracks.numTracks) return "err:V" + (k + 1) + " kanali yok";
         var vt = seq.videoTracks[k];
+        /* ⚠ KILIT DENETIMI — SILMEDEN ONCE.
+           Premiere kilitli kanalda remove()'a izin vermiyor ve hata asagidaki try icinde
+           yutuluyordu: fonksiyon hicbir sey silmeden "ok:0 emoji silindi" donuyor, panel
+           bunu BASARI sayip ustune yeni bir emoji katmani aciyordu — kullanicinin
+           projesinde bes katman bu sekilde birikti (V6:235 · V7:125 · V8:77 · V9:29 · V10:13).
+           _kanalKilitli AutoCut icin yazilmisti (surumlere gore isLocked bazen metot bazen
+           alan; taninmayan deger "kilitli degil" sayilir) — burada da aynen kullaniliyor. */
+        if (_kanalKilitli(vt)) {
+            return "err:V" + (k + 1) + " kanali KILITLI — kilidi ac ve tekrar dene";
+        }
         var harita = null;
         if (yolDosyasi) {
             harita = {};
@@ -1028,11 +1038,22 @@ function emojiTemizle(kanalNo, yolDosyasi) {
             if (p && _haritadaBul(harita, p)) hedefler.push(c); else yabanci++;
         }
         if (yabanci) return "err:V" + (k + 1) + " kanalinda emoji OLMAYAN " + yabanci + " klip var — silinmedi";
-        var silindi = 0;
+        /* ⚠ "HICBIR SEY SILINMEDI" AYIRT EDILEBILIR OLMALI. Eskiden bu fonksiyon uc ayri
+           durumda ayni "ok:0 emoji silindi" cumlesini donuyordu: (a) kanal zaten bostu,
+           (b) remove() her klipte patladi. Panel ikisini de basari sayiyor ve ustune yeni
+           katman aciyor. (a) gercekten basaridir, (b) HATADIR — ayrildilar. */
+        if (!hedefler.length) return "ok:0 (silinecek klip yok) — V" + (k + 1) + " kanalinda emoji klibi yok";
+        var silindi = 0, ilkHata = "";
         for (i = hedefler.length - 1; i >= 0; i--) {
-            try { hedefler[i].remove(false, false); silindi++; } catch (e1) {}
+            try { hedefler[i].remove(false, false); silindi++; }
+            catch (e1) { if (!ilkHata) ilkHata = e1.toString(); }
         }
-        return "ok:" + silindi + " emoji silindi (V" + (k + 1) + ")";
+        if (!silindi) {
+            return "err:V" + (k + 1) + " kanalindaki " + hedefler.length +
+                   " emoji klibinin hicbiri silinemedi" + (ilkHata ? " (" + ilkHata + ")" : "");
+        }
+        return "ok:" + silindi + " emoji silindi (V" + (k + 1) + ")" +
+               (silindi < hedefler.length ? (", " + (hedefler.length - silindi) + " silinemedi" + (ilkHata ? " (" + ilkHata + ")" : "")) : "");
     } catch (e) { return "err:" + e.toString(); }
 }
 
@@ -2622,10 +2643,14 @@ function _klipYenidenBul(trackIdx, nodeId, basSn, ipucuIx) {
    DONUS: "" = basarili, aksi halde SEBEP metni. Eskiden boolean donuyordu ve uc ayri
    hatayi (efekt katalogda yok / QE klibi bulunamadi / ekleme patladi) ayirt edilemez
    kiliyordu — kullaniciya "eklenemedi" deyip nedenini soylememek teshisi imkansizlastiriyor. */
-function _qeEfektEkle(ti, efektAdi) {
-    if (!efektAdi) return "efekt adi bos";
+/* Efekt adini QE katalogunda coz — bulunamazsa null.
+   AYRI FONKSIYON OLDU cunku presetYaz artik klip dongusune GIRMEDEN once ayni cozumlemeyi
+   yapiyor (bkz. oradaki "DIS EFEKT DENETIMI" notu): tek dogru yer olsun, "(Pop In 1)" eki
+   atma kurali iki yerde ayri ayri yazilmasin. */
+function _qeEfektBul(efektAdi) {
+    if (!efektAdi) return null;
     try {
-        if (typeof app.enableQE !== "function") return "QE bu surumde yok";
+        if (typeof app.enableQE !== "function") return null;
         app.enableQE();
         var ef = null;
         try { ef = qe.project.getVideoEffectByName(String(efektAdi)); } catch (e0) {}
@@ -2638,6 +2663,15 @@ function _qeEfektEkle(ti, efektAdi) {
                 try { ef = qe.project.getVideoEffectByName(sade); } catch (e1) {}
             }
         }
+        return ef || null;
+    } catch (e) { return null; }
+}
+function _qeEfektEkle(ti, efektAdi) {
+    if (!efektAdi) return "efekt adi bos";
+    try {
+        if (typeof app.enableQE !== "function") return "QE bu surumde yok";
+        app.enableQE();
+        var ef = _qeEfektBul(efektAdi);
         if (!ef) return "Premiere efekt katalogunda yok";
         var qs = qe.project.getActiveSequence();
         var qc = _qeKlipBul(qs, ti, _qeSonIx);   // monoton imlec: emoji kanalinda 0dan tarama O(n2) yapiyordu
@@ -2910,8 +2944,16 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
                         else if (rapor) rapor.push(kayit.ad + ":statik yazildi ama tutmadi");
                     } catch (eSv) { if (rapor) rapor.push(kayit.ad + ":setValue " + String(eSv)); }
                 }
-            } else if (!statikYaz && kayit.v !== null && kayit.v !== undefined && rapor) {
-                rapor.push(kayit.ad + " (klip kendi ayari, atlandi)");
+            } else if (!statikYaz && kayit.v !== null && kayit.v !== undefined) {
+                /* ⚠ BU BIR HATA DEGIL, TASARIM GEREGI: icsel bilesenlerin (Motion/Opacity)
+                   STATIK ayarlari bilerek yazilmiyor — yazilsaydi klip kaynagin
+                   koordinatina siçrardi. Eskiden her biri `rapor`a bir satir atiyordu ve
+                   `presetYaz` basarili kliplerde bile `if (rapor.length) uyari.push(...)`
+                   diyip o klibi HATA listesine sokuyordu. Pakette klip basina 14 boyle
+                   satir var (Opacity 3 + Motion 11), yani 200 emojide 200 klip "uyarili"
+                   gorunuyor ve kullanici "surekli hatalar aliyorum" diyordu (ParsMazi,
+                   21 Agustos 2026). Artik yalniz SAYILIYOR; toplami sonuc satirinda. */
+                if (sayac) sayac.icselAtlandi = (sayac.icselAtlandi || 0) + 1;
             }
             continue;
         }
@@ -3001,14 +3043,27 @@ function _paramlariYaz(hedefBilesen, plist, adaylar, rapor, kaynakAd, statikYaz,
 
         /* Strateji (zaman bicimi + taban) klip basina BIR KEZ olculur; sonra butun
            parametrelerde ayni strateji kullanilir. Olcum yapilamazsa adaylar tek tek
-           denenir (asagida). Probe ofseti: gercek keyframe'lerin ORTASI. */
+           denenir (asagida). Probe ofseti: gercek keyframe'lerin ORTASI.
+           ⚠ PROBE OFSETINE capaDelta KATILIR — eskiden katilmiyordu ve olcum bosa gidiyordu.
+           adaylar[].baz YIGIN capasina gore kurulu; parametrenin kendi capasi farkliysa
+           gercek yazim `strateji.baz + capaDelta` ile yapiliyor (asagida) ama PROBE ham
+           pofs ile yapiliyordu. OLCULDU (paketteki gercek "Emoji Sag Taraf" verisi):
+           yigin capa="bas", ilk keyframe'li parametre Transform/Position capa="son",
+           ornek zamanlari -0.783 … +0.050 -> pofs = -0.3667; 2 sn'lik emoji klibinde
+           adaylarin araligi [0, 2] oldugu icin UC ADAYIN UCU DE "aralik disi" diye
+           atlaniyor ve _stratejiOlc null donuyordu.
+           ⚠ olculdu BAYRAGI ARTIK YALNIZ OLCUM TUTTUGUNDA KONUR. Eskiden olcumden ONCE
+           konuyordu: ilk parametre olculemeyince o klipte ikinci sans kalmiyor, kalan
+           butun parametreler bicimsiz (yavas, adaydan adaya) yola dusuyordu. */
         if (strateji && !strateji.olculdu) {
-            strateji.olculdu = true;
             var tIlk = kw[0].t, tSon = kw[kw.length - 1].t;
             var pofs = (tIlk + tSon) / 2;
             if (!pofs) pofs = (tIlk < 0) ? -0.01 : 0.25;
-            var s0 = _stratejiOlc(pr, adaylar, pofs);
-            if (s0) { strateji.baz = s0.baz; strateji.bicim = s0.bicim; strateji.ad = s0.ad; }
+            var s0 = _stratejiOlc(pr, adaylar, pofs + capaDelta);
+            if (s0) {
+                strateji.olculdu = true;
+                strateji.baz = s0.baz; strateji.bicim = s0.bicim; strateji.ad = s0.ad;
+            }
         }
 
         /* Denenecek sira: olculen strateji varsa once o, sonra kalan adaylar.
@@ -3251,6 +3306,62 @@ function presetYaz(jsonYol, kafaKullan, emojiKanal) {
         } else {
             try { sec = seq.getSelection(); } catch (eS) {}
             if (!sec || !sec.length) return "err:Timeline'da klip secili degil";
+        }
+
+        /* ===== DIS EFEKT DENETIMI — KLIP DONGUSUNE GIRMEDEN ONCE, BIR KEZ =====
+           ⚠ Panelle dagitilan preset paketinde ADOBE OLMAYAN efektler var. OLCULDU
+           (varsayilan/preset-paketi.json, 8 preset, butun bilesenlerin matchName'i
+           dokuldu): "Camera Shake 1" -> AE.Impact_Camera_Shake_FX (ucuncu parti eklenti,
+           ParsMazi'de KURULU DEGIL) · "Pop In RGB" -> AE.Mettle SkyBox Chromatic
+           Aberrations (Immersive Video ile gelir, her kurulumda olmayabilir). Kalan alti
+           preset yalniz yerlesik AE.ADBE Geometry2/AECrop kullaniyor — yani "Emoji Sag
+           Taraf" bu denetimden ETKILENMIYOR (denetim raporu onu ucuncu parti sanmisti,
+           gercek veride oyle degil). Bu yuzden ad listesi KODA GOMULMEDI: karar her zaman
+           Premiere'in KENDI katalogundan soruluyor.
+           Eskiden _qeEfektEkle her klip icin AYRI AYRI
+           "Premiere efekt katalogunda yok" donuyordu: 200 emojilik bir
+           kanalda 200 sessiz basarisizlik. Kullaniciya "surekli hatalar aliyorum" diye
+           yansiyor, gercek sebep (eksik eklenti) hicbir yerde YAZMIYOR.
+           Artik kataloga BIR KEZ soruluyor ve anlasilir TEK bir hata donuyor.
+           ⚠ HEMEN HATA DONMUYORUZ — "hedef kliplerin hicbirinde de yok" sarti aranir:
+           efekt klipte ZATEN varsa eklemeye gerek yok ve preset calisir (kullanici o
+           efekti elle uygulamis olabilir). Yanlis-pozitif bir hata calisan bir akisi
+           oldururdu; risk asimetrik.
+           ⚠ ICSEL bilesenler (Motion/Opacity) ve HIZ RAMPASI denetime GIRMEZ — ikisi de
+           zaten her klipte hazir, katalogda aranmalari anlamsiz (mevcut _icselMi /
+           _hizRampasiMi filtreleri aynen kullaniliyor).
+           ⚠ KATALOG SAGLIK KAPISI: katalog hic okunamiyorsa (QE yok, yerellestirilmis
+           Premiere, getVideoEffectByName patliyor) HER ad cozulemez gorunur ve denetim
+           calisan bir kurulumu yanlislikla reddederdi. Bu yuzden once bilinen bir
+           YERLESIK efekt ("Transform") sorulur; o da cozulemiyorsa katalog okumasina
+           guvenilmez sayilip denetim tumden atlanir (eski davranis surer). */
+        var dKatalog = false;
+        try { dKatalog = (typeof app.enableQE === "function") && !!_qeEfektBul("Transform"); } catch (eDk) {}
+        if (dKatalog) {
+            var dGor = {}, dSira = [], dEks = [], dj, dq, dAnah, db, dVar;
+            for (dj = 0; dj < veri.bilesenler.length; dj++) {
+                db = veri.bilesenler[dj];
+                if (_hizRampasiMi(db.ad, db.match)) continue;
+                if (_icselMi(db.ad, db.match)) continue;
+                dAnah = String(db.match || "") + " <> " + _sadeAd(db.ad || "");
+                if (dGor[dAnah]) continue;
+                dGor[dAnah] = true; dSira.push(db);
+            }
+            for (dj = 0; dj < dSira.length; dj++) {
+                if (_qeEfektBul(dSira[dj].ad)) continue;          // katalogda var: sorun yok
+                dVar = false;
+                for (dq = 0; dq < sec.length && !dVar; dq++) {
+                    if (_sesKlibiMi(sec[dq])) continue;
+                    if (_bilesenSay(sec[dq], dSira[dj].match, dSira[dj].ad) > 0) dVar = true;
+                }
+                if (!dVar) dEks.push(_sadeAd(dSira[dj].ad || "?"));
+            }
+            if (dEks.length) {
+                return "err:\"" + dEks.join("\", \"") + "\" " +
+                       (dEks.length > 1 ? "efektleri" : "efekti") +
+                       " bu bilgisayarda kurulu degil (ucuncu parti eklenti) — " +
+                       "bu preset burada uygulanamaz";
+            }
         }
 
         /* HIZ RAMPASI eski kayitlarda olabilir — uygulama aninda da suzulur (bkz.
@@ -3951,12 +4062,43 @@ function _kanalKilitli(tr) {
     return false;   // metot nesnesi / bilinmeyen tip: kilit yok say
 }
 
-// [s,e] aralığını tek bir klip tam kaplıyor mu? (kayıt sürekliliği kontrolü, H2/H3)
-function _trackCovers(tr, s, e, eps) {
-    for (var i = 0; i < tr.clips.numItems; i++) {
-        var cl = tr.clips[i], cs, ce;
-        try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er) { continue; }
-        if (cs <= s + eps && ce >= e - eps) return true;
+/* Son bulunan kapsayıcı klip indeksi — _trackCovers kendi ipucunu buraya yazar;
+   autoCut her çalışmanın BAŞINDA -1'e sıfırlar (bayat ipucu bir sonraki videoya sızmasın). */
+var _coverSonIx = -1;
+/* [s,e] aralığını tek bir klip tam kaplıyor mu? (kayıt sürekliliği kontrolü, H2/H3)
+   ⚠ NEDEN İPUCU VAR: autoCut bu fonksiyonu KESİM BAŞINA çağırıyor ve fonksiyon her
+   çağrıda klipleri indeks 0'dan tarıyordu — erken çıkış da yoktu. Yoğun bir timeline'da
+   (1000 kesim × 1000+ klip) milyonlarca özellik okuması demek ve her okuma bir Premiere
+   çağrısı. Aynı ders `_qeKlipBul` ve `_klipYenidenBul`'da alınmıştı.
+   ⚠ KESİMLER SONDAN BAŞA gidiyor (autoCut'ta `ivs.sort(b.s - a.s)`, zamanlar kaymasın
+   diye) ve klipler zaman sırasında; yani aranan klibin indeksi tur be tur AZALIYOR.
+   Ripple-delete yalnız kesim noktasından SONRAKİ (daha yüksek indeksli) klipleri
+   siliyor/kaydırıyor, daha düşük indeksler yerinde kalıyor — bu yüzden ipucu asla
+   "çok düşük" olmuyor, en fazla "çok yüksek" oluyor ve aşağı doğru yürümek yetiyor.
+   ⚠⚠ İPUCU TUTMAZSA 0'DAN TAM TARAMA YAPILIR — ŞART. İpucu yalnızca bir HIZLANDIRMA;
+   yanlış ipucu yüzünden "kaplamıyor" demek o kesimi ATLATIR (skippedCover) ya da yanlış
+   kesim yaptırır. Aynı tuzağa v1.30.1'de düşülüp düzeltildi: hız için doğruluktan ödün
+   verilmez. Bir track'te klipler çakışmadığı için [s,e]'yi kaplayan klip en fazla BİR
+   tanedir — yani ipuçlu tarama ile tam tarama aynı cevabı verir. */
+function _trackCovers(tr, s, e, eps, ipucuIx) {
+    var n = 0;
+    try { n = tr.clips.numItems; } catch (en) { return false; }
+    var ip = parseInt(ipucuIx, 10), i, cl, cs, ce;
+    if (!isNaN(ip) && ip >= 0) {
+        if (ip > n - 1) ip = n - 1;
+        for (i = ip; i >= 0; i--) {
+            cl = tr.clips[i];
+            try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er) { continue; }
+            if (cs <= s + eps && ce >= e - eps) { _coverSonIx = i; return true; }
+            /* Zaman sırası: bu klip aranan bitişten önce bitiyorsa daha düşük indeksliler
+               daha da erken biter, hiçbiri kaplayamaz — ipuçlu turu burada kes. */
+            if (ce < e - eps) break;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        cl = tr.clips[i];
+        try { cs = cl.start.seconds; ce = cl.end.seconds; } catch (er2) { continue; }
+        if (cs <= s + eps && ce >= e - eps) { _coverSonIx = i; return true; }
     }
     return false;
 }
@@ -4044,8 +4186,17 @@ function autoCut(intervalsFilePath) {
         }
         pr("Dolu kanal: " + doluV.length + " video + " + doluA.length + " ses (boş kanallar atlanıyor)");
 
-        var t0 = 0; try { t0 = $.hiresTimer; } catch (et) {}
-        var tRazor = 0, tRip = 0;
+        /* ⚠⚠ $.hiresTimer "SON OKUMADAN BU YANA geçen mikrosaniye" döndürür ve OKUNUNCA
+           SIFIRLANIR — mutlak bir saat DEĞİLDİR. Eski kod `t0 = $.hiresTimer` deyip sonra
+           `$.hiresTimer - t0` yapıyordu, yani İKİ FARKLI ARALIĞI birbirinden çıkarıyordu:
+           sonuç anlamsız, hatta negatif olabiliyordu. Panelin AutoCut yavaşlığı için TEK
+           ölçeği bu satırlardı ve ölçüm ÇÖPTÜ. Doğrusu: her faz sınırında BİR KEZ okuyup
+           deltayı ilgili kovaya eklemek.
+           ⚠ Aralarda BAŞKA hiçbir yerde $.hiresTimer okunmamalı — her okuma sayacı sıfırlar. */
+        function _ht() { try { return $.hiresTimer; } catch (eht) { return 0; } }
+        _ht();                                   // tabanı sıfırla (dönüş değeri atılır)
+        var tRazor = 0, tRip = 0, tDiger = 0;
+        _coverSonIx = -1;                        // monoton imleç: her AutoCut kendi turunda başlar
         var done = 0, failed = 0, noop = 0, skippedCover = 0, firstErr = "";
         for (var k = 0; k < ivs.length; k++) {
             var cs = ivs[k].s, ce = ivs[k].e;
@@ -4053,23 +4204,24 @@ function autoCut(intervalsFilePath) {
                atarsa dongu tamamen kirilip disa firliyordu (bir kanal gecersiz kilindiginda
                oluyor). Artik o kesim "hata" sayilip digerlerine devam ediliyor. */
             try {
-                if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04)) { skippedCover++; continue; }
+                if (refTrack && !_trackCovers(refTrack, cs, ce, 0.04, _coverSonIx)) { skippedCover++; continue; }
                 var tcS = _secToTC(cs, fpsFrac), tcE = _secToTC(ce, fpsFrac);
-                var m0 = 0; try { m0 = $.hiresTimer; } catch (em) {}
+                tDiger += _ht();                 // kapsama kontrolü + TC hesabı
                 for (var v = 0; v < qeV.length; v++) { qeV[v].razor(tcS); qeV[v].razor(tcE); }
                 for (var a = 0; a < qeA.length; a++) { qeA[a].razor(tcS); qeA[a].razor(tcE); }
-                try { tRazor += $.hiresTimer - m0; } catch (em2) {}
-                var m1 = 0; try { m1 = $.hiresTimer; } catch (em3) {}
+                tRazor += _ht();
                 var rem = _rippleDeleteRange(seq, cs, ce, fps, doluV, doluA);
-                try { tRip += $.hiresTimer - m1; } catch (em4) {}
+                tRip += _ht();
                 if (rem > 0) done++; else noop++;              // hiçbir klip silinmediyse "done" sayma (H4)
             } catch (e1) { failed++; if (!firstErr) firstErr = e1.toString(); }
         }
+        tDiger += _ht();                         // atlanan kesimler + son tur
         var durAfter = _seqDuration(seq);
-        var tTop = 0; try { tTop = ($.hiresTimer - t0) / 1000000; } catch (et2) {}
+        var tTop = (tRazor + tRip + tDiger) / 1000000;
         // Faz zamanlaması: bir dahaki yavaşlık şikâyetinde nerede takıldığı ÖLÇÜLEBİLİR olsun.
         pr("Süre: toplam " + tTop.toFixed(1) + " sn | razor " + (tRazor / 1000000).toFixed(1) +
-           " sn | ripple-delete " + (tRip / 1000000).toFixed(1) + " sn");
+           " sn | ripple-delete " + (tRip / 1000000).toFixed(1) +
+           " sn | diğer (kapsama+TC) " + (tDiger / 1000000).toFixed(1) + " sn");
         pr("Sekans süresi SONRA: " + durAfter.toFixed(2) + " sn | done=" + done + " noop=" + noop + " skipCover=" + skippedCover + " failed=" + failed + (firstErr ? " err=" + firstErr : ""));
         try { var dir = new File(intervalsFilePath).parent; _writeFileUTF8(dir.fsName + "/autocut_diag.txt", diag.join("\n")); } catch (ed) {}
         return "ok:" + done + " boşluk kesildi (" + seqDur.toFixed(1) + " → " + durAfter.toFixed(1) + " sn)"

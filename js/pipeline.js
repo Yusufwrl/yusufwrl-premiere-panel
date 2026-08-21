@@ -94,17 +94,66 @@ function run(exe, args, onLog, o) {
     if (o.pathDirs && o.pathDirs.length) {
       opts.env = Object.assign({}, process.env, { PATH: o.pathDirs.join(";") + ";" + (process.env.PATH || "") });
     }
-    let buf = "";
-    function cap(d) { const s = d.toString(); buf += s; if (onLog) onLog(s); }
-    function dump(tail) { if (o.logFile) { try { fs.writeFileSync(o.logFile, buf + (tail || ""), "utf8"); } catch (e) {} } }
+    /* ÇIKTI TAMPONU SINIRLI — ama TANI DEĞERİ KORUNARAK.
+       Eskiden `buf` sınırsız büyüyordu: motorun/ffmpeg'in yazdığı her bayt panel kapanana
+       kadar RAM'de duruyordu. ÖLÇÜLDÜ (kullanıcının gerçek çalıştırması, engine_last.log):
+       26 dakikalık bir kanal 2.532 bayt üretti — altyazı satırı başına ~100 bayt, tqdm
+       çubuğu yok. Yani PRATİKTE küçük; ama koddaki tavanın olmaması bir kaza (batched mod,
+       ffmpeg ilerleme satırları, DLL hata seli) durumunda tamponu sınırsız büyütür.
+       TAVAN ALTINDA DAVRANIŞ BİREBİR AYNI: 200 KB'ın altında tek bir writeFileSync yapılır,
+       hata metni ve `e.cikti` eskisiyle aynıdır. Yalnız taşma anında en ESKİ kısım bellekten
+       düşer ve — log dosyası varsa — ORAYA AKTARILIR, yani `engine_last.log` yine TAM çıktıyı
+       içerir. Kesme sessiz değil: bir kez log'a yazılır ve `e.cikti`nin başına işaret konur. */
+    const CIKTI_TAVAN = 200 * 1024;
+    let buf = "", atilan = 0, dosyaAcildi = false, tasmaBildirildi = false;
+    // Taşan (en eski) parçayı log dosyasına aktar. İlk yazış dosyayı TAZELER (eski dump
+    // davranışı: writeFileSync), sonrakiler ekler. Yazamazsak gerçekten kaybolur -> sayılır.
+    function dosyayaAk(s) {
+      if (!o.logFile) return false;
+      try {
+        if (dosyaAcildi) fs.appendFileSync(o.logFile, s, "utf8");
+        else { fs.writeFileSync(o.logFile, s, "utf8"); dosyaAcildi = true; }
+        return true;
+      } catch (e) { return false; }
+    }
+    function cap(d) {
+      const s = d.toString(); buf += s; if (onLog) onLog(s);
+      if (buf.length > CIKTI_TAVAN) {
+        const fazla = buf.length - CIKTI_TAVAN;
+        const eski = buf.slice(0, fazla);       // bellekten düşen HEP en eski kısım
+        buf = buf.slice(fazla);
+        if (!dosyayaAk(eski)) atilan += eski.length;
+        if (!tasmaBildirildi) {
+          tasmaBildirildi = true;
+          if (onLog) onLog("[cikti] motor ciktisi uzun; bellekte son " +
+            Math.round(CIKTI_TAVAN / 1024) + " KB tutuluyor" +
+            (o.logFile ? " (tamami log dosyasinda)." : ", basi atildi.") + "\n");
+        }
+      }
+    }
+    // Hata metnine giden çıktı: kesildiyse BAŞINA işaret konur, yoksa çağıran eksik bir
+    // dökümü tam sanar ("motor bu argümanı mı tanımadı?" sorusu yanlış cevaplanırdı).
+    function ciktiMetni() {
+      return (atilan || dosyaAcildi)
+        ? ("[...cikti kirpildi, basi " + (o.logFile ? "log dosyasinda" : "atildi") + "...]\n" + buf)
+        : buf;
+    }
+    function dump(tail) {
+      if (!o.logFile) return;
+      const govde = buf + (tail || "");
+      try {
+        if (dosyaAcildi) fs.appendFileSync(o.logFile, govde, "utf8");
+        else fs.writeFileSync(o.logFile, govde, "utf8");
+      } catch (e) {}
+    }
     let proc;
     try { proc = spawn(exe, args, opts); }
-    catch (e) { dump("\nSPAWN HATASI: " + e.message); e.cikti = buf; reject(e); return; }
+    catch (e) { dump("\nSPAWN HATASI: " + e.message); e.cikti = ciktiMetni(); reject(e); return; }
     _procs.push(proc);
     function unreg() { const ix = _procs.indexOf(proc); if (ix >= 0) _procs.splice(ix, 1); }
     proc.stdout.on("data", cap);
     proc.stderr.on("data", cap);
-    proc.on("error", (e) => { unreg(); dump("\nSPAWN HATASI: " + e.message); e.cikti = buf; reject(e); });
+    proc.on("error", (e) => { unreg(); dump("\nSPAWN HATASI: " + e.message); e.cikti = ciktiMetni(); reject(e); });
     proc.on("close", (code) => {
       unreg();
       dump("\nÇIKIŞ KODU: " + code);
@@ -113,15 +162,16 @@ function run(exe, args, onLog, o) {
         // Süreci kullanıcının "İptal"i öldürdü — çağırana anlaşılır bir mesaj git (ffmpeg
         // için de geçerli: log'da "ffmpeg çıkış kodu 1" yerine "İptal edildi" görünsün).
         const iptalHata = new Error("İptal edildi");
-        iptalHata.iptal = true; iptalHata.cikti = buf;
+        iptalHata.iptal = true; iptalHata.cikti = ciktiMetni();
         reject(iptalHata);
       }
       else {
         const hata = new Error(exe + " çıkış kodu " + code +
           (buf.trim() ? "\n" + buf.slice(-1200) : " (motor çıktı vermeden çöktü — DLL hatası olabilir)"));
         /* Hata mesajına yalnızca son 1200 karakter giriyor. Çağıran ("motor bu argümanı mı
-           tanımadı?" gibi) TAM çıktıya bakabilsin diye ham dökümü hataya iliştiriyoruz. */
-        hata.cikti = buf;
+           tanımadı?" gibi) elindeki en geniş döküme bakabilsin diye ham çıktı hataya
+           iliştiriliyor — çıktı tavanı aşmışsa başı kırpılmıştır, işareti metnin başında. */
+        hata.cikti = ciktiMetni();
         hata.cikisKodu = code;
         reject(hata);
       }
@@ -1208,7 +1258,15 @@ function cumleBirlestir(gruplar, opts, onLog) {
   var MAX_KOPRU = (opts.maxKopru > 0) ? opts.maxKopru : 0.15;
   /* Başka kanalın cue'suna bırakılacak emniyet payı — kanallarArasiCakisma'nın GAP'i ile aynı. */
   var GAP = (opts.gap > 0) ? opts.gap : 0.08;
-  var sayac = { koprulen: 0, kanalEngeli: 0, farkliCumle: 0, uzakBosluk: 0 };
+  /* uzakCumleIci / uzakCumleArasi: MAX_KOPRU'yu aşan boşluğun AYRI iki anlamı var ve
+     ayrılmadan hiçbir işe yaramıyor. `uzakCumleIci` = aynı cümlenin ortasında kalan geniş
+     boşluk, yani KÖPRÜLENMESİ GEREKİRDİ ama boşluk büyük olduğu için kurulamadı — bu sayı
+     "altyazılar birbirinden kopuk" şikâyetinin doğrudan ölçüsüdür (sesleHizala boşluğu
+     açtığında tam da burası şişiyordu, bkz. sesleHizala'daki "boşluğu birlikte taşı" bloğu).
+     `uzakCumleArasi` = iki ayrı cümle arasındaki gerçek duraklama; NORMALDİR, düzeltilecek
+     bir şey değil. Toplamı tek sayı olarak raporlamak ikisini birbirine karıştırıyordu. */
+  var sayac = { koprulen: 0, kanalEngeli: 0, farkliCumle: 0, uzakBosluk: 0,
+                uzakCumleIci: 0, uzakCumleArasi: 0 };
   gruplar = gruplar || [];
 
   /* Diğer grupların cue'ları — köprü aralığında biri var mı diye bakmak için tek düz liste.
@@ -1252,7 +1310,15 @@ function cumleBirlestir(gruplar, opts, onLog) {
       if (!isFinite(a.end) || !isFinite(b.start)) continue;
       var d = b.start - a.end;
       if (d <= 0) continue;                             // zaten bitişik ya da çakışıyor
-      if (d > MAX_KOPRU) { sayac.uzakBosluk++; continue; }
+      if (d > MAX_KOPRU) {
+        sayac.uzakBosluk++;
+        /* Sınıflandırma SAYIM İÇİN, karar için değil — köprü zaten kurulmuyor. `farkliCumle`
+           sayacına DOKUNULMUYOR: o yalnız "yakın boşluk ama farklı cümle" anlamına geliyor ve
+           anlamı değişirse geriye dönük okunan log'lar yanıltıcı olurdu. */
+        if (a.cumleId && b.cumleId && a.cumleId === b.cumleId) sayac.uzakCumleIci++;
+        else sayac.uzakCumleArasi++;
+        continue;
+      }
       /* AYNI CÜMLE Mİ? cumleId "<oturum jetonu>-<kaynakNo>:<segment>" ve buildCues cümle
          sınırında grubu BÖLÜYOR, yani kimlik gerçekten kesin. Kimliği olmayan cue'da
          (seg bilgisi yok) köprü kurulmaz: cümle sınırını uydurmaktansa boşluk bırakmak
@@ -1288,6 +1354,13 @@ function cumleBirlestir(gruplar, opts, onLog) {
     /* Kurulamayan köprüler SESSİZ KALMAZ: kullanıcı hâlâ yanıp sönme görürse sebebi burada. */
     if (sayac.kanalEngeli) onLog("[kopru] " + sayac.kanalEngeli + " tanesi baska kanal yuzunden kurulmadi.\n");
     if (sayac.farkliCumle) onLog("[kopru] " + sayac.farkliCumle + " bosluk cumle sinirinda, birakildi.\n");
+    /* GENİŞ BOŞLUKLAR ARTIK SESSİZ DEĞİL. Bu iki sayı hesaplanıyor ama hiçbir yere
+       yazılmıyordu — oysa "altyazılar çok aralıklı" şikâyetinin görüneceği sayı tam da
+       `uzakCumleIci`. Satırlar 80 karakterin altında (app.js whenLog sonu kırpıyor). */
+    if (sayac.uzakCumleIci) onLog("[kopru] " + sayac.uzakCumleIci +
+      " bosluk cumle ICINDE ama " + MAX_KOPRU.toFixed(2) + " sn'den genis.\n");
+    if (sayac.uzakCumleArasi) onLog("[kopru] " + sayac.uzakCumleArasi +
+      " genis bosluk cumleler ARASINDA (normal).\n");
     if (kalanKA) onLog("[kopru] UYARI: koprüden sonra " + kalanKA + " kanallar arasi cakisma var.\n");
   }
   return sayac;
@@ -1422,6 +1495,12 @@ function sesleHizala(cues, wavPath, onLog) {
      sessizlikte başlıyordu — 0.60 ileri gitmek nötr ya da iyi. */
   var PEN = 0.010, MAX_KAYDIR = 0.60, ONEMSIZ = 0.06, HIZ_GAP = 0.08;
   var MIN_GOR = 0.40, ARA_PENCERE = 1.20;
+  /* KAYDIRMA SIRASINDA KORUNACAK EN BÜYÜK BOŞLUK (aşağıdaki "boşluğu birlikte taşı" bloğu).
+     cumleBirlestir'in MAX_KOPRU'su ile aynı sayı ve aynı gerekçe: 0.15 sn'ye kadar olan
+     boşluk buildCues'un MIN_GAP dolgusudur (yapay), üstü GERÇEK duraklamadır. Gerçek
+     duraklamada önceki altyazıyı uzatmak "konuşma bitti ama yazı duruyor" demek olurdu,
+     o yüzden orada eski davranış (boşluk büyüsün) bilerek korunuyor. BÜYÜTME. */
+  var KORU_BOSLUK = 0.15;
   /* İKİ AYRI SEBEP, İKİ AYRI MESAJ. Eskiden `catch (e) { z = null; }` istisna metnini YUTUYOR
      ve tek bir "ses okunamadı" satırı iki bambaşka durumu birbirine karıştırıyordu:
      (a) dosya açılamadı / WAV başlığı ayrıştırılırken çöktü (istisna — yol, izin, bozuk dosya),
@@ -1469,6 +1548,7 @@ function sesleHizala(cues, wavPath, onLog) {
      tek başına işe yaramıyor: asıl soru DÜZELTİLEMEYENLERİN NEDEN düzeltilemediği.
      Sonraki her değişikliğin (kelime tavanı, pencere boyu, eşik) etkisini ölçmenin tek yolu bu. */
   var duzeltildi = 0, toplamKayma = 0, kismi = 0;
+  var boslukKorundu = 0; // kaydırma yüzünden açılacakken önceki cue ile birlikte taşınan boşluk
   var kisaldi = 0;       // rijit kaydırılamadı, yalnız BAŞLANGICI ilerledi (cue kısaldı)
   var tavanaDayandi = 0; // konuşma MAX_KAYDIR'dan daha geç başlıyor — kısmen düzeldi, tam değil
   var yokPencere = 0;    // ARA_PENCERE içinde konuşma hiç başlamadı
@@ -1519,8 +1599,37 @@ function sesleHizala(cues, wavPath, onLog) {
     // Cue zaten MIN_GOR kadar kısa: kaydırmak onu görünmez yapardı, kazanç sıfır olurdu.
     if (basKaydir <= ONEMSIZ) { yokSure++; continue; }
     if (basKaydir < kayma) kismi++;                         // kısmen kaydırıldı: hiç yoktan iyi
+    /* ⚠ AÇILAN BOŞLUĞU ÖNCEKİ CUE İLE BİRLİKTE TAŞI — bu blok olmadan hizalama
+       altyazılar ARASINDA gerçek boşluk üretiyordu. (ParsMazi'nin şikâyeti: "altyazı
+       kısımları çok aralıklı kalıyor, oluşturulan altyazı birbiriyle birleşmiyor.")
+       ESKİDEN NE OLUYORDU: buildCues her cue'nun bitişini `sonraki.start - MIN_GAP`
+       değerine DAYIYOR, yani önceki cue'nun bitişi bu cue'nun O ANDAKİ başlangıcına
+       yapıştırılmış YAPAY bir sayı. Hemen ardından çalışan bu döngü cue.start'ı ileri
+       kaydırıyor ama önceki cue'ya HİÇ dokunmuyordu: aradaki boşluk 0.08'den
+       0.08 + kayma'ya (MAX_KAYDIR yüzünden 0.68 sn'ye kadar) çıkıyordu. O boşluk tanım
+       gereği SESSİZLİKTİ (cue zaten orada konuşma olmadığı için kaydırıldı) ama ekran
+       altyazısız kalıyordu; sonra çalışan cumleBirlestir de boşluk MAX_KOPRU'yu (0.15)
+       aştığı için köprüyü KURAMIYORDU. Yani boşluğu AÇAN kod ile KAPATAN kod
+       birbirinden habersizdi.
+       ÖLÇÜLDÜ (kullanıcının gerçek A1 kaydı, A1.json + A1.wav, kelime tavanı 2, 1064 cue):
+       hizalama 42 boşluğu 0.15'in altındayken üstüne çıkarıyordu, toplam 9.73 sn.
+       ÇÖZÜM: boşluk NE İSE aynen korunur — önceki cue'nun bitişi de kayma kadar ilerler.
+       · Boşluk BÜYÜTÜLMEZ, KÜÇÜLTÜLMEZ; `ys > onc.end` şartı yüzünden yalnız UZATIR,
+         hiçbir cue kısalmaz ve hiçbir `start` değişmez (senkron bu projede en pahalı şey).
+       · Yalnız YAPAY boşlukta (<= KORU_BOSLUK) çalışır; gerçek duraklamada eski davranış.
+       · onc.end en fazla cue.start'a kadar gider (eskiBosluk > 0), yani KANAL İÇİ çakışma
+         doğuramaz. Kanallar ARASI eksende ise bu, rijit dalın cue.end'i ileri uzatmasıyla
+         aynı sınıf bir değişiklik — kanallarArasiCakisma zaten sesleHizala'dan SONRA
+         çalışıyor ve onu topluyor. */
+    var onc = (c > 0) ? cues[c - 1] : null;
+    var eskiBosluk = onc ? (cue.start - onc.end) : Infinity;   // KAYDIRMADAN ÖNCE ölç
     cue.start = +(cue.start + basKaydir).toFixed(3);
     if (sonKaydir > 0) cue.end = +(cue.end + sonKaydir).toFixed(3);
+    if (onc && eskiBosluk > 0 && eskiBosluk <= KORU_BOSLUK) {
+      var yeniSon = +(cue.start - eskiBosluk).toFixed(3);
+      // `<= cue.start` yuvarlama emniyeti: 3 basamağa yuvarlarken bitiş başlangıcı GEÇMESİN.
+      if (yeniSon > onc.end && yeniSon <= cue.start) { onc.end = yeniSon; boslukKorundu++; }
+    }
     duzeltildi++; toplamKayma += basKaydir;
     if (sonKaydir < basKaydir) kisaldi++;                   // bitiş geride kaldı -> cue kısaldı
   }
@@ -1538,6 +1647,9 @@ function sesleHizala(cues, wavPath, onLog) {
        edip "altyazılarım niye kısaldı?" diye sorduğunda cevabı burada bulmalı — kısalan kısım
        sessizlikti, ama bunu söylemeden yapmak sessiz değişikliktir. */
     if (kisaldi) onLog("[hizala] " + kisaldi + " altyazının yalnız başlangıcı ilerledi.\n");
+    /* Kaydırma yüzünden açılacakken kapatılan boşluklar. Bu satır olmadan düzeltme SESSİZ
+       kalırdı: kullanıcı "aralıklar düzeldi mi?" diye sorduğunda cevap log'da olmalı. */
+    if (boslukKorundu) onLog("[hizala] " + boslukKorundu + " boşluk önceki altyazıyla kapatıldı.\n");
     if (kismi) onLog("[hizala] " + kismi + " tanesi tabana takılıp kısmen kaydı.\n");
     /* Tavana dayananlar DÜZELTİLDİ sayılır ama tam değil: konuşma MAX_KAYDIR'dan geç
        başlıyor, yani o altyazılar hâlâ erken görünüyor olabilir. Kullanıcı ekranda kayma

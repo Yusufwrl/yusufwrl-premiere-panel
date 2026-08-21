@@ -738,18 +738,28 @@
   /* Host'tan gelen sonucu tek yerden yorumla: "ok:" ile başlamayan her şey hatadır.
      Host kısmi başarıyı da "ok:" içinde bildiriyor ("N klipte OLMADI"), o yüzden mesajın
      TAMAMI gösteriliyor — yarısı uygulanmış bir işi "başarılı" diye yutmak en kötüsü. */
+  /* KISMI BASARI TESTI — TEK KAYNAK. Ayni kural iki yerde lazim: preset KARTI (sonucGoster)
+     ve EMOJI akisi. Emoji dali eskiden yalniz `indexOf("ok:") === 0` bakiyordu, yani
+     host'un "ok:3/200 klibe uygulandi — 197 klipte OLMADI" cevabini TAM BASARI sayiyordu:
+     kullanici yesil bir tik goruyor, emojilerin cogunda animasyon olmadigini ancak videoyu
+     izlerken fark ediyordu (ParsMazi, 21 Agustos 2026). Iki ayri kopyada kural kaymasinin
+     bedeli bu bulgunun ta kendisi — o yuzden tek fonksiyon. */
+  function presetKismiMi(govde) {
+    var g = String(govde || "");
+    return (g.indexOf("OLMADI") !== -1) || (g.indexOf("UYARI") !== -1) ||
+           (g.indexOf("öğretilmiş kayıt YOK") !== -1) ||
+           /* Atlanan klipler de YEŞİL görünmemeli: host "kafanin disinda"/"atlandi"
+              diyen klipleri paydadan düşürüyor, yani "1/1 uygulandı" yazıp 4 klibi
+              sessizce atlayabilir. */
+           (g.indexOf("kafanin disinda") !== -1) || (g.indexOf("atlandi") !== -1);
+  }
   function sonucGoster(etiket, r) {
     logLine(etiket + ": " + r);
     if (r.indexOf("ok:") !== 0) { durumYaz(r.replace(/^err:/, ""), "var(--bad)"); return; }
     /* KISMİ BAŞARI YEŞİL DEĞİL SARI. Host "3/20 klibe uygulandı — 17 klipte OLMADI" diyor;
        bunu yeşil göstermek, render'dan sonra fark edilen en pahalı hataya davetiye. */
     var govde = r.slice(3);
-    var kismi = (govde.indexOf("OLMADI") !== -1) || (govde.indexOf("UYARI") !== -1) ||
-                (govde.indexOf("öğretilmiş kayıt YOK") !== -1) ||
-                /* Atlanan klipler de YEŞİL görünmemeli: host "kafanin disinda"/"atlandi"
-                   diyen klipleri paydadan düşürüyor, yani "1/1 uygulandı" yazıp 4 klibi
-                   sessizce atlayabilir. */
-                (govde.indexOf("kafanin disinda") !== -1) || (govde.indexOf("atlandi") !== -1);
+    var kismi = presetKismiMi(govde);
     durumYaz((kismi ? "⚠ " : "✓ ") + govde, kismi ? "var(--warn)" : "var(--good)");
   }
   /* PRESET ADI → PANELİN KENDİ ANİMASYONU.
@@ -2319,19 +2329,71 @@
      5 katmanda 479 emoji birikmiş, panel hiçbirini tanımıyor, "Emojileri Sil" temizleyemiyor
      ve "boş kanal yok" diyor. Yol karşılaştırması bin'den bağımsız çalışır.
      Emoji klasörünün ALT klasörleri de emoji sayılır (Emoji\w) — onlar da bizim koyduğumuz. */
-  function emojiKanalOzet(ek, kok) {
+  /* ⚠⚠ BU KARAR BIR ZAMANLAR TEK OLCUTE BAGLIYDI VE IKINCI KULLANICIDA KATMAN BIRIKTIRDI
+     (ParsMazi, 21 Agustos 2026: timeline dolusu ust uste emoji katmani).
+     Tek olcut suydu: klibin medya yolu, #emojiKlasor kutusundaki yolla BASLIYOR mu.
+     Yanlis cikinca IKI sey ayni anda bozuluyor:
+       (a) eski emoji katmani `t.emoji > 0` sartina takilip TEMIZLENECEKLER listesine girmiyor,
+       (b) ayni katman `yabanci > 0` oldugu icin `enUstDolu`yu yukseltiyor ve hedef kanal
+           bir yukari kayiyor -> her basista YENI bir katman.
+     Host tarafindaki v1.8.0 korumasi bunu yakalayamaz: yeni kanal gercekten BOS.
+     Kutu neden yanlis olur: degeri localStorage'da (CEF onbellegi, koruma listelerinin
+     disinda) ya da `cfg._engineRoot + \Emoji`; panel yeniden kurulunca, onbellek silinince
+     veya motor klasoru degisince (ParsMazi'de "-teslim" ekli IKINCI motor klasoru var)
+     kutu sessizce baska bir klasoru gosterebiliyor.
+     OLCULDU: siniflandirma dogruyken 5 basis -> hep V2+V3 (birikme yok); bozukken ayni 5
+     basis -> V2..V10 doluyor ve 6. basista "bos kanal yok".
+
+     COZUM UC KATMANLI:
+       1. YOL ONEKI (eski, en guclu olcut)
+       2. DOSYA ADI (yeni): ad emoji kalibindaysa ("<Duygu> <Karakter>.png") ve bilinen
+          emoji adlari kumesindeyse klip BIZIMDIR — klasor degisse bile taninir.
+       3. BILINMEYEN (yeni ucuncu sinif): medya yolu OKUNAMAYAN klip. Host getMediaPath
+          basarisiz olunca bos dizge donduruyor; bos yol "kullanicinin goruntusu" DEMEK
+          DEGIL, "olcemedim" demek. Eskiden yabanci sayiliyordu ve tek bir olculemeyen
+          klip (offline PNG, adjustment layer, ic ice sekans) koca katmani kilitliyordu. */
+  function emojiKanalOzet(ek, kok, adKumesi) {
     var kk = String(kok || "").replace(/\\/g, "/").toLowerCase();
     if (kk && kk.charAt(kk.length - 1) !== "/") kk += "/";
+    var adK = adKumesi || {};
     (ek.tracks || []).forEach(function (t) {
-      var e = 0, y = 0;
+      var e = 0, y = 0, b = 0;
       (t.yollar || []).forEach(function (o) {
         var py = String(o.y || "").replace(/\\/g, "/").toLowerCase();
-        if (kk && py && py.indexOf(kk) === 0) { e += o.n; o.emoji = true; }
-        else y += o.n;
+        if (!py) { b += o.n; o.bilinmeyen = true; return; }          // 3. sinif: olculemedi
+        if (kk && py.indexOf(kk) === 0) { e += o.n; o.emoji = true; return; }
+        var ad = py.slice(py.lastIndexOf("/") + 1);
+        if (ad && adK[ad]) { e += o.n; o.emoji = true; o.adIle = true; return; }  // 2. olcut
+        y += o.n;
       });
-      t.emoji = e; t.yabanci = y;
+      t.emoji = e; t.yabanci = y; t.bilinmeyen = b;
     });
     return ek;
+  }
+  /* Bilinen emoji dosya adlari (kucuk harf). Iki kaynak: kullanicinin KLASORU (taramadan)
+     ve panelin dagittigi PAKET (varsayilan/emoji-paketi.json). Paket sart: kullanici
+     klasoru degistirmisse bile onceki calistirmada konan emojiler taninabilsin. */
+  function emojiAdKumesi(tarama) {
+    var k = {}, i, ad;
+    try {
+      var dl = (tarama && tarama.dosyalar) || [];
+      for (i = 0; i < dl.length; i++) {
+        ad = String(dl[i].ad || dl[i].dosya || "").toLowerCase();
+        if (ad) k[ad] = 1;
+      }
+    } catch (e1) {}
+    try {
+      var py = path.join(extRoot, "varsayilan", "emoji-paketi.json");
+      if (fs.existsSync(py)) {
+        var ham = String(fs.readFileSync(py, "utf8")).replace(/^\uFEFF/, "");
+        var man = JSON.parse(ham) || [];
+        for (i = 0; i < man.length; i++) {
+          ad = String((man[i] && (man[i].ad || man[i].dosya)) || "").toLowerCase();
+          if (ad) k[ad] = 1;
+        }
+      }
+    } catch (e2) {}
+    return k;
   }
   /* Silinecek medya yollarını dosyaya yaz — host onu okuyup YALNIZ o klipleri siler.
      Dosya kullanmanın sebebi proje geneli kural: evalScript string literaline gömülen Türkçe
@@ -2510,17 +2572,31 @@
          aşağıdaki catch'e düşer; mesaj bu yüzden "Premiere'i kapat-aç" diyor. */
       ek = JSON.parse(String(await evalES("emojiKanallariJSON()")));
       if (ek.error) { yaz("Sekans okunamadı: " + ek.error, "var(--bad)"); return; }
-      emojiKanalOzet(ek, kok);          // emoji/yabanci sayıları YOLA göre burada hesaplanır
+      emojiKanalOzet(ek, kok, emojiAdKumesi(tarama));   // yol ÖNEKİ + dosya ADI; okunamayan yol ayrı sınıf
       var i, t;
       /* EN ÜSTTEKİ *YABANCI* KLİP — yani kullanıcının gerçek görüntüsü. Kendi emoji
          katmanımız bu hesaba GİRMEZ: girseydi ikinci çalıştırmada emoji katmanı "dolu
          kanal" sayılıp hedef bir üste kayardı ve tuzak geri gelirdi. */
+      /* ⚠ YALNIZ GERCEKTEN OLCULMUS yabanci klip tavani yukseltir. Medya yolu okunamayan
+         klip ("bilinmeyen") belirsizliktir; onu "kullanicinin goruntusu" saymak, tek bir
+         offline PNG yuzunden hedefi bir ust kanala itip katman biriktiriyordu. */
       for (i = 0; i < ek.tracks.length; i++) if (ek.tracks[i].yabanci > 0) enUstDolu = ek.tracks[i].idx;
       /* Sadece emoji içeren kanalların HEPSİ temizlenir (birden çok katman birikmiş
          olabilir — eski davranış tam olarak bunu üretiyordu). */
+      var _bilinmeyenNot = [];
       for (i = 0; i < ek.tracks.length; i++) {
         t = ek.tracks[i];
-        if (t.emoji > 0 && t.yabanci === 0 && !t.kilit) temizlenecekler.push(t.idx);
+        if (t.emoji > 0 && t.yabanci === 0 && !t.kilit && !t.bilinmeyen) temizlenecekler.push(t.idx);
+        else if (t.emoji > 0 && t.yabanci === 0 && !t.kilit && t.bilinmeyen) {
+          /* Katmanda bizim emojilerimiz var AMA medya yolu okunamayan klip de var.
+             Silmek riskli (o klip kullanicinin olabilir), sessiz gecmek de yanlis:
+             temizlenmeyen katman uzerine yenisi biner. SOYLE. */
+          _bilinmeyenNot.push("V" + (t.idx + 1) + " (" + t.bilinmeyen + " klibin medya yolu okunamadı)");
+        }
+      }
+      if (_bilinmeyenNot.length) {
+        logLine("Emoji: şu katmanlar TEMİZLENMEDİ — " + _bilinmeyenNot.join(" · ") +
+                ". Bu kanallardaki çevrimdışı/eksik klipleri Premiere'de kontrol et.");
       }
       /* HEDEF: yeniden kullanılabilir bir emoji katmanı, ama YALNIZ görüntünün ÜSTÜNDEYSE.
          ⚠ Bu kontrol düşerse emoji kullanıcının görüntüsünün ARKASINA gider; panel
@@ -3179,9 +3255,26 @@
               logLine("Emoji preset (" + presetAd + ") V" + (kanal2 + 1) + " → " + prSol);
             }
             var pr = (prSag.indexOf("ok:") === 0 && prSol.indexOf("ok:") === 0) ? "ok:" : (prSag.indexOf("ok:") === 0 ? prSol : prSag);
-            presetNot = (pr.indexOf("ok:") === 0)
-              ? (" | preset: " + presetAd)
-              : (" | preset UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 60));
+            if (pr.indexOf("ok:") !== 0) {
+              /* ⚠ .slice(60) BUYUTULDU: hata metni tam da SEBEBIN basladigi yerde
+                 kesiliyordu ("...eksik: Transform [P"). Sebep gorunmezse kullanici ne
+                 yapacagini bilemiyor. */
+              presetNot = " | preset UYGULANMADI: " + pr.replace(/^err:/, "").slice(0, 160);
+            } else {
+              /* KISMI BASARI DA BILDIRILIR — "ok:" ile basliyor diye tam basari SAYMA.
+                 Iki kanalin govdesi ayri ayri denetlenir; hangisi kismi kaldiysa o yazilir. */
+              var _gSag = (prSag.indexOf("ok:") === 0) ? prSag.slice(3) : "";
+              var _gSol = (prSol.indexOf("ok:") === 0) ? prSol.slice(3) : "";
+              var _kSag = presetKismiMi(_gSag), _kSol = presetKismiMi(_gSol);
+              if (_kSag || _kSol) {
+                presetNot = " | ⚠ preset KISMİ (" + presetAd + "): " +
+                            (_kSag ? ("sağ → " + _gSag.slice(0, 120)) : "") +
+                            ((_kSag && _kSol) ? "  ·  " : "") +
+                            (_kSol ? ("sol → " + _gSol.slice(0, 120)) : "");
+              } else {
+                presetNot = " | preset: " + presetAd;
+              }
+            }
           } catch (ePr) { presetNot = " | preset hatası: " + (ePr.message || ePr); }
           try { fs.unlinkSync(pYol); } catch (ePu) {}
         }
@@ -3194,7 +3287,8 @@
       var aynaHata = aynaHataSay();
       var kismi = (kondu < plan.length) || uyarilar.length > 0 || !!parcaHata || aynasizKondu > 0 ||
                   !!secUyari ||   // yapay zekâ parçalarının bir kısmı düştü — plan zaten eksik doğdu
-                  (presetNot.indexOf("UYGULANMADI") !== -1) || (presetNot.indexOf("öğretilmemiş") !== -1);
+                  (presetNot.indexOf("UYGULANMADI") !== -1) || (presetNot.indexOf("öğretilmemiş") !== -1) ||
+                  (presetNot.indexOf("preset KISMİ") !== -1);   // 197/200 klipte animasyon yoksa YEŞİL olmamalı
       /* Kanal özeti GERÇEKTEN kullanılan kanalları söyler: hepsi sol taraftaysa `kanal`
          boş kalıyor ve onu "sağ" diye raporlamak kullanıcıyı boş bir track'e bakmaya
          yolluyordu (preset dalındaki aynı asimetri). */
@@ -3373,7 +3467,13 @@
         if (!kok2) { y2("Önce emoji klasörünü seç — hangi kliplerin emoji olduğu ondan anlaşılıyor", "var(--warn)"); return; }
         var ek = JSON.parse(String(await evalES("emojiKanallariJSON()")));
         if (ek.error) { y2("Sekans okunamadı: " + ek.error, "var(--bad)"); return; }
-        emojiKanalOzet(ek, kok2);        // emoji/yabanci YOLA göre (bin'e güvenilmiyor)
+        /* ⚠ SILME DE AYNI UC OLCUTU KULLANIR. Eskiden yalniz yol onegine bakiyordu:
+           siniflandirma yanlis ciktiginda kullanicinin ELINDEKI TEK geri alma yolu da
+           bozuluyor, hicbir kanal denenmiyor ve panel notr bir cumleyle "Silinecek emoji
+           bulunamadi" diyordu — timeline yuzlerce emoji doluyken (ParsMazi). Dosya ADI
+           olcutu klasor degisse bile o emojileri taniyor. */
+        var _tara2 = null; try { _tara2 = EMJ.tara(kok2); } catch (eT2) { _tara2 = null; }
+        emojiKanalOzet(ek, kok2, emojiAdKumesi(_tara2));   // yol ONEKI + dosya ADI
         var silinen = 0, engel = [], i, t, r, sy;
         for (i = 0; i < (ek.tracks || []).length; i++) {
           t = ek.tracks[i];
@@ -4890,6 +4990,10 @@
       snkKisiStatus("✕ " + (e.message || e), "var(--bad)"); return;
     }
     snkKisiDoldur();
+    /* ⚠ SEÇİCİ DE YENİLENİR: kullanıcı kadroya karakter ekler/çıkarırsa "Videoyu kim
+       çekiyor?" düğmeleri bayat kalırdı ve olmayan bir karakter seçili görünürdü.
+       Düğmeler kadrodan üretildiği için tek satır yeter. */
+    snkCekenDoldur();
     /* Renk uyarısı KALDIRILDI: timeline etiketleme iptal edilince renk alanı da anlamsızlaştı.
        parseText eski "[Mavi]" yazımını hâlâ tolere ediyor (kullanıcının mevcut listesi
        bozulmasın), ama artık ne gösteriliyor ne de kullanılıyor.
@@ -4941,9 +5045,53 @@
   }
 
   // ---------- 2) kişileri eşle + plan kur ----------
+  /* ⚠⚠ BU SECICI BIR ZAMANLAR "Tofi"/"Moni"YE CAKILIYDI — İKİNCİ KULLANICIDA YIKICIYDI
+     (ParsMazi bildirdi, 21 Ağustos 2026). Zinciri izle: seçilen ad `snkEslestir` içinde
+     planın ilk satırına (`{kanal:0, karakter: ceken}`) yazılıyor, `kanalAdlariniPlandanYaz`
+     onu hem localStorage'a (`kanalAd.0`) hem CANLI isim kutusuna basıyor, emoji tarafı da
+     `a1Adi()` ile tam o kutudan okuyor. Kadrosunda Tofi/Moni OLMAYAN bir kullanıcıda A1
+     zorla "Tofi" adlanıyor, paket Tofi resimleriyle geldiği için eşleşme BAŞARILI sayılıyor
+     ve kullanıcının kendi mikrofonuna Tofi'nin yüzü konuyordu. Kimlik onayı da panelin
+     kendi yazdığı ada bakıp "Bu videoyu Tofi mi çekti?" diye sorduğu için işe yaramıyordu.
+     Artık düğmeler KADRODAN üretiliyor (snkCekenDoldur) ve taban kadronun ilk karakteri. */
   function snkCekenKim() {
     var b = document.querySelector("#snkCeken .seg-btn.active");
-    return b ? b.dataset.ceken : "Tofi";
+    if (b && b.dataset && b.dataset.ceken) return b.dataset.ceken;
+    var kad = snkKadro();
+    return kad.length ? kad[0] : "Tofi";      // kadro hiç okunamadıysa eski taban
+  }
+  /* Kadro = kisiler.json sırası. Sıra ANLAMLI (kanal sırasını da o belirliyor), o yüzden
+     alfabetik sıralama YAPILMAZ. */
+  function snkKadro() {
+    var a = [], i, k;
+    for (i = 0; i < (state.kisiler || []).length; i++) {
+      k = state.kisiler[i];
+      if (k && k.karakter && a.indexOf(k.karakter) < 0) a.push(k.karakter);
+    }
+    return a;
+  }
+  /* Seçici düğmelerini kadrodan üret. Kayıtlı seçim kadroda yoksa SESSİZCE düşme —
+     sessiz düşüş bu hatanın ta kendisiydi; kullanıcıya söylenir. */
+  function snkCekenDoldur() {
+    var kap = $("snkCeken"); if (!kap) return;
+    var kad = snkKadro();
+    if (!kad.length) kad = ["Tofi", "Moni"];   // kadro okunamadı: eski davranış
+    var kayitli = String(lsGet("snkCeken", "") || "").trim();
+    var secili = (kayitli && kad.indexOf(kayitli) >= 0) ? kayitli : kad[0];
+    if (kayitli && kad.indexOf(kayitli) < 0) {
+      snkLog("Kayıtlı \"videoyu çeken\" (" + kayitli + ") kişi listesinde YOK — " +
+             secili + " seçildi. Doğrusu buysa üstteki düğmeden değiştir.");
+    }
+    kap.innerHTML = "";
+    for (var i = 0; i < kad.length; i++) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "seg-btn" + (kad[i] === secili ? " active" : "");
+      b.setAttribute("data-ceken", kad[i]);
+      b.appendChild(document.createTextNode(kad[i]));
+      kap.appendChild(b);
+    }
+    lsSet("snkCeken", secili);
   }
   function snkEslestir() {
     if (!snk.dosyalar.length) return;
@@ -4958,7 +5106,13 @@
        Yanlış pozitif bu kapıda özellikle pahalı: kapı gerçek bir felaketi önlemek için var ve
        boş yere çıkarsa kullanıcı onu görmezden gelmeyi öğrenir. */
     var ceken = snkCekenKim();
-    var karsi = (ceken === "Tofi") ? "Moni" : "Tofi";
+    /* A2 = "çekenden BAŞKA ilk karakter". Eskiden `(ceken === "Tofi") ? "Moni" : "Tofi"`
+       diye çakılıydı: kadrosunda ikisi de olmayan kullanıcıda A2 var olmayan bir karaktere
+       ayrılıyordu. Mevcut kadroda (Tofi, Moni, ...) sonuç BİREBİR AYNI — Tofi seçiliyse
+       Moni, Moni seçiliyse Tofi — yani Yusuf tarafında davranış değişmiyor. */
+    var _kad = snkKadro(), karsi = "";
+    for (var _ki = 0; _ki < _kad.length; _ki++) { if (_kad[_ki] !== ceken) { karsi = _kad[_ki]; break; } }
+    if (!karsi) karsi = (ceken === "Tofi") ? "Moni" : "Tofi";   // tek kişilik kadro: eski taban
     var eslesen = [], bilinmeyen = [];
     snk.dosyalar.forEach(function (d) {
       var k = KISI.bul(state.kisiler, d.ad);
@@ -5870,12 +6024,18 @@
   if ($("snkLogToggle")) $("snkLogToggle").addEventListener("click", function () {
     var l = $("snkLog"); l.hidden = !l.hidden; this.textContent = l.hidden ? "Ayrıntılar ▾" : "Ayrıntılar ▴";
   });
+  /* ⚠ OLAY DELEGASYONU: düğmeler artık `snkCekenDoldur` ile YENİDEN ÜRETİLİYOR, yani
+     tek tek bağlanan dinleyiciler ilk yenilemede ölürdü (düğmeye basılır, hiçbir şey olmaz).
+     Kapsayıcıya bir kez bağlanan dinleyici bu sınıfın tamamını kapatıyor. */
   (function () {
-    var btns = document.querySelectorAll("#snkCeken .seg-btn");
-    for (var i = 0; i < btns.length; i++) btns[i].addEventListener("click", function () {
-      var a = document.querySelector("#snkCeken .seg-btn.active"); if (a) a.classList.remove("active");
-      this.classList.add("active");
-      lsSet("snkCeken", this.dataset.ceken);
+    var kap = $("snkCeken"); if (!kap) return;
+    kap.addEventListener("click", function (ev) {
+      var t = ev.target;
+      while (t && t !== kap && !(t.className && String(t.className).indexOf("seg-btn") >= 0)) t = t.parentNode;
+      if (!t || t === kap || !t.dataset || !t.dataset.ceken) return;
+      var a = kap.querySelector(".seg-btn.active"); if (a) a.classList.remove("active");
+      t.classList.add("active");
+      lsSet("snkCeken", t.dataset.ceken);
       if (snk.dosyalar.length) snkEslestir();
     });
   })();
@@ -6518,9 +6678,7 @@
       } catch (eKiB) { logLine("Kişi listesi birleştirmesi atlandı: " + (eKiB.message || eKiB)); }
       state.kisiler = KISI.load(extRoot);
       snkKisiDoldur();
-      var ck = lsGet("snkCeken", "Tofi");
-      var ckBtn = document.querySelector('#snkCeken .seg-btn[data-ceken="' + ck + '"]');
-      if (ckBtn) { var akt = document.querySelector("#snkCeken .seg-btn.active"); if (akt) akt.classList.remove("active"); ckBtn.classList.add("active"); }
+      snkCekenDoldur();   // düğmeler KADRODAN üretilir; kayıtlı seçim yoksa/geçersizse söyler
     } catch (eKisi) { logLine("Senkron modülü yüklenemedi: " + (eKisi.message || eKisi)); }
     dictFill();
     if (state.dict.length) logLine("Sözlük: " + SZ.hotwords(state.dict));

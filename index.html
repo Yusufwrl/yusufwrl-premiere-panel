@@ -560,13 +560,18 @@
 
         <div class="card" id="snkCekenCard" hidden>
           <div class="card-title">2 · Videoyu kim çekiyor?</div>
+          <!-- ⚠ BU DÜĞMELER ARTIK app.js snkCekenDoldur() TARAFINDAN KADRODAN ÜRETİLİYOR.
+               Aşağıdakiler yalnız kişi listesi hiç okunamazsa görünen tabandır — buraya
+               yeni karakter EKLEME, "Kişiler" listesine ekle. Eskiden bu ikisi SABİTTİ ve
+               kadrosunda Tofi/Moni olmayan kullanıcıda A1 zorla "Tofi" adlanıp emoji o
+               kişinin mikrofonuna Tofi'nin yüzünü koyuyordu (ParsMazi, 21 Ağustos 2026). -->
           <div class="seg" id="snkCeken">
             <button class="seg-btn active" data-ceken="Tofi" type="button">Tofi</button>
             <button class="seg-btn" data-ceken="Moni" type="button">Moni</button>
           </div>
           <!-- Bu metin ESKİ düzeni anlatıyordu ("diğerleri A4'ten devam eder") ve panelin
                yaptığının tam tersini söylüyordu. Yeni düzen açıkça yazılıyor. -->
-          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · A2 = Tofi/Moni'den diğeri · sonra aşağıdaki “Kişiler” listesindeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz.</p>
+          <p class="note"><b style="color:var(--text)">Kanal düzeni:</b> A1 = sen · A2 = “Kişiler” listesindeki ilk diğer karakter · sonra listedeki sırayla arkadaşların · en alt kanal oyun sesi. Videoda olmayan karakter kanal harcamaz.</p>
           <!-- "Oyun sesi şu an hangi kanalda?" seçici KALDIRILDI. Panel oyun sesini artık
                taşımıyor (Premiere'de klip taşıma API'si yok; overwriteClip çoklu-akışlı OBS
                kaydında yanlış ses akışını yerleştiriyordu). Yerleşim tablosu oyun sesi için

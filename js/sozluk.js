@@ -25,20 +25,48 @@ var DOSYA = "sozluk.json";
    O, motorun "Sage" için ürettiği yanlış yazımları tek tek yazıp gönderdi; diğer karakterlere
    de aynı KALIPLAR uygulandı. Motorun Türkçe dinlerken yaptığı dört tip hata:
      1. ünsüz kayması : g→c/j/q  (sace · saje · saqe) · k→c (nico) · t→d (dofi)
+                        f→p (topi) · f→v (tovi) · f→b (tobi) · f→ph (tophi)
+                        ⚠ KAYMA TABLOSU SİMETRİK OLMALI: bir sesin kaydığı yönlerden
+                        yalnız bazılarını yazmak ParsMazi'nin asıl şikâyetiydi (f→p ve
+                        f→v vardı, f→b ve f→ph yoktu; "Tobi" hiçbir yoldan yakalanmıyordu).
      2. harf ikizleme : sagee · sagge · saage · monni · mimee
      3. harf düşmesi  : sgae · sge · tofi→tofe
      4. kulaktan yazım: seyç · sayge · seyiç  (Türkçe okunuşun harfe dökülmesi)
    ⚠ Yeni varyant eklerken bu listenin ÜSTÜNDEKİ kuralı uygula: gerçek Türkçe kelimeye
    benzeyen varyant EKLENMEZ. */
 var VARSAYILAN = [
+  /* ⚠⚠ f→b VE f→ph KAYMASI 21 AĞUSTOS 2026'DA EKLENDİ — PARSMAZI'NİN ASIL ŞİKÂYETİ.
+     Liste unsuz kaymasını YARIM uyguluyordu: f→p ("topi") vardı, f→v ("tovi") vardı,
+     t→d ("dofi") vardı, ama f→b ("tobi") ve f→ph ("tophi") HİÇ YOKTU. fixToken tam
+     eşleşme + ek zinciriyle çalıştığı için listede olmayan bir yazım hiçbir yoldan
+     yakalanamaz — yani "Tobi" yazan her cümle elle düzeltiliyordu.
+     ÖLÇÜLDÜ (11 yeni yazım × 8 ek biçimi × küçük/BÜYÜK harf = 176 biçim):
+       eklemeden önce 2/176 düzeliyordu, eklemeden sonra 176/176.
+     ÖLÇÜLDÜ (22.294 benzersiz kelimelik gerçek Türkçe havuz): yeni bozulan kelime = 0.
+
+     ⚠ "tofu" GERÇEK BİR YEMEK ADI — BİLEREK BIRAKILDI ama şikâyet gelirse ÇIKARILACAK
+     İLK VARYANT BUDUR. Ölçüldü: "tofu yedim" → "Tofi yedim" (ayrıca "tofuyu" → "Tofiyi",
+     "tofudan" → "Tofiden", "tofulu" → "Tofili"). Dosyanın en üstündeki kural "gerçek
+     Türkçe/yaygın kelimeye benzeyen varyant EKLEME" diyor, yani bu varyant kuralın
+     istisnası: motorun Tofi için gerçekten ürettiği bir yazım ve eski kullanıcının
+     kayıtlarında işe yarıyor olabilir. Minecraft/Roblox videosunda tofudan bahsedilme
+     ihtimali düşük olduğu için korundu. AYNI SINIFTAKİ ÖTEKİ VARYANT: Sage'deki "sega"
+     (oyun konsolu markası — aşağıdaki nota bak). İkisi de aynı takas: karakterin adını
+     kurtarmak için masum bir kelimeyi riske atmak. */
   { ad: "Tofi", varyant: ["toffy", "toffi", "tofy", "tofu", "topi", "toffee", "tofie", "dofi", "to fi",
-                          "tofe", "tofii", "toffie", "tovi", "topfi", "tofhi", "tofii", "dofy"] },
+                          "tofe", "tofii", "toffie", "tovi", "topfi", "tofhi", "dofy",
+                          // f→b kayması (21 Ağustos 2026)
+                          "tobi", "toby", "tobby", "dobi",
+                          // f→ph kayması — motor İngilizce yazım varsayıyor
+                          "tophi", "tophie", "tophy",
+                          // "toffee" çevresindeki eksik yazımlar
+                          "tofee", "toffe", "toffey", "tovy"] },
   { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni",
-                          "monee", "monni", "monyi", "mohni", "monny", "moniy"] },
+                          "monee", "monni", "monyi", "mohni", "moniy"] },
   { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra",
                           "doraa", "tohra", "thora", "dhora", "torra"] },
   { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi",
-                          "mimee", "mimii", "meemi", "mimmie", "mimii"] },
+                          "mimee", "mimii", "meemi", "mimmie"] },
   { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko",
                           "niiko", "nikoh", "nikho", "nikoe"] },
   /* ⚠⚠ SAGE — LİSTE PARSMAZI'DEN GELDİ (18 Ağustos 2026), AMA BİR TANESİ ALINMADI.
@@ -53,7 +81,11 @@ var VARSAYILAN = [
 
      ⚠ "SEGA" ALINDI ama farkında ol: Sega bir oyun konsolu markası. Minecraft/Roblox
      videosunda geçme ihtimali düşük olduğu için Sage'in adını kurtarmak yeğ tutuldu.
-     Şikâyet gelirse ÇIKARILACAK İLK VARYANT BUDUR. */
+     Şikâyet gelirse ÇIKARILACAK İLK VARYANT BUDUR.
+     ⚠ 21 AĞUSTOS 2026 DENETİMİ BUNU YENİDEN ÖLÇTÜ VE KARARI DEĞİŞTİRMEDİ: 22.294 kelimelik
+     havuzda "sega" → "Sage" tek başına duruyor, yani bedeli tam olarak bir marka adı.
+     Tofi'deki "tofu" ile AYNI SINIFTA (gerçek kelimeye benzeyen bilinçli istisna) —
+     birini çıkarmaya karar verirsen ötekini de gözden geçir. */
   { ad: "Sage", varyant: ["sej", "sace", "saje", "saqe", "sagee", "sagge", "sgae", "sge", "saage",
                           "sega", "sege", "sagi", "seyc", "seyj", "seyç", "sayge", "seyiç",
                           "sayc", "sagë", "sa ge"] },
@@ -64,10 +96,58 @@ var VARSAYILAN = [
                    otomatik ekleniyor, yani "sera" → "Sera" büyük harf düzeltmesi çalışıyor;
                    listeye ayrıca varyant olarak koymak GEREKMİYOR ve tehlikeli olurdu.
        · "sıra", "seri", "sera"ya yakın her şey → aynı sebep.
-     Kalanlar Whisper'ın Türkçe dinlerken üretmesi muhtemel, kelime OLMAYAN yazımlar. */
-  { ad: "Sera", varyant: ["seraa", "serra", "sehra", "seyra", "se ra",
-                          "serah", "seira", "seraah", "sehraa", "seraa"] }
+     Kalanlar Whisper'ın Türkçe dinlerken üretmesi muhtemel, kelime OLMAYAN yazımlar.
+
+     ⚠⚠ "SEYRA" 21 AĞUSTOS 2026'DA ÇIKARILDI — GERÇEK KELİMENİN KÖKÜ ÇIKTI.
+     "seyra" tek başına kelime değil ama fixToken'ın yapışık-ek dalı onu "seyran"ın KÖKÜ
+     gibi okuyor: kalan "n" geçerli bir Türkçe ek. Ölçüldü (gerçek varsayılan sözlük):
+       "seyran"   → "Seran"     "seyranda" → "Seranda"     "seyranı" → "Seranı"
+     Yani seyrandan bahseden her cümle bozuluyordu. Yukarıdaki kural ("gerçek Türkçe
+     kelimeye BENZEYEN varyant EKLENMEZ") KELİME KÖKLERİNİ de kapsamak zorunda —
+     yeni varyant eklerken yalnız "bu bir kelime mi" diye değil, "buna ek gelince bir
+     kelime OLUYOR mu" diye de sor. Sage'deki "saç" kararının aynısı, bir adım ilerisi.
+     ⚠ ÇIKARMAK TEK BAŞINA YETMEZ — mevcut kullanıcının dosyasında duruyor;
+     PAKET_KALDIRILAN tablosuna da yazıldı (aşağı bak).
+
+     ⚠ "SERA" ADININ KENDİSİ GERÇEK BİR TÜRKÇE KELİME (sera = cam ev) — BU BİLİNİYOR,
+     BEDELİ KABUL EDİLDİ, KURCALAMA. Doğru yazımın kendisi buildMap'te otomatik ekleniyor
+     (büyük harf düzeltmesi için ŞART), yani kaçınılmaz bir yan etkisi var. Ölçüldü:
+       "serada domates var" → "Serada domates var"   "seracılık" → "Seracılık"
+     Bunu "hata" sanıp düzeltmeye kalkma: karakterin adı gerçekten Sera ve cümle başında
+     olmayan "sera geldi" gibi bir yazımı büyük harfe çevirmek DOĞRU davranış. Tek
+     alternatif doğru yazımı tablodan çıkarmaktı, o da "sera" → "Sera" düzeltmesini tümden
+     öldürürdü — yani asıl işi bozardı. Kullanıcı rahatsız olursa çözüm koda değil,
+     panele: Sera girdisini kendi sözlüğünden silebilir. */
+  { ad: "Sera", varyant: ["seraa", "serra", "sehra", "se ra",
+                          "serah", "seira", "seraah", "sehraa"] }
 ];
+
+/* ⚠⚠ PAKETTEN ÇIKARILAN VARYANTLAR — ÇIKARMAK TEK BAŞINA KİMSEYE ULAŞMAZ.
+   `paketBirlestir` YALNIZ EKLER. Bir varyantı yukarıdaki listeden silmek, o varyantı daha
+   ÖNCE teslim almış kullanıcının sozluk.json'ından SİLMEZ: ParsMazi v1.30.1'i aldığı için
+   damgası zaten 2 ve "seyra" onun dosyasına yazılmış durumda. Listeden çıkarmak onda
+   hiçbir şeyi değiştirmezdi — "seyran" bozulmaya devam ederdi. Bu, projenin tekrar eden
+   sorusunun ters yüzü: "pakete eklenen mevcut kullanıcıya nasıl ulaşır" diye beş kez
+   soruldu, "paketten ÇIKARILAN nasıl ulaşır" hiç sorulmamıştı.
+   KURALLAR — dördü de bilinçli, DARALTILMIŞ kapsam:
+   · Yalnız birleştirme turunda, yani PAKET_SURUM artarken BİR KEZ çalışır.
+   · Yalnız VARSAYILAN'da adı geçen karakterin girdisinde çalışır — kullanıcının kendi
+     eklediği isimlerin varyantları hiç taranmaz.
+   · Yalnız TAM eşleşen varyant çıkarılır (büyük/küçük harf duyarsız); kullanıcının kendi
+     yazdığı başka hiçbir varyanta dokunulmaz.
+   · Kullanıcı çıkarılan varyantı gerçekten istiyorsa panelden geri yazar; birleştirme
+     damga yüzünden bir daha çalışmaz, yani bir daha silinmez.
+   ⚠ Buraya bir varyant yazarken PAKET_SURUM'u da ARTIR — yoksa bu tablo da ölü kalır.
+   ⚠ PROTOTİPSİZ (Object.create(null)) — dosyanın kendi kuralı. Düz "{}" ile kurulsaydı
+   PAKET_KALDIRILAN["constructor"] Object yapıcısını döndürür, `.length` sayı olduğu için
+   aşağıdaki kapıyı geçer ve olmayan bir "çıkarma listesi" üzerinde dönülürdü. Bugün adlar
+   VARSAYILAN'dan geldiği için ulaşılmaz bir yol, ama buildMap ve _EK aynı tuzağa GERÇEKTEN
+   düştü (altyazıya "function Object() { [native code] }" yazılmıştı) — tekrarlanmasın. */
+var PAKET_KALDIRILAN = (function () {
+  var t = Object.create(null);
+  t["Sera"] = ["seyra"];
+  return t;
+})();
 
 /* BİLİNEN İSİMLER — oyun, marka ve süper kahraman adları. Motor Türkçe dinlerken bunları
    kulaktan yazıyor ("maynkraft", "betmen") ve her videoda elle düzeltiliyordu.
@@ -510,23 +590,29 @@ function save(extRoot, entries) {
    ⚠ Pakete yeni isim/varyant eklerken PAKET_SURUM'u ARTIR — yoksa kimseye gitmez. */
 /* 2 = 18 Ağustos 2026: Sage karakteri eklendi + altı karakterin varyantları genişletildi
    (kaynak: ParsMazi'nin gerçek kayıtlarından gönderdiği yanlış yazımlar).
-   ⚠ ARTIRILMASI ŞART OLDUĞU İÇİN ARTIRILDI: damga eskisi gibi kalsaydı `paketBirlestir`
-   birleştirmeyi bir daha çalıştırmaz ve yeni varyantlar MEVCUT kullanıcılara (ParsMazi
-   dahil) hiç ulaşmazdı — güncelleme yüklenir, sözlük eski kalırdı. */
-var PAKET_SURUM = 2;
+   3 = 21 Ağustos 2026: Tofi'ye f→b ("tobi", "toby", "tobby", "dobi") ve f→ph ("tophi",
+   "tophie", "tophy") varyantları + "tofee/toffe/toffey/tovy" eklendi; Sera'dan "seyra"
+   ÇIKARILDI (gerçek "seyran" kelimesini bozuyordu, bkz. PAKET_KALDIRILAN).
+   ⚠ ARTIRILMASI ŞART OLDUĞU İÇİN ARTIRILDI — 3'e çıkarma sebebi mekanik: ParsMazi
+   v1.30.1'i aldığı için dosyasındaki damga ZATEN 2. Damga 2'de bırakılsaydı yeni
+   varyantlar kod dosyasına yazılır, panele kurulur ve `paketBirlestir` "guncel" deyip
+   hiçbir şey yapmazdı — yani asıl şikâyetçiye HİÇBİRİ ulaşmazdı. Aynı tuzağa 18
+   Ağustos'ta da düşülmemişti; üçüncü kez sorma, kural şu: VARSAYILAN'a dokundun mu
+   PAKET_SURUM artar. */
+var PAKET_SURUM = 3;
 function paketBirlestir(extRoot) {
   var p = path.join(extRoot, DOSYA), raw, j;
   try {
-    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [] };   // load() zaten varsayılanı veriyor
+    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [], cikarilan: [] };   // load() zaten varsayılanı veriyor
     raw = fs.readFileSync(p, "utf8");
     if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
     j = JSON.parse(raw);
-  } catch (e) { return { durum: "okunamadi", eklenen: [], hata: String((e && e.message) || e) }; }
-  if (!j || Object.prototype.toString.call(j.entries) !== "[object Array]") return { durum: "bicim", eklenen: [] };
-  if (!j.entries.length) return { durum: "bos-birakilmis", eklenen: [] };
-  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
+  } catch (e) { return { durum: "okunamadi", eklenen: [], cikarilan: [], hata: String((e && e.message) || e) }; }
+  if (!j || Object.prototype.toString.call(j.entries) !== "[object Array]") return { durum: "bicim", eklenen: [], cikarilan: [] };
+  if (!j.entries.length) return { durum: "bos-birakilmis", eklenen: [], cikarilan: [] };
+  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [], cikarilan: [] };
 
-  var eklenen = [], indeks = {}, i;
+  var eklenen = [], cikarilan = [], indeks = {}, i;
   for (i = 0; i < j.entries.length; i++) {
     if (j.entries[i] && j.entries[i].ad) indeks[String(j.entries[i].ad).toLowerCase()] = i;
   }
@@ -546,6 +632,21 @@ function paketBirlestir(extRoot) {
     }
     var mevcut = j.entries[indeks[k]];
     if (!mevcut.varyant) mevcut.varyant = [];
+    /* ⚠ ÖNCE ÇIKARMA, SONRA EKLEME — sıra ÖNEMLİ. Aynı varyant hem PAKET_KALDIRILAN'da hem
+       VARSAYILAN'da olsaydı (olmamalı ama), önce eklenip sonra silinseydi sessizce kaybolur;
+       bu sırada ise "gorulen" tablosu temizlenmiş listeden kurulur ve paket onu geri ekler,
+       yani VARSAYILAN her zaman son sözü söyler. Ayrıntı için PAKET_KALDIRILAN notuna bak. */
+    var _kaldir = PAKET_KALDIRILAN[v.ad], _kSet, _kalan, z;
+    if (_kaldir && _kaldir.length) {
+      _kSet = Object.create(null);
+      for (z = 0; z < _kaldir.length; z++) _kSet[String(_kaldir[z]).toLowerCase()] = 1;
+      _kalan = [];
+      for (z = 0; z < mevcut.varyant.length; z++) {
+        if (_kSet[String(mevcut.varyant[z]).toLowerCase()]) cikarilan.push(v.ad + ": " + mevcut.varyant[z]);
+        else _kalan.push(mevcut.varyant[z]);
+      }
+      mevcut.varyant = _kalan;
+    }
     var gorulen = {}, q;
     for (q = 0; q < mevcut.varyant.length; q++) gorulen[String(mevcut.varyant[q]).toLowerCase()] = 1;
     (v.varyant || []).forEach(function (x) {
@@ -554,8 +655,12 @@ function paketBirlestir(extRoot) {
   });
   j.pkgSurum = PAKET_SURUM;
   try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
-  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, hata: String((e2 && e2.message) || e2) }; }
-  return { durum: "birlestirildi", eklenen: eklenen };
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, cikarilan: cikarilan, hata: String((e2 && e2.message) || e2) }; }
+  /* ⚠ "cikarilan" AYRI ALANDA, "eklenen"e KARIŞTIRILMADI. Panel (app.js) sonuç mesajını
+     "eklenen" listesinden kuruyor; çıkarılan bir varyantı oraya yazmak kullanıcıya
+     "şu varyant EKLENDİ" diye görünürdü — tam tersi. Alan şimdilik gösterilmiyor;
+     gerekirse app.js okuyup ayrı bir satır yazabilir. */
+  return { durum: "birlestirildi", eklenen: eklenen, cikarilan: cikarilan };
 }
 
 module.exports = {

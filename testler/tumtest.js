@@ -1872,6 +1872,134 @@ function bitir() {
           "Kullanıcı beklemenin normal olduğunu göremiyor.");
   })();
 
+  /* ========== 26. PARSMAZI TURU (21 Ağustos 2026) ==========
+     İkinci kullanıcı paneli kullanamaz hâle gelmişti. Altı şikâyet, 12 ajanlı denetim,
+     22 doğrulanmış bulgu. Buradaki her kontrol o bulgulardan birinin nöbetçisi. */
+  baslik("ParsMazi turu — ikinci kullanıcıda çalışması şart olanlar");
+  (function () {
+    var src = "", host = "", html = "";
+    try { src  = fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8"); } catch (e) {}
+    try { host = fs.readFileSync(path.join(KOK, "jsx", "host.jsx"), "utf8"); } catch (e) {}
+    try { html = fs.readFileSync(path.join(KOK, "index.html"), "utf8"); } catch (e) {}
+    dogru("kaynaklar okunabildi", src.length > 1000 && host.length > 1000 && html.length > 1000);
+
+    /* --- 1) "Videoyu kim çekiyor?" KADRODAN üretilmeli ---
+       Düğmeler Tofi/Moni'ye ÇAKILIYDI. Seçilen ad plana, oradan kanalAd.0'a, oradan da
+       emojiye gidiyor: kadrosunda Tofi olmayan kullanıcının kendi mikrofonuna TOFİ'nin
+       yüzü konuyordu ve kimlik onayı panelin kendi yazdığı ada baktığı için susuyordu. */
+    dogru("çeken seçicisi kadrodan üretiliyor", /function snkCekenDoldur\(/.test(src),
+          "Düğmeler sabit kalmış — ikinci kullanıcıda A1 zorla Tofi adlanır.");
+    dogru("kadro yardımcısı var", /function snkKadro\(/.test(src));
+    dogru("A2 (karşı taraf) da kadrodan seçiliyor",
+          !/var karsi = \(ceken === "Tofi"\) \? "Moni" : "Tofi";/.test(src),
+          "karsi hâlâ Tofi/Moni'ye çakılı — kadrosunda ikisi de olmayan kullanıcıda A2 hayalet karaktere ayrılır.");
+    dogru("seçici tıklaması DELEGASYONLA bağlı (düğmeler yeniden üretiliyor)",
+          /kap\.addEventListener\("click"/.test(src),
+          "Tek tek bağlanan dinleyici ilk yenilemede ölür — düğmeye basılır, hiçbir şey olmaz.");
+
+    /* --- 2) Emoji sınıflandırması TEK ölçüte bağlı olmamalı ---
+       Yol öneki yanlış çıkınca eski katman ne temizleniyor ne de tavan hesabından
+       düşüyordu: her basış BİR ÜST kanala yeni katman açıyordu (ölçüldü: 5 basışta V2..V10). */
+    dogru("emoji sınıflandırması dosya ADI ölçütünü de kullanıyor",
+          /function emojiAdKumesi\(/.test(src) && /emojiKanalOzet\(ek, kok, emojiAdKumesi/.test(src),
+          "Tek ölçüt (yol öneki) kalmış — klasör değişince panel kendi emojilerini tanımaz.");
+    dogru("okunamayan medya yolu AYRI sınıf (yabancı değil)", /o\.bilinmeyen = true/.test(src),
+          "Boş yol 'kullanıcının görüntüsü' sayılıyor — tek offline klip koca katmanı kilitler.");
+    dogru("'Emojileri Sil' de aynı ölçütleri kullanıyor", /emojiKanalOzet\(ek, kok2, emojiAdKumesi/.test(src),
+          "Silme bozuk sınıflandırmayla çalışıyor — kullanıcının tek geri alma yolu da bozuk.");
+
+    /* --- 3) DAĞITILAN emoji preseti üçüncü parti eklenti İSTEMEMELİ ---
+       "Emoji Sağ Taraf" paketinde AE.Impact_Camera_Shake_FX vardı; ParsMazi'de o eklenti
+       kurulu olmadığı için emoji animasyonu HER klipte patlıyordu. Bileşenin keyframe'i
+       yoktu, çıkarınca animasyon aynen kaldı (2 keyframe'li param korundu). */
+    (function () {
+      var pk = null;
+      try {
+        var ham = String(fs.readFileSync(path.join(KOK, "varsayilan", "preset-paketi.json"), "utf8"));
+        pk = JSON.parse(ham.replace(/^\uFEFF/, ""));
+      } catch (e) { pk = null; }
+      dogru("preset paketi okunabildi", !!pk);
+      if (!pk) return;
+      var emj = pk["Emoji Sağ Taraf"];
+      dogru("emoji preseti pakette duruyor", !!emj);
+      if (!emj) return;
+      var dis = [], bl = emj.bilesenler || [], i, m;
+      for (i = 0; i < bl.length; i++) {
+        m = String((bl[i] && bl[i].match) || "");
+        if (m && !/^AE\.ADBE/.test(m)) dis.push(bl[i].ad + " [" + m + "]");
+      }
+      dogru("emoji preseti ÜÇÜNCÜ PARTİ efekt istemiyor", dis.length === 0,
+            "Bu preset panelle DAĞITILIYOR; eklentisi olmayan kullanıcıda her klipte patlar → " + dis.join(", "));
+      var kf = 0, ps, k;
+      for (i = 0; i < bl.length; i++) { ps = (bl[i] && bl[i].p) || []; for (k = 0; k < ps.length; k++) if (ps[k].kf) kf++; }
+      dogru("emoji presetinin animasyonu duruyor (keyframe'li parametre var)", kf >= 2,
+            "Bileşen çıkarılırken animasyon da gitmiş — keyframe sayısı: " + kf);
+    })();
+
+    /* --- 4) Preset KISMİ başarısı emoji dalında da SARI olmalı --- */
+    dogru("kısmi başarı testi TEK kaynakta", /function presetKismiMi\(/.test(src));
+    dogru("emoji dalı kısmi başarıyı bildiriyor", /presetKismiMi\(_gSag\)/.test(src),
+          "'ok:' ile başlayan her şey tam başarı sayılıyor — 197/200 klipte animasyon yokken YEŞİL.");
+
+    /* --- 5) host: dağıtılan preset'in dış efekti YOKSA tek ve net hata --- */
+    dogru("presetYaz dış efektleri ÖNCEDEN denetliyor", /_qeEfektBul\(/.test(host),
+          "200 klip tek tek deneniyor — kullanıcı 200 sessiz hata görüyor.");
+    dogru("eksik eklenti mesajı kullanıcıya ne olduğunu söylüyor", /ucuncu parti eklenti/.test(host));
+
+    /* --- 6) host: _trackCovers imleci ve İPUCU YEDEĞİ ---
+       ⚠ Hız için doğruluktan ödün verilemez: ipucu tutmazsa TAM TARAMA yapılmalı. */
+    dogru("_trackCovers imleç alıyor", /function _trackCovers\(tr, s, e, eps, ipucuIx\)/.test(host));
+    var iTc = host.indexOf("function _trackCovers");
+    var tcBlok = iTc > -1 ? host.slice(iTc, iTc + 2600) : "";
+    /* ⚠ TESTIN KENDISI BIR KEZ YANLIS YAZILDI: "tam tarama" KELIMESINI aradı ve kod doğru
+       olduğu hâlde kırmızı verdi. Doğrusu DAVRANIŞI ölçmek: ipuçlu turdan SONRA indeks
+       0'dan başlayan KOŞULSUZ bir tarama döngüsü olmalı. */
+    var iIpucu = tcBlok.indexOf("if (!isNaN(ip)");
+    var iTam   = tcBlok.indexOf("for (i = 0; i < n; i++)");
+    dogru("ipucu tutmazsa 0'dan tam tarama yapılıyor", iIpucu > -1 && iTam > iIpucu,
+          "İpuçlu turdan sonra tam tarama yok — yanlış ipucu kesimi atlatır ve kesim SONUÇLARI değişir.");
+
+    /* --- 7) host: $.hiresTimer artık mutlak saat sanılmıyor ---
+       O sayaç OKUNUNCA SIFIRLANIR; 't0 = saat; ... saat - t0' deseni çöp üretir. */
+    /* ⚠ YORUMLARI AYIKLAMADAN ARAMA: bu test bir kez yorum satırındaki AÇIKLAMAYA takılıp
+       kod doğruyken kırmızı verdi. Eski hatayı anlatan yorum, hatanın kendisi değildir. */
+    var hostKod = host.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1 ");
+    dogru("hiresTimer yanlış deseni KODDA kalmadı", !/\$\.hiresTimer\s*-\s*[a-zA-Z_]/.test(hostKod),
+          "AutoCut süre ölçümleri hâlâ anlamsız — yavaşlık şikâyeti yanlış teşhis edilir.");
+    dogru("süre ölçümü tek okuma noktasından geçiyor", /function _ht\(\)/.test(hostKod),
+          "Her $.hiresTimer okuması sayacı sıfırlıyor; dağınık okuma ölçümü yine bozar.");
+
+    /* --- 8) İçsel bileşen atlaması HATA sayılmamalı --- */
+    dogru("içsel atlama sayaca yazılıyor, rapora değil", /icselAtlandi/.test(host),
+          "Her klip uyarı üretiyor — kullanıcı 'sürekli hatalar alıyorum' diyor.");
+    dogru("eski gürültü satırı kaldırıldı", !/rapor\.push\(kayit\.ad \+ " \(klip kendi ayari, atlandi\)"\)/.test(host));
+
+    /* --- 9) Sözlük: ParsMazi'nin bildirdiği yazımlar + kök tuzağı --- */
+    (function () {
+      var SZ = null;
+      try { SZ = require(path.join(KOK, "js", "sozluk.js")); } catch (e) {}
+      dogru("sozluk.js yüklendi", !!(SZ && SZ.buildMap));
+      if (!SZ || !SZ.buildMap) return;
+      var m = SZ.buildMap(SZ.defaults());
+      var bekle = [["tobi", "Tofi"], ["Tobi", "Tofi"], ["tophie", "Tofi"], ["Tophie", "Tofi"],
+                   ["toby", "Tofi"], ["tophi", "Tofi"]];
+      var kotu = [], i, r;
+      for (i = 0; i < bekle.length; i++) { r = SZ.fixText(bekle[i][0], m); if (r !== bekle[i][1]) kotu.push(bekle[i][0] + "->" + r); }
+      dogru("ParsMazi'nin bildirdiği yazımlar (tobi/Tophie) düzeliyor", kotu.length === 0,
+            "düzelmeyenler: " + JSON.stringify(kotu));
+      /* ⚠ KÖK TUZAĞI: "seyra" tek başına kelime değil ama "seyran"ın KÖKÜ — ek zinciri onu
+         yakalayıp "Seran" üretiyordu. Yeni varyant eklerken 'bu bir kelime mi' yetmez,
+         'buna ek gelince kelime OLUYOR mu' diye de sorulmalı. */
+      var masum = ["seyran", "seyranda", "seyranı", "saç", "saç kesimi güzel olmuş"];
+      var bozuk = [];
+      for (i = 0; i < masum.length; i++) { if (SZ.fixText(masum[i], m) !== masum[i]) bozuk.push(masum[i]); }
+      dogru("gerçek Türkçe kelimeler (seyran/saç) bozulmuyor", bozuk.length === 0,
+            "bozulanlar: " + JSON.stringify(bozuk));
+      dogru("PAKET_SURUM artırıldı (yeni varyantlar mevcut kullanıcıya ulaşsın)", SZ.PAKET_SURUM >= 3,
+            "Damga eski — paketBirlestir bir daha çalışmaz, düzeltme ParsMazi'ye HİÇ gitmez.");
+    })();
+  })();
+
   /* ---- ÖZET ---- */
   console.log("\n" + new Array(52).join("="));
   console.log(gecti + " geçti · " + kaldi + " KALDI · " + uyari + " not");
