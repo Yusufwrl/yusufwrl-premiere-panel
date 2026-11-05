@@ -22,17 +22,21 @@ var LABELLER = ["Violet", "Iris", "Caribbean", "Lavender", "Cerulean", "Forest",
   "Purple", "Blue", "Teal", "Magenta", "Tan", "Green", "Brown", "Yellow"];
 
 /* Varsayılan kadro. renk = Premiere label indeksi; panelin karakter renklerine en yakın olan seçildi
-   (Tofi kırmızı -> Rose, Moni mavi -> Blue, Dora yeşil -> Green, Mimi pembe -> Magenta,
-    Niko sarı -> Yellow, Sage -> Teal). */
+   (Tofi kırmızı -> Rose, Moni mavi -> Blue, Lulu yeşil -> Green, Niko sarı -> Yellow, Sage -> Teal,
+    Sera -> Cerulean).
+   ⚠ KADRO DEĞİŞİKLİĞİ (5 Kasım 2026, kullanıcı isteği): MİMİ ve DORA KADRODAN ÇIKTI, yerine
+   LULU geldi. Yeşil (Green, 13) eskiden Dora'nındı; Lulu'nun kimlik rengi de yeşil olduğu için
+   ona geçti. Mimi/Dora'yı MEVCUT kullanıcının kayıtlı listesinden çıkaran şey bu tablo değil,
+   aşağıdaki PAKET_KALDIRILAN_KARAKTER göçü — VARSAYILAN'dan silmek tek başına kimseye ulaşmaz. */
 /* SIRA ÖNEMLİDİR — ses kanallarının sırasını bu liste belirler.
    A1 = videoyu çeken (Tofi/Moni'den hangisi seçiliyse), A2 = ikisinden diğeri,
    sonra bu listedeki sırayla kalan karakterler, en sonda oyun sesi.
    Videoda olmayan karakter atlanır ve alttakiler yukarı kayar. */
 var VARSAYILAN = [
   { karakter: "Tofi", adlar: ["yusufwrl"], renk: 6 },
-  { karakter: "Moni", adlar: ["e", "31241324asdwq12123"], renk: 9 },
-  { karakter: "Mimi", adlar: ["1298721"], renk: 11 },
-  { karakter: "Dora", adlar: ["dielyzed"], renk: 13 },
+  /* "monikcachi" = Moni'nin Discord GÖRÜNEN adı (kullanıcının gönderdiği profil, 5 Kasım 2026);
+     "31241324asdwq12123" kullanıcı adı. Craig dosyayı kayıt anındaki görünen adla adlandırıyor. */
+  { karakter: "Moni", adlar: ["e", "31241324asdwq12123", "monikcachi"], renk: 9 },
   { karakter: "Sage", adlar: ["tenebrissa"], renk: 10 },
   { karakter: "Niko", adlar: ["pompa456", "adsadsaadas"], renk: 15 },
   /* ⚠ SERA — YENİ KARAKTER (16 Ağustos 2026). Discord görünen adı HENÜZ BİLİNMİYOR;
@@ -51,8 +55,16 @@ var VARSAYILAN = [
      Niko'nun adlarına yazılmış. Sonuç: Sera'nın sesi Niko sanıldı, Sera "videoda yok"
      göründü ve AutoCut onun konuşmasını SESSİZLİK sayıp KESTİ — bütün kesimler boşa gitti.
      Aynı ad iki karakterde varsa `bul()` LİSTEDE ÖNCE GELENİ döndürür (Niko, Sera'dan önce).
-     Bu yüzden aşağıya yinelenen-ad denetimi eklendi (`yinelenenAdlar`). */
-  { karakter: "Sera", adlar: ["juiced", "juiceoi", "kawakami", "eybep", "sera"], renk: 4 }
+     Bu yüzden aşağıya yinelenen-ad denetimi eklendi (`yinelenenAdlar`).
+     "eybeplol" 5 Kasım 2026'da kullanıcının gönderdiği Craig listesinden eklendi. */
+  { karakter: "Sera", adlar: ["juiced", "juiceoi", "kawakami", "eybep", "eybeplol", "sera"], renk: 4 },
+  /* ⚠ LULU — YENİ KARAKTER (5 Kasım 2026). Discord adı kullanıcının gönderdiği Craig
+     listesinden: "artemis9099". Listenin SONUNDA: sıra = ses kanalı sırası, Sage ve Sera'nın
+     bugünkü kanalı kaymasın (mevcut kullanıcıya da paketBirlestir SONA ekliyor — iki yol aynı
+     sırayı üretsin diye). ⚠ Aynı Craig listesindeki "decimation33" BİLEREK hiçbir karaktere
+     yazılmadı: kim olduğu belli değil; yanlış eşleşme AutoCut'a o kişinin konuşmasını
+     sessizlik sandırıp kestirir. Panel onu "Bilinmeyen kişi" olarak soruyor. */
+  { karakter: "Lulu", adlar: ["artemis9099"], renk: 13 }
 ];
 
 /* Karşılaştırma normali.
@@ -304,20 +316,57 @@ function save(extRoot, entries) {
    · Kullanıcının SİLDİĞİ varsayılan karakter DİRİLTİLMEZ.
    · Liste bilerek boşaltıldıysa dokunulmaz.
    ⚠ Kadroya yeni karakter eklerken PAKET_SURUM'u ARTIR — yoksa kimseye gitmez. */
-var PAKET_SURUM = 1;
+/* 2 = 5 Kasım 2026: Mimi + Dora kadrodan ÇIKTI, Lulu ("artemis9099") geldi; Sera'ya
+   "eybeplol", Moni'ye "monikcachi" eklendi. Yusuf'un ve ParsMazi'nin dosyasındaki damga 1. */
+var PAKET_SURUM = 2;
+
+/* ⚠⚠ PAKETTEN ÇIKARILAN KARAKTERLER — ÇIKARMAK TEK BAŞINA KİMSEYE ULAŞMAZ.
+   `paketBirlestir` eskiden YALNIZ EKLİYORDU. Mimi'yi/Dora'yı VARSAYILAN'dan silmek, onları
+   daha önce teslim almış kullanıcının kisiler.json'ından SİLMEZ — kayıtlı listesi olan herkeste
+   (Yusuf + ParsMazi) iki karakter sonsuza kadar kalır, "Videoyu kim çekiyor?" düğmelerinde ve
+   "Bilinmeyen kişi" seçicisinde görünmeye devam ederdi. Sözlükteki PAKET_KALDIRILAN'ın eşi.
+   KURALLAR (dar kapsam, bilinçli):
+   · Yalnız birleştirme turunda, yani damga PAKET_SURUM'dan küçükken BİR KEZ çalışır.
+   · Yalnız TAM ad eşleşmesi (_norm ile) — kullanıcının kendi eklediği başka karaktere dokunmaz.
+   · ÖNCE ÇIKARMA, SONRA EKLEME: çıkarılan karaktere elle atanmış bir Discord adı (ör. ParsMazi
+     Lulu'nun kaydını "Bilinmeyen kişi"den Mimi'ye bağladıysa "artemis9099") sahipsiz kalır ve
+     aşağıdaki ad birleştirmesi onu ÇAKIŞMA saymadan doğru karaktere (Lulu) verir.
+   · Kullanıcı sonradan Mimi'yi elle geri eklerse bir daha SİLİNMEZ — SONRAKİ PAKET_SURUM
+     artışlarında da. ⚠ İlk taslakta bu söz YALNIZ bir sonraki artışa kadar tutuyordu (inceleme
+     yakaladı): tablo düz diziydi ve damga kapısını geçen her birleştirme turunda koşulsuz
+     yeniden uygulanıyordu; Mimi 2026-10-26'da Tofi kadrosuna bir kez geri dönmüştü, yani
+     senaryo gerçekçi. Artık her satır kendi `surum`'unu taşır ve yalnız kullanıcının ESKİ
+     damgası ondan küçükse uygulanır.
+   ⚠ Buraya ad yazarken PAKET_SURUM'u da ARTIR ve `surum` = yeni PAKET_SURUM yaz. */
+var PAKET_KALDIRILAN_KARAKTER = [{ ad: "Mimi", surum: 2 }, { ad: "Dora", surum: 2 }];
+
 function paketBirlestir(extRoot) {
   var p = path.join(extRoot, DOSYA), raw, j;
   try {
-    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [] };
+    if (!fs.existsSync(p)) return { durum: "dosya-yok", eklenen: [], cikarilan: [] };
     raw = fs.readFileSync(p, "utf8");
     if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
     j = JSON.parse(raw);
-  } catch (e) { return { durum: "okunamadi", eklenen: [], hata: String((e && e.message) || e) }; }
-  if (!j || Object.prototype.toString.call(j.kisiler) !== "[object Array]") return { durum: "bicim", eklenen: [] };
-  if (!j.kisiler.length) return { durum: "bos-birakilmis", eklenen: [] };
-  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [] };
+  } catch (e) { return { durum: "okunamadi", eklenen: [], cikarilan: [], hata: String((e && e.message) || e) }; }
+  if (!j || Object.prototype.toString.call(j.kisiler) !== "[object Array]") return { durum: "bicim", eklenen: [], cikarilan: [] };
+  if (!j.kisiler.length) return { durum: "bos-birakilmis", eklenen: [], cikarilan: [] };
+  var eskiDamga = Number(j.pkgSurum || 0);
+  if (eskiDamga >= PAKET_SURUM) return { durum: "guncel", eklenen: [], cikarilan: [] };
 
-  var eklenen = [], catismalar = [], var_ = {}, indeks = {}, i;
+  /* ÖNCE ÇIKARMA — ad sahipliği tablosu (adSahibi) çıkarılmış listeden kurulsun diye.
+     Yalnız bu kullanıcının henüz GÖRMEDİĞİ satırlar (eskiDamga < surum). */
+  var cikarilan = [], kSet = Object.create(null), kalanK = [], i;
+  for (i = 0; i < PAKET_KALDIRILAN_KARAKTER.length; i++) {
+    if (eskiDamga < Number(PAKET_KALDIRILAN_KARAKTER[i].surum || 0)) kSet[_norm(PAKET_KALDIRILAN_KARAKTER[i].ad)] = 1;
+  }
+  for (i = 0; i < j.kisiler.length; i++) {
+    var kx = j.kisiler[i];
+    if (kx && kx.karakter && kSet[_norm(kx.karakter)]) { cikarilan.push(kx.karakter); continue; }
+    kalanK.push(kx);
+  }
+  j.kisiler = kalanK;
+
+  var eklenen = [], catismalar = [], var_ = {}, indeks = {};
   for (i = 0; i < j.kisiler.length; i++) {
     if (j.kisiler[i] && j.kisiler[i].karakter) {
       var_[_norm(j.kisiler[i].karakter)] = 1;
@@ -340,9 +389,21 @@ function paketBirlestir(extRoot) {
     var k = _norm(v.karakter);
     if (silinenSet[k]) return;                       // bilerek silmiş — diriltme
     if (!var_[k]) {
-      j.kisiler.push({ karakter: v.karakter, adlar: (v.adlar || []).slice(), renk: v.renk || 0 });
+      /* ⚠⚠ YENİ KARAKTERİN ADLARI DA ÇAKIŞMA DENETİMİNDEN GEÇER (5 Kasım 2026, test yakaladı).
+         Bu dal eskiden adları KOŞULSUZ kopyalıyordu; denetim yalnız aşağıdaki "karakter zaten
+         var" dalındaydı. Senaryo: ParsMazi Lulu'nun kaydını ("artemis9099") Lulu pakete
+         girmeden önce "Bilinmeyen kişi"den NİKO'ya bağladıysa ad iki karakterde birden olurdu
+         ve `bul()` listede ÖNCE geleni (Niko) döndürürdü — Sera vakasının birebir aynısı, bu
+         kez paketin kendi eliyle. Artık ad eklenmez, çakışma RAPORLANIR (panel log'a yazıyor)
+         ve GÖRÜNÜR uyarıyı her Senkron'da paketAdSapmalari() üretir — log tek başına yetmez. */
+      var yeniAdlar = [];
+      (v.adlar || []).forEach(function (a) {
+        var an0 = _norm(a), sahip0 = adSahibi[an0];
+        if (sahip0 && _norm(sahip0) !== k) { catismalar.push({ ad: a, sahip: sahip0, olmasiGereken: v.karakter }); return; }
+        yeniAdlar.push(a); adSahibi[an0] = v.karakter;
+      });
+      j.kisiler.push({ karakter: v.karakter, adlar: yeniAdlar, renk: v.renk || 0 });
       eklenen.push(v.karakter);
-      (v.adlar || []).forEach(function (a) { adSahibi[_norm(a)] = v.karakter; });
       return;
     }
     /* ⚠⚠ KARAKTER ZATEN VARSA DISCORD ADLARI DA BİRLEŞTİRİLİR — eskiden bu dal `return`
@@ -367,8 +428,8 @@ function paketBirlestir(extRoot) {
   });
   j.pkgSurum = PAKET_SURUM;
   try { fs.writeFileSync(p, JSON.stringify(j, null, 2), "utf8"); }
-  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, catismalar: catismalar, hata: String((e2 && e2.message) || e2) }; }
-  return { durum: "birlestirildi", eklenen: eklenen, catismalar: catismalar };
+  catch (e2) { return { durum: "yazilamadi", eklenen: eklenen, catismalar: catismalar, cikarilan: cikarilan, hata: String((e2 && e2.message) || e2) }; }
+  return { durum: "birlestirildi", eklenen: eklenen, catismalar: catismalar, cikarilan: cikarilan };
 }
 
 /* ⚠⚠ AYNI DISCORD ADI İKİ KARAKTERDE — SESSİZ VE ÇOK PAHALI BİR HATA.
@@ -398,10 +459,44 @@ function yinelenenAdlar(liste) {
   return cakisan;
 }
 
+/* ⚠⚠ PAKETİN BİLDİĞİ DISCORD ADI LİSTEDE BAŞKA KARAKTERDE Mİ? (5 Kasım 2026, inceleme turu)
+   paketBirlestir çakışan adı artık EKLEMİYOR (aynı ad iki karakterde olmasın diye) ve
+   çakışmayı yalnız tek seferlik bir log satırıyla bildiriyor — #log ise varsayılan GİZLİ.
+   Ad tek karakterde kaldığı için yinelenenAdlar() da boş dönüyor; yani Senkron'daki kırmızı
+   uyarı HİÇ çıkmıyordu. Senaryo: Lulu pakete girmeden önce "artemis9099" "Bilinmeyen kişi"
+   satırından Niko'ya bağlanmış → Lulu'nun sesi sessizce Niko'nun kanalına, çeken Tofi/Moni'ye
+   bağlıysa hiç konmuyor ve AutoCut onun konuşmasını kesiyor (Sera vakasının aynısı).
+   Bu yüzden denetim TEK SEFERLİK DEĞİL: panel her Senkron'da çağırır.
+   · Yalnız `klasorAdlari` içindeki adlara bakar (verilirse) — bu videoda olmayan bir kişi için
+     her seferinde uyarı basmak kullanıcıya uyarıyı görmezden gelmeyi öğretirdi.
+   · Doğru karakter listede YOKSA susar — kullanıcı onu bilerek silmiş olabilir.
+   · Kullanıcı adı doğru kişiye taşıyınca kendiliğinden kaybolur; dosyaya ek alan yazılmaz. */
+function paketAdSapmalari(liste, klasorAdlari) {
+  var out = [], ilgili = null, i;
+  liste = liste || [];
+  if (klasorAdlari) {
+    ilgili = Object.create(null);
+    for (i = 0; i < klasorAdlari.length; i++) {
+      ilgili[_norm(klasorAdlari[i])] = 1;
+      ilgili[_norm(_ekKirp(klasorAdlari[i]))] = 1;
+    }
+  }
+  VARSAYILAN.forEach(function (d) {
+    if (!karakterBul(liste, d.karakter)) return;
+    (d.adlar || []).forEach(function (a) {
+      if (ilgili && !ilgili[_norm(a)]) return;
+      var s = bul(liste, a);
+      if (s && _norm(s.karakter) !== _norm(d.karakter)) out.push({ ad: a, sahip: s.karakter, olmasiGereken: d.karakter });
+    });
+  });
+  return out;
+}
+
 module.exports = {
   load: load, save: save, defaults: defaults,
   paketBirlestir: paketBirlestir, PAKET_SURUM: PAKET_SURUM,
-  yinelenenAdlar: yinelenenAdlar,
+  PAKET_KALDIRILAN_KARAKTER: PAKET_KALDIRILAN_KARAKTER,
+  yinelenenAdlar: yinelenenAdlar, paketAdSapmalari: paketAdSapmalari,
   parseText: parseText, toText: toText,
   adCikar: adCikar, bul: bul, karakterBul: karakterBul, ekKirp: _ekKirp,
   /* norm: ad normalleştirmesi TEK KURAL olsun diye dışa açıldı (18 Ağustos 2026 denetimi).

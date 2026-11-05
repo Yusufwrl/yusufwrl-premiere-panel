@@ -386,13 +386,14 @@ function bitir() {
        Ekranda ne konuşmacının söylediği ne de doğru Türkçe olan kelimeler çıkıyordu. */
     var ekVaka = [
       ["tofuyu", "Tofiyi"], ["tofunun", "Tofinin"], ["tofuda", "Tofide"],
-      ["tofudan", "Tofiden"], ["torasinda", "Dorasında"], ["nikuya", "Nikoya"],
+      /* (Dora 5 Kasım 2026'da kadrodan çıktı — "torasinda"→"Dorasında" vakası Sera'ya taşındı.) */
+      ["tofudan", "Tofiden"], ["serrasinda", "Serasında"], ["nikuya", "Nikoya"],
       ["moneylerin", "Monilerin"], ["tofularla", "Tofilerle"],
       /* Zincirlenmiş ek BOZULMAMALI (CLAUDE.md'de açıkça korunan davranış). */
       ["tofulerden", "Tofilerden"], ["toffyyle", "Tofiyle"],
       /* ⚠ ÜNLÜ UYUMUNA GİRMEYEN EK (TDK): -gil her kökten sonra AYNI kalır. Körlemesine
          uyumlamak "gilde"yi "gılda"ya çevirip var olmayan bir ek üretiyordu. */
-      ["dorragilde", "Doragilde"], ["tofuyken", "Tofiyken"]
+      ["serragilde", "Seragilde"], ["tofuyken", "Tofiyken"]
     ];
     var ekYanlis = [];
     ekVaka.forEach(function (v) {
@@ -415,15 +416,16 @@ function bitir() {
     if (!harita) { hata("harita kurulamadı"); return; }
     function kel(w, s, e, seg) { return { word: w, start: s, end: e, seg: seg }; }
 
-    var bitisik = [kel("mi", 10.0, 10.2, 0), kel("mi", 10.25, 10.5, 0)];
+    /* (Mimi 5 Kasım 2026'da kadrodan çıktı; aynı iki harfli hece vakası Lulu'nun "lu lu"suyla.) */
+    var bitisik = [kel("lu", 10.0, 10.2, 0), kel("lu", 10.25, 10.5, 0)];
     SZ.fixWords(bitisik, harita);
-    esit("bitişik hece birleşiyor", bitisik.length === 1 && /Mimi/.test(bitisik[0].word), true);
+    esit("bitişik hece birleşiyor", bitisik.length === 1 && /Lulu/.test(bitisik[0].word), true);
 
-    var uzak = [kel("mi", 41.0, 41.2, 3), kel("mi", 95.0, 95.4, 21)];
+    var uzak = [kel("lu", 41.0, 41.2, 3), kel("lu", 95.0, 95.4, 21)];
     SZ.fixWords(uzak, harita);
     esit("54 sn arayla olan İKİ kelime birleşMİYOR", uzak.length, 2);
 
-    var farkliSeg = [kel("mi", 10.0, 10.2, 0), kel("mi", 10.25, 10.5, 1)];
+    var farkliSeg = [kel("lu", 10.0, 10.2, 0), kel("lu", 10.25, 10.5, 1)];
     SZ.fixWords(farkliSeg, harita);
     esit("farklı Whisper segmenti birleşMİYOR", farkliSeg.length, 2);
 
@@ -466,7 +468,7 @@ function bitir() {
     var b = KS.parseText("Moni: e [Blue]");
     esit("gerçek renk adı hâlâ ayrışıyor", b.length === 1 ? b[0].adlar : null, ["e"]);
     dogru("gerçek renk değeri okunuyor", b.length === 1 && b[0].renk > 0, "renk: " + (b[0] && b[0].renk));
-    var c = KS.parseText("Dora: kiz [3]");
+    var c = KS.parseText("Lulu: kiz [3]");
     esit("sayısal renk hâlâ ayrışıyor", c.length === 1 ? [c[0].adlar, c[0].renk] : null, [["kiz"], 3]);
   })();
 
@@ -539,7 +541,10 @@ function bitir() {
       dogru("kişiler: YENİ karakter eklendi", kar.indexOf("Sera") !== -1, "kadro: " + kar.join(", "));
       /* ⚠ SONA eklenmeli: liste sırası = ses kanalı sırası. Başa eklemek mevcut kadronun
          BÜTÜN kanal düzenini kaydırır ve kullanıcı bunu ancak videoyu izlerken fark eder. */
-      esit("kişiler: yeni karakter listenin SONUNDA (kanal düzeni kaymasın)", kar[kar.length - 1], "Sera");
+      /* Son eleman = VARSAYILAN'ın son karakteri (5 Kasım 2026'dan beri Lulu); sabit ad yazılmadı
+         ki kadro değişince test kendi kendine yanlış kırmızı vermesin. */
+      var _sonV = KS2.defaults()[KS2.defaults().length - 1].karakter;
+      esit("kişiler: yeni karakter listenin SONUNDA (kanal düzeni kaymasın)", kar[kar.length - 1], _sonV);
       dogru("kişiler: kullanıcının sırası korunuyor", kar[0] === "Tofi" && kar[1] === "Moni",
             "kadro: " + kar.join(", "));
       esit("kişiler: ikinci çağrı hiçbir şey yapmıyor (damga)", KS2.paketBirlestir(kok).durum, "guncel");
@@ -1810,7 +1815,7 @@ function bitir() {
 
     /* Diğer karakterlere de aynı kalıplar uygulandı; birer örnekle kilitle. */
     var ornek = [["tofe", "Tofi"], ["toffie", "Tofi"], ["monee", "Moni"], ["monni", "Moni"],
-                 ["doraa", "Dora"], ["thora", "Dora"], ["mimee", "Mimi"], ["niiko", "Niko"],
+                 ["lülü", "Lulu"], ["loulou", "Lulu"], ["luluu", "Lulu"], ["niiko", "Niko"],
                  ["serah", "Sera"]];
     var eksik = [];
     for (var k = 0; k < ornek.length; k++) {
@@ -1998,6 +2003,229 @@ function bitir() {
       dogru("PAKET_SURUM artırıldı (yeni varyantlar mevcut kullanıcıya ulaşsın)", SZ.PAKET_SURUM >= 3,
             "Damga eski — paketBirlestir bir daha çalışmaz, düzeltme ParsMazi'ye HİÇ gitmez.");
     })();
+  })();
+
+  /* ===== 27. KADRO DEĞİŞİKLİĞİ: MİMİ + DORA ÇIKTI, LULU GELDİ (5 Kasım 2026) =====
+     Kullanıcı: "premiere eklentisinde mimi ve dora olmayacak, lulu eklendi · programı bozma,
+     ParsMazi'de de güncelleyeceğiz". Paket güncellemesi kullanıcı dosyalarına (kisiler.json /
+     sozluk.json) YALNIZ EKLİYORDU — çıkarılan bir karakter, kayıtlı listesi olan herkeste
+     sonsuza kadar kalırdı. Bu bölüm iki yönü de GERÇEK dosya biçimiyle ölçüyor. Kişiler fikstürü
+     Yusuf'un kurulu panelindeki kisiler.json'ın birebir kopyası (5 Kasım 2026, pkgSurum 1)
+     + ParsMazi'nin bilinen eki ("texatv" Niko'da). */
+  baslik("Kadro değişikliği (Mimi + Dora çıktı, Lulu geldi)");
+  (function () {
+    var SZ, KS, os = require("os");
+    try { SZ = require(path.join(KOK, "js", "sozluk.js")); KS = require(path.join(KOK, "js", "kisiler.js")); }
+    catch (e) { hata("modül yüklenemedi", e.message); return; }
+
+    /* ── Varsayılanlar ── */
+    var D = KS.defaults();
+    var kv = D.map(function (x) { return x.karakter; });
+    dogru("kişiler varsayılanında Mimi/Dora YOK", kv.indexOf("Mimi") === -1 && kv.indexOf("Dora") === -1, "kadro: " + kv.join(", "));
+    esit("Lulu varsayılan kadronun SONUNDA (Sage/Sera'nın kanalı kaymasın)", kv[kv.length - 1], "Lulu");
+    function kim(liste, ad) { var k = KS.bul(liste, ad); return k ? k.karakter : null; }
+    esit("Craig: artemis9099 → Lulu", kim(D, "artemis9099"), "Lulu");
+    esit("Craig: eybeplol → Sera", kim(D, "eybeplol"), "Sera");
+    esit("Craig: monikcachi → Moni (görünen ad)", kim(D, "monikcachi"), "Moni");
+    esit("Craig: decimation33 BİLEREK kimseye bağlı değil (kim olduğu bilinmiyor)", kim(D, "decimation33"), null);
+    esit("varsayılan kadroda yinelenen Discord adı yok", KS.yinelenenAdlar(D), []);
+    var sv = SZ.defaults().map(function (e) { return e.ad; });
+    dogru("sözlük varsayılanında Dora/Mimi YOK, Lulu VAR",
+          sv.indexOf("Dora") === -1 && sv.indexOf("Mimi") === -1 && sv.indexOf("Lulu") !== -1, "isimler: " + sv.join(", "));
+    dogru("kişiler PAKET_SURUM ≥ 2 (çıkarma mevcut kullanıcıya ulaşsın)", KS.PAKET_SURUM >= 2,
+          "Damga 1'de — Yusuf'ta ve ParsMazi'de Mimi/Dora listede kalır, Lulu hiç gelmez.");
+    dogru("sözlük PAKET_SURUM ≥ 4 (çıkarma mevcut kullanıcıya ulaşsın)", SZ.PAKET_SURUM >= 4,
+          "Damga 3'te — ParsMazi'nin sözlüğünde Dora/Mimi kalır.");
+
+    /* ── Sözlük davranışı ── */
+    var m = SZ.buildMap(SZ.defaults());
+    var bekle = [["lülü", "Lulu"], ["Lülü", "Lulu"], ["lolo", "Lulu"], ["lulu", "Lulu"], ["Loulou", "Lulu"],
+                 ["lolonun", "Lulunun"]];
+    /* ("lu lu" iki heceli: fixText birleştirmez, zamanlı fixWords birleştirir — 11. bölüm ölçüyor.) */
+    var kotu = [], i, r;
+    for (i = 0; i < bekle.length; i++) { r = SZ.fixText(bekle[i][0], m); if (r !== bekle[i][1]) kotu.push(bekle[i][0] + " -> " + r); }
+    dogru("Lulu'nun yanlış yazımları düzeliyor", kotu.length === 0, "düzelmeyenler: " + JSON.stringify(kotu));
+    /* Gerçek kelime ve başka isimler BOZULMAMALI ("saç"/"seyran" dersi). */
+    /* "lolu/lolun/lolum/lolunu": LoL + ek. İlk taslakta "lolu" Lulu varyantıydı ve bunların
+       hepsini Lulu'ya çeviriyordu — inceleme turu yakaladı (gerçek kök + ek = varyant). */
+    var masum = ["lüle", "saç lülesi", "lale", "ulu", "lolipop", "lokum", "lüks", "lügat", "lol",
+                 "uluslararası", "oluyor", "lu", "Lola", "Lili", "tora geldi", "mini etek",
+                 "lolu", "LOLU", "lolun", "lolum", "lolunu", "dün akşam lolu sildim", "lolun yeni şampiyonu"];
+    var bozuk = [];
+    for (i = 0; i < masum.length; i++) { if (SZ.fixText(masum[i], m) !== masum[i]) bozuk.push(masum[i] + " -> " + SZ.fixText(masum[i], m)); }
+    dogru("gerçek kelimeler bozulmuyor; 'tora' artık Dora'ya ÇEVRİLMİYOR", bozuk.length === 0,
+          "bozulanlar: " + JSON.stringify(bozuk));
+
+    /* ── GÖÇ: gerçek dosya biçimiyle ── */
+    var kok = path.join(os.tmpdir(), "yw-kadro-test-" + process.pid);
+    try { fs.mkdirSync(kok, { recursive: true }); } catch (e) {}
+    function yaz(f, j) { fs.writeFileSync(path.join(kok, f), JSON.stringify(j, null, 2), "utf8"); }
+    function oku(f) { try { return JSON.parse(String(fs.readFileSync(path.join(kok, f), "utf8")).replace(/^﻿/, "")); } catch (e) { return null; } }
+    function yusufunListesi() {
+      return { surum: 2, pkgSurum: 1, kisiler: [
+        { karakter: "Tofi", adlar: ["yusufwrl"], renk: 6 },
+        { karakter: "Moni", adlar: ["e", "31241324asdwq12123"], renk: 9 },
+        { karakter: "Mimi", adlar: ["1298721"], renk: 11 },
+        { karakter: "Dora", adlar: ["dielyzed"], renk: 13 },
+        { karakter: "Sage", adlar: ["tenebrissa"], renk: 10 },
+        { karakter: "Niko", adlar: ["pompa456", "adsadsaadas", "texatv"], renk: 15 },
+        { karakter: "Sera", adlar: ["juiced", "juiceoi", "kawakami", "eybep", "sera"], renk: 4 }
+      ] };
+    }
+    try {
+      /* A) Yusuf'un listesi */
+      yaz(KS.DOSYA, yusufunListesi());
+      var rA = KS.paketBirlestir(kok);
+      var jA = oku(KS.DOSYA) || { kisiler: [] };
+      var kA = jA.kisiler.map(function (x) { return x.karakter; });
+      esit("göç: birleştirme çalıştı", rA.durum, "birlestirildi");
+      esit("göç: kadro sırası Tofi, Moni, Sage, Niko, Sera, Lulu", kA.join(", "), "Tofi, Moni, Sage, Niko, Sera, Lulu");
+      esit("göç: çıkarılanlar raporlanıyor (panel log'a yazıyor)", (rA.cikarilan || []).join(","), "Mimi,Dora");
+      esit("göç: çakışma yok", rA.catismalar || [], []);
+      esit("göç: artemis9099 → Lulu", kim(jA.kisiler, "artemis9099"), "Lulu");
+      esit("göç: eybeplol → Sera", kim(jA.kisiler, "eybeplol"), "Sera");
+      esit("göç: monikcachi → Moni", kim(jA.kisiler, "monikcachi"), "Moni");
+      esit("göç: kullanıcının kendi eklediği ad korunuyor (texatv → Niko)", kim(jA.kisiler, "texatv"), "Niko");
+      esit("göç: çıkarılan karakterin eski adı artık kimseye bağlı değil (dielyzed)", kim(jA.kisiler, "dielyzed"), null);
+      esit("göç: ikinci çağrı hiçbir şey yapmıyor (damga)", KS.paketBirlestir(kok).durum, "guncel");
+      KS.save(kok, KS.load(kok));
+      esit("göç: kayıttan sonra 'silinmiş varsayılan' işareti oluşmuyor", (oku(KS.DOSYA) || {}).silinenVarsayilanlar, []);
+
+      /* B) ParsMazi Lulu'nun kaydını daha önce "Bilinmeyen kişi"den MİMİ'ye bağlamış olabilir */
+      var jB = yusufunListesi(); jB.kisiler[2].adlar.push("artemis9099");
+      yaz(KS.DOSYA, jB);
+      var rB = KS.paketBirlestir(kok);
+      var jB2 = oku(KS.DOSYA) || { kisiler: [] };
+      esit("Mimi'ye elle bağlanmış artemis9099 Lulu'ya geçiyor (çakışma sayılmıyor)",
+           [kim(jB2.kisiler, "artemis9099"), (rB.catismalar || []).length], ["Lulu", 0]);
+
+      /* C) ...ya da başka bir KALAN karaktere (Niko) — sessizce düzeltilmez, RAPORLANIR */
+      var jC = yusufunListesi(); jC.kisiler[5].adlar.push("artemis9099");
+      yaz(KS.DOSYA, jC);
+      var rC = KS.paketBirlestir(kok);
+      var jC2 = oku(KS.DOSYA) || { kisiler: [] };
+      dogru("başka karaktere bağlı artemis9099 çakışma olarak raporlanıyor",
+            (rC.catismalar || []).some(function (c) { return c.ad === "artemis9099" && c.sahip === "Niko" && c.olmasiGereken === "Lulu"; }),
+            "catismalar: " + JSON.stringify(rC.catismalar));
+      dogru("o durumda da Lulu kadroya giriyor ve aynı ad iki karakterde OLMUYOR",
+            jC2.kisiler.some(function (x) { return x.karakter === "Lulu"; }) && KS.yinelenenAdlar(jC2.kisiler).length === 0);
+
+      /* D) Göçten SONRA Mimi'yi elle geri ekleyen kullanıcı → bir daha silinmez */
+      yaz(KS.DOSYA, yusufunListesi()); KS.paketBirlestir(kok);
+      var jD = oku(KS.DOSYA); jD.kisiler.push({ karakter: "Mimi", adlar: ["1298721"], renk: 11 }); yaz(KS.DOSYA, jD);
+      KS.paketBirlestir(kok);
+      dogru("göçten sonra elle geri eklenen Mimi bir daha SİLİNMİYOR",
+            (oku(KS.DOSYA) || { kisiler: [] }).kisiler.some(function (x) { return x.karakter === "Mimi"; }));
+
+      /* E) Sözlük: eski paketten kalma dosya (Dora/Mimi + kullanıcının kendi varyantı) */
+      yaz(SZ.DOSYA, { pkgSurum: 3, silinenVarsayilanlar: [], entries: [
+        { ad: "Tofi", varyant: ["toffy", "benimtofim"] },
+        { ad: "Dora", varyant: ["dorra", "tora", "benimdoram"] },
+        { ad: "Mimi", varyant: ["mimmi"] },
+        { ad: "Niko", varyant: ["nico"] } ] });
+      var rE = SZ.paketBirlestir(kok);
+      var aE = ((oku(SZ.DOSYA) || {}).entries || []).map(function (e) { return e.ad; });
+      dogru("sözlük göçü: Dora ve Mimi çıktı, Lulu geldi",
+            aE.indexOf("Dora") === -1 && aE.indexOf("Mimi") === -1 && aE.indexOf("Lulu") !== -1, "isimler: " + aE.join(", "));
+      dogru("sözlük göçü: kullanıcının kendi varyantı (Tofi: benimtofim) duruyor",
+            ((oku(SZ.DOSYA) || {}).entries || []).some(function (e) { return e.ad === "Tofi" && e.varyant.indexOf("benimtofim") !== -1; }));
+      dogru("sözlük göçü: çıkarılanlar ayrı alanda raporlanıyor", (rE.cikarilan || []).join(" ").indexOf("Dora") !== -1,
+            "cikarilan: " + JSON.stringify(rE.cikarilan));
+      esit("sözlük göçü: ikinci çağrı hiçbir şey yapmıyor (damga)", SZ.paketBirlestir(kok).durum, "guncel");
+
+      /* F) ÇIKARMA TABLOLARI SÜRÜME BAĞLI — bir SONRAKİ PAKET_SURUM artışı elle geri eklenen
+         Mimi'yi / Dora'yı tekrar SİLMEMELİ. İlk taslakta tablolar düz diziydi ve damga
+         kapısını geçen her turda koşulsuz yeniden uygulanıyordu (inceleme yakaladı).
+         Ölçüm: modülün PAKET_SURUM'u bir artırılmış KOPYASI yükleniyor (gelecek sürüm). */
+      function gelecekModul(dosya) {
+        var kaynak = String(fs.readFileSync(path.join(KOK, "js", dosya), "utf8"));
+        var yeni = kaynak.replace(/var PAKET_SURUM = (\d+);/, function (_, n) { return "var PAKET_SURUM = " + (Number(n) + 1) + ";"; });
+        if (yeni === kaynak) throw new Error(dosya + ": PAKET_SURUM satırı bulunamadı");
+        var hedef = path.join(kok, "gelecek-" + dosya);
+        fs.writeFileSync(hedef, yeni, "utf8");
+        return require(hedef);
+      }
+      var KSg = gelecekModul("kisiler.js"), SZg = gelecekModul("sozluk.js");
+      yaz(KS.DOSYA, yusufunListesi()); KS.paketBirlestir(kok);                       // bugünkü göç → damga 2
+      var jF = oku(KS.DOSYA); jF.kisiler.push({ karakter: "Mimi", adlar: ["1298721"], renk: 11 }); yaz(KS.DOSYA, jF);
+      var rF = KSg.paketBirlestir(kok);                                               // gelecek sürüm
+      dogru("SONRAKİ kişiler PAKET_SURUM artışında elle geri eklenen Mimi SİLİNMİYOR",
+            rF.durum === "birlestirildi" && (oku(KS.DOSYA) || { kisiler: [] }).kisiler.some(function (x) { return x.karakter === "Mimi"; }),
+            "durum: " + rF.durum + " · cikarilan: " + JSON.stringify(rF.cikarilan));
+      yaz(SZ.DOSYA, { pkgSurum: SZ.PAKET_SURUM, silinenVarsayilanlar: [], entries: [
+        { ad: "Tofi", varyant: ["toffy"] }, { ad: "Dora", varyant: ["benimdoram"] },
+        { ad: "Sera", varyant: ["seraa", "seyra"] } ] });                             // kullanıcı ikisini de BİLEREK geri yazmış
+      var rFs = SZg.paketBirlestir(kok);
+      var eF = (oku(SZ.DOSYA) || {}).entries || [];
+      dogru("SONRAKİ sözlük PAKET_SURUM artışında elle geri yazılan Dora SİLİNMİYOR",
+            rFs.durum === "birlestirildi" && eF.some(function (e) { return e.ad === "Dora"; }), "cikarilan: " + JSON.stringify(rFs.cikarilan));
+      dogru("…ve elle geri yazılan 'seyra' da (eski PAKET_KALDIRILAN satırı yeniden uygulanmıyor)",
+            eF.some(function (e) { return e.ad === "Sera" && e.varyant.indexOf("seyra") !== -1; }));
+      /* Kapı ters yönde de çalışmalı: damgası ESKİ olan kullanıcıda tablolar hâlâ uygulanır. */
+      yaz(SZ.DOSYA, { pkgSurum: 2, silinenVarsayilanlar: [], entries: [
+        { ad: "Dora", varyant: ["dorra"] }, { ad: "Sera", varyant: ["seraa", "seyra"] } ] });
+      SZ.paketBirlestir(kok);
+      var eF2 = (oku(SZ.DOSYA) || {}).entries || [];
+      dogru("damga 2 olan eski dosyada Dora çıkıyor VE 'seyra' çıkıyor (tablolar ölmedi)",
+            !eF2.some(function (e) { return e.ad === "Dora"; }) &&
+            eF2.some(function (e) { return e.ad === "Sera" && e.varyant.indexOf("seyra") === -1; }),
+            "girdiler: " + JSON.stringify(eF2));
+      yaz(SZ.DOSYA, { pkgSurum: 3, silinenVarsayilanlar: [], entries: [ { ad: "Sera", varyant: ["seraa", "seyra"] } ] });
+      SZ.paketBirlestir(kok);
+      dogru("damga 3 olan dosyada (seyra'yı ZATEN bir kez görmüş) elle geri yazılmış 'seyra' kalıyor",
+            ((oku(SZ.DOSYA) || {}).entries || []).some(function (e) { return e.ad === "Sera" && e.varyant.indexOf("seyra") !== -1; }));
+
+      /* G) GÖRÜNÜR UYARI: çakışan ad tek karakterde kalınca yinelenenAdlar susuyor —
+         paketAdSapmalari her Senkron'da bunu yakalamalı (inceleme turu bulgusu). */
+      var sap = KS.paketAdSapmalari(jC2.kisiler, ["yusufwrl", "artemis9099", "tenebrissa"]);
+      dogru("Niko'ya bağlı artemis9099 Senkron'da GÖRÜNÜR uyarı üretiyor",
+            sap.length === 1 && sap[0].ad === "artemis9099" && sap[0].sahip === "Niko" && sap[0].olmasiGereken === "Lulu",
+            "sapmalar: " + JSON.stringify(sap));
+      esit("Craig '_2' ekli dosya adı da yakalanıyor (artemis9099_2)",
+           KS.paketAdSapmalari(jC2.kisiler, ["artemis9099_2"]).length, 1);
+      esit("bu videoda olmayan kişi için uyarı YOK (gürültü olmasın)",
+           KS.paketAdSapmalari(jC2.kisiler, ["yusufwrl", "tenebrissa"]), []);
+      esit("temiz göçte (A) uyarı YOK", KS.paketAdSapmalari(jA.kisiler, ["yusufwrl", "artemis9099", "eybeplol", "monikcachi", "decimation33"]), []);
+      var jG = JSON.parse(JSON.stringify(jC2.kisiler)).filter(function (x) { return x.karakter !== "Lulu"; });
+      esit("doğru karakter (Lulu) listede YOKSA susuyor — kullanıcı bilerek silmiş olabilir",
+           KS.paketAdSapmalari(jG, ["artemis9099"]), []);
+      var jG2 = JSON.parse(JSON.stringify(jC2.kisiler));
+      jG2.forEach(function (x) {
+        if (x.karakter === "Niko") x.adlar = x.adlar.filter(function (a) { return a !== "artemis9099"; });
+        if (x.karakter === "Lulu") x.adlar.push("artemis9099");
+      });
+      esit("ad doğru kişiye taşınınca uyarı kendiliğinden kayboluyor", KS.paketAdSapmalari(jG2, ["artemis9099"]), []);
+    } catch (eG) { hata("kadro göçü testi", eG.message || String(eG)); }
+    try { fs.unlinkSync(path.join(kok, "gelecek-kisiler.js")); } catch (e) {}
+    try { fs.unlinkSync(path.join(kok, "gelecek-sozluk.js")); } catch (e) {}
+    try { fs.unlinkSync(path.join(kok, KS.DOSYA)); } catch (e) {}
+    try { fs.unlinkSync(path.join(kok, SZ.DOSYA)); } catch (e) {}
+    try { fs.rmdirSync(kok); } catch (e) {}
+
+    /* ── Panel ve paket ── */
+    var appHam = "", emojiMan = "";
+    try { appHam = String(fs.readFileSync(path.join(KOK, "js", "app.js"), "utf8")); } catch (e) {}
+    try { emojiMan = String(fs.readFileSync(path.join(KOK, "varsayilan", "emoji-paketi.json"), "utf8")); } catch (e) {}
+    dogru("panel çıkarılan karakterleri log'a yazıyor", /_kiB\.cikarilan/.test(appHam) && /_szB\.cikarilan/.test(appHam));
+    dogru("panel Discord adı çakışmasını log'a yazıyor (eskiden hiç okunmuyordu)", /_kiB\.catismalar/.test(appHam));
+    dogru("sözlük sıfırlama sorusu isimleri metne ÇAKMIYOR", !/varsayılan karakterlere \(Tofi, Moni, Dora/.test(appHam));
+    dogru("emoji paketinde Mimi/Dora resmi kalmadı", emojiMan.length > 0 && !/ (Mimi|Dora)( \d+)?\.png/.test(emojiMan));
+    /* Senkron uyarısının KONUMU: yinelenenAdlar bloğundan SONRA (o daha ağır vakayı söylüyor)
+       ve plan yazılmadan ÖNCE. Yorumlar ayıklanarak bakılıyor (eski hatayı anlatan yorum,
+       hatanın kendisi değildir — 24-26. bölüm dersi). */
+    var appKod = appHam.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    var iY = appKod.indexOf("KISI.yinelenenAdlar(state.kisiler)"), iS = appKod.indexOf("KISI.paketAdSapmalari(state.kisiler"),
+        iP = appKod.indexOf("snk.plan = plan");
+    dogru("Senkron 'ad yanlış kişide' uyarısını her seferinde üretiyor (yinelenenAdlar'dan sonra, plandan önce)",
+          iY > 0 && iS > iY && iP > iS, "konumlar: yinelenen=" + iY + " sapma=" + iS + " plan=" + iP);
+    /* Emoji tanıma: kadrodan çıkanların dosya adları kalıcı ad kümesinde (eski projelerde katman
+       birikmesi geri gelmesin). Liste fonksiyonun İÇİNDE olmalı (hoisting dersi). */
+    var mE = /function emojiAdKumesi\(tarama\)\s*\{\s*var EMOJI_ESKI_AD = \[([\s\S]*?)\];/.exec(appKod);
+    var eskiAdlar = [];
+    try { eskiAdlar = mE ? JSON.parse("[" + mE[1] + "]") : []; } catch (eJ) {}
+    dogru("emoji ad kümesinde 16 eski Mimi/Dora adı var, hepsi küçük harf + .png (fonksiyonun içinde)",
+          eskiAdlar.length === 16 && eskiAdlar.every(function (a) { return a === a.toLowerCase() && /^[^\/\\]+ (mimi|dora)\.png$/.test(a); }),
+          "bulunan: " + JSON.stringify(eskiAdlar));
   })();
 
   /* ---- ÖZET ---- */

@@ -63,10 +63,11 @@ var VARSAYILAN = [
                           "tofee", "toffe", "toffey", "tovy"] },
   { ad: "Moni", varyant: ["money", "monny", "mony", "monie", "monnie", "mo ni",
                           "monee", "monni", "monyi", "mohni", "moniy"] },
-  { ad: "Dora", varyant: ["dorra", "doora", "tora", "dorah", "do ra",
-                          "doraa", "tohra", "thora", "dhora", "torra"] },
-  { ad: "Mimi", varyant: ["mimmi", "mimy", "mimie", "mimmy", "mi mi",
-                          "mimee", "mimii", "meemi", "mimmie"] },
+  /* ⚠ DORA ve MİMİ 5 KASIM 2026'DA ÇIKARILDI (kadrodan ayrıldılar, kullanıcı isteği).
+     Yerlerine LULU geldi (listenin sonunda). Mevcut kullanıcının sozluk.json'ından onları
+     çıkaran şey PAKET_KALDIRILAN_AD tablosu — buradan silmek tek başına kimseye ulaşmaz.
+     Bırakılsalardı "tora" gibi varyantlar artık videoda olmayan bir isme çevrilmeye ve
+     motor ipucuna (--hotwords) iki ölü isim gitmeye devam ederdi. */
   { ad: "Niko", varyant: ["nico", "nikko", "nicko", "niku", "nikoo", "ni ko",
                           "niiko", "nikoh", "nikho", "nikoe"] },
   /* ⚠⚠ SAGE — LİSTE PARSMAZI'DEN GELDİ (18 Ağustos 2026), AMA BİR TANESİ ALINMADI.
@@ -119,7 +120,22 @@ var VARSAYILAN = [
      öldürürdü — yani asıl işi bozardı. Kullanıcı rahatsız olursa çözüm koda değil,
      panele: Sera girdisini kendi sözlüğünden silebilir. */
   { ad: "Sera", varyant: ["seraa", "serra", "sehra", "se ra",
-                          "serah", "seira", "seraah", "sehraa"] }
+                          "serah", "seira", "seraah", "sehraa"] },
+  /* ⚠ LULU — YENİ KARAKTER (5 Kasım 2026). Varyantlar dosyanın üstündeki dört kalıptan:
+     ünlü kayması u→ü / u→o (lülü · lulü · lülu · lolo · lulo), ikizleme (lullu · luluu),
+     İngilizce/Fransızca yazım (loulou · lou lou), hece ayrılması (lu lu).
+     BİLEREK DIŞARIDA: "lüle" (gerçek kelime: saç lülesi), "lola"/"lili" (başka isimler),
+     "ulu" (gerçek kelime). Kalanlar Türkçede kelime DEĞİL ve bilinen bir kelimenin kökü de
+     değil ("seyra" dersi: ek gelince kelime oluyor mu diye de soruldu).
+     ⚠ "LOLU" İLK TASLAKTA VARDI, İNCELEMEDE ÇIKARILDI (yayından önce): "lol" (LoL, League of
+     Legends) + belirtme eki = "lolu". Motor apostrofsuz yazınca "dün akşam lolu sildim" →
+     "Lulu sildim", yapışık ek dalıyla "lolun/lolum/lolunu" da bozuluyordu. "seyra"nın TERSİ:
+     orada varyanta ek gelince gerçek kelime çıkıyordu, burada gerçek KÖKE ek gelince varyantın
+     kendisi oluşuyor. Yeni varyant eklerken üçüncü soru: "bilinen bir kelime + ek = bu mu?"
+     ⚠ Bu liste tahmin — ParsMazi'nin Sage'de yaptığı gibi motorun Lulu için ürettiği GERÇEK
+     yanlış yazımlar gelirse buraya eklenir (PAKET_SURUM'u da artır). */
+  { ad: "Lulu", varyant: ["lülü", "lulü", "lülu", "lolo", "lulo",
+                          "lullu", "luluu", "loulou", "lou lou", "lu lu"] }
 ];
 
 /* ⚠⚠ PAKETTEN ÇIKARILAN VARYANTLAR — ÇIKARMAK TEK BAŞINA KİMSEYE ULAŞMAZ.
@@ -142,10 +158,15 @@ var VARSAYILAN = [
    PAKET_KALDIRILAN["constructor"] Object yapıcısını döndürür, `.length` sayı olduğu için
    aşağıdaki kapıyı geçer ve olmayan bir "çıkarma listesi" üzerinde dönülürdü. Bugün adlar
    VARSAYILAN'dan geldiği için ulaşılmaz bir yol, ama buildMap ve _EK aynı tuzağa GERÇEKTEN
-   düştü (altyazıya "function Object() { [native code] }" yazılmıştı) — tekrarlanmasın. */
+   düştü (altyazıya "function Object() { [native code] }" yazılmıştı) — tekrarlanmasın.
+   ⚠⚠ HER SATIR KENDİ SÜRÜMÜNÜ TAŞIR ({ v, surum }) — 5 Kasım 2026 incelemesi. Eskiden
+   tablo düz diziydi ve damga kapısını geçen HER birleştirme turunda koşulsuz yeniden
+   uygulanıyordu: "bir kez çalışır, kullanıcı geri yazarsa bir daha silinmez" sözü yalnız
+   SONRAKİ PAKET_SURUM artışına kadar tutuyordu. Satır artık yalnız kullanıcının eski damgası
+   `surum`'dan KÜÇÜKSE uygulanır; `surum` = o satırın eklendiği PAKET_SURUM. */
 var PAKET_KALDIRILAN = (function () {
   var t = Object.create(null);
-  t["Sera"] = ["seyra"];
+  t["Sera"] = [{ v: "seyra", surum: 3 }];
   return t;
 })();
 
@@ -598,8 +619,19 @@ function save(extRoot, entries) {
    varyantlar kod dosyasına yazılır, panele kurulur ve `paketBirlestir` "guncel" deyip
    hiçbir şey yapmazdı — yani asıl şikâyetçiye HİÇBİRİ ulaşmazdı. Aynı tuzağa 18
    Ağustos'ta da düşülmemişti; üçüncü kez sorma, kural şu: VARSAYILAN'a dokundun mu
-   PAKET_SURUM artar. */
-var PAKET_SURUM = 3;
+   PAKET_SURUM artar.
+   4 = 5 Kasım 2026: Dora + Mimi ÇIKARILDI (PAKET_KALDIRILAN_AD), Lulu eklendi. */
+var PAKET_SURUM = 4;
+
+/* ⚠⚠ PAKETTEN ÇIKARILAN İSİMLER (girdinin TAMAMI) — PAKET_KALDIRILAN'ın (tek varyant) eşi.
+   Kadrodan ayrılan karakterin sözlük girdisi mevcut kullanıcının dosyasından ancak böyle
+   çıkar. KURALLAR: yalnız birleştirme turunda BİR KEZ (damga) · yalnız TAM ad eşleşmesi
+   (büyük/küçük harf duyarsız) · girdi kullanıcının kendi eklediği varyantlarla birlikte
+   gider (karakter artık videoda yok) · kullanıcı ismi sonradan elle geri yazarsa damga
+   yüzünden bir daha SİLİNMEZ — SONRAKİ PAKET_SURUM ARTIŞINDA DA (her satır kendi `surum`'unu
+   taşır, yalnız eski damga ondan küçükse uygulanır; ayrıntı PAKET_KALDIRILAN notunda).
+   ⚠ Buraya isim yazarken PAKET_SURUM'u da ARTIR ve `surum` = yeni PAKET_SURUM yaz. */
+var PAKET_KALDIRILAN_AD = [{ ad: "Dora", surum: 4 }, { ad: "Mimi", surum: 4 }];
 function paketBirlestir(extRoot) {
   var p = path.join(extRoot, DOSYA), raw, j;
   try {
@@ -610,9 +642,22 @@ function paketBirlestir(extRoot) {
   } catch (e) { return { durum: "okunamadi", eklenen: [], cikarilan: [], hata: String((e && e.message) || e) }; }
   if (!j || Object.prototype.toString.call(j.entries) !== "[object Array]") return { durum: "bicim", eklenen: [], cikarilan: [] };
   if (!j.entries.length) return { durum: "bos-birakilmis", eklenen: [], cikarilan: [] };
-  if (Number(j.pkgSurum || 0) >= PAKET_SURUM) return { durum: "guncel", eklenen: [], cikarilan: [] };
+  var eskiDamga = Number(j.pkgSurum || 0);
+  if (eskiDamga >= PAKET_SURUM) return { durum: "guncel", eklenen: [], cikarilan: [] };
 
   var eklenen = [], cikarilan = [], indeks = {}, i;
+  /* ÖNCE ÇIKARILAN İSİMLER — indeks çıkarılmış listeden kurulsun. Yalnız bu kullanıcının
+     henüz GÖRMEDİĞİ satırlar (eskiDamga < surum). */
+  var _adSet = Object.create(null), _kalanE = [];
+  for (i = 0; i < PAKET_KALDIRILAN_AD.length; i++) {
+    if (eskiDamga < Number(PAKET_KALDIRILAN_AD[i].surum || 0)) _adSet[String(PAKET_KALDIRILAN_AD[i].ad).toLowerCase()] = 1;
+  }
+  for (i = 0; i < j.entries.length; i++) {
+    var _ex = j.entries[i];
+    if (_ex && _ex.ad && _adSet[String(_ex.ad).toLowerCase()]) { cikarilan.push(_ex.ad + " (isim)"); continue; }
+    _kalanE.push(_ex);
+  }
+  j.entries = _kalanE;
   for (i = 0; i < j.entries.length; i++) {
     if (j.entries[i] && j.entries[i].ad) indeks[String(j.entries[i].ad).toLowerCase()] = i;
   }
@@ -639,7 +684,9 @@ function paketBirlestir(extRoot) {
     var _kaldir = PAKET_KALDIRILAN[v.ad], _kSet, _kalan, z;
     if (_kaldir && _kaldir.length) {
       _kSet = Object.create(null);
-      for (z = 0; z < _kaldir.length; z++) _kSet[String(_kaldir[z]).toLowerCase()] = 1;
+      for (z = 0; z < _kaldir.length; z++) {
+        if (eskiDamga < Number(_kaldir[z].surum || 0)) _kSet[String(_kaldir[z].v).toLowerCase()] = 1;
+      }
       _kalan = [];
       for (z = 0; z < mevcut.varyant.length; z++) {
         if (_kSet[String(mevcut.varyant[z]).toLowerCase()]) cikarilan.push(v.ad + ": " + mevcut.varyant[z]);
@@ -666,6 +713,7 @@ function paketBirlestir(extRoot) {
 module.exports = {
   load: load, save: save, defaults: defaults,
   paketBirlestir: paketBirlestir, PAKET_SURUM: PAKET_SURUM,
+  PAKET_KALDIRILAN_AD: PAKET_KALDIRILAN_AD,
   parseText: parseText, toText: toText,
   buildMap: buildMap, fixWords: fixWords, fixToken: fixToken, fixText: fixText,
   hotwords: hotwords, DOSYA: DOSYA,

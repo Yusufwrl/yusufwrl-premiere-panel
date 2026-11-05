@@ -517,7 +517,11 @@
   });
   if ($("dictReset")) $("dictReset").addEventListener("click", async function () {
     if (!SZ) { dictStatus("Önizleme modunda kaydedilmez.", "var(--warn)"); return; }
-    if (!(await uiConfirm("Sözlük varsayılan karakterlere (Tofi, Moni, Dora, Mimi, Niko) dönecek.\nKendi eklediklerin silinir.\n\nDevam?", "Varsayılanlar"))) return;
+    /* Ad listesi VARSAYILAN'dan okunur, metne çakılmaz: kadro değişince (5 Kasım 2026: Dora/Mimi
+       çıktı, Lulu geldi) bu soru eski isimleri vaat etmeye devam ediyordu. */
+    var _vAd = "";
+    try { _vAd = SZ.defaults().map(function (e) { return e.ad; }).join(", "); } catch (eVa) { _vAd = ""; }
+    if (!(await uiConfirm("Sözlük varsayılan karakterlere" + (_vAd ? " (" + _vAd + ")" : "") + " dönecek.\nKendi eklediklerin silinir.\n\nDevam?", "Varsayılanlar"))) return;
     state.dict = SZ.defaults(); dictFill();
     try { SZ.save(extRoot, state.dict); dictStatus("✓ Varsayılanlar yüklendi.", "var(--good)"); }
     catch (e) { dictStatus("✕ Kaydedilemedi: " + (e.message || e), "var(--bad)"); }
@@ -2373,12 +2377,31 @@
   /* Bilinen emoji dosya adlari (kucuk harf). Iki kaynak: kullanicinin KLASORU (taramadan)
      ve panelin dagittigi PAKET (varsayilan/emoji-paketi.json). Paket sart: kullanici
      klasoru degistirmisse bile onceki calistirmada konan emojiler taninabilsin. */
+  /* ⚠⚠ KADRODAN ÇIKAN KARAKTERLERİN EMOJİ ADLARI — YALNIZ TANIMA İÇİN, KULLANIM İÇİN DEĞİL.
+     (5 Kasım 2026, v1.32.0 incelemesi.) 2. ölçütün (dosya ADI) tek çalışan kaynağı paketti
+     (emoji-paketi.json); Mimi/Dora paketten çıkınca eski projelerdeki onların klipleri — yol
+     öneki de tutmuyorsa (ParsMazi'nin "-teslim" motor klasörü, Yusuf'un Ağustos projeleri:
+     kutu o zaman Edit\Emoji idi) — "yabancı" sayılıp katman birikmesini GERİ getiriyordu:
+     2. basışta eski katman temizlenmiyor, enUstDolu yükseliyor, "Emojileri Sil" "karışık,
+     dokunulmadı" diyor. Kurulum ve seçim bu listeyi HİÇ okumaz (onlar paketten ve tara()'dan).
+     Kadrodan yeni biri çıkarsa adlarını BURAYA ekle, silme.
+     ⚠ Liste FONKSİYONUN İÇİNDE: dışarıda `var` olsaydı, fonksiyon o satır çalışmadan önce
+     çağrıldığında undefined.length ile düşerdi (v1.9.20 hoisting dersi). */
   function emojiAdKumesi(tarama) {
+    var EMOJI_ESKI_AD = [
+      "ağlayan dora.png", "ağlayan mimi.png", "aşırı sinirli dora.png", "aşırı sinirli mimi.png",
+      "düşünceli dora.png", "düşünceli mimi.png", "havalı dora.png", "havalı mimi.png",
+      "korkmuş dora.png", "korkmuş mimi.png", "sevgi dora.png", "sevgi mimi.png",
+      "şaşırmış dora.png", "şaşırmış mimi.png", "yalvaran dora.png", "yalvaran mimi.png"
+    ];
     var k = {}, i, ad;
+    for (i = 0; i < EMOJI_ESKI_AD.length; i++) k[EMOJI_ESKI_AD[i]] = 1;
     try {
       var dl = (tarama && tarama.dosyalar) || [];
       for (i = 0; i < dl.length; i++) {
-        ad = String(dl[i].ad || dl[i].dosya || "").toLowerCase();
+        /* DOSYA ADI yoldan alınır: tara()'nın `ad` alanı uzantısız taban ("ağlayan moni"),
+           klip adı ise ".png"li — eskiden bu kaynak hiçbir klibe eşleşmiyordu (ölü). */
+        ad = String(dl[i].yol ? path.basename(dl[i].yol) : (dl[i].ad || dl[i].dosya || "")).toLowerCase();
         if (ad) k[ad] = 1;
       }
     } catch (e1) {}
@@ -5232,6 +5255,23 @@
         snkLog("UYARI: " + snk.uyariMetni);
       }
     } catch (eCak) {}
+    /* ⚠⚠ PAKETİN BİLDİĞİ AD BAŞKA KARAKTERDE — yukarıdaki uyarının "ad tek karakterde kalmış"
+       hâli. Kadro güncellemesi (v1.32.0) çakışan Discord adını yeni karaktere EKLEMİYOR ve
+       bunu yalnız gizli log'a yazıyor; ad iki karakterde olmadığı için yukarıdaki denetim
+       susuyor. Bu satır her Senkron'da, yalnız bu klasördeki adlar için bakar.
+       Ayrıntı: kisiler.js paketAdSapmalari. */
+    try {
+      if (!snk.uyariMetni && KISI && KISI.paketAdSapmalari) {
+        var _sap = KISI.paketAdSapmalari(state.kisiler, (snk.dosyalar || []).map(function (d) { return d.ad; }));
+        if (_sap.length) {
+          snk.uyariMetni = "⚠ DISCORD ADI YANLIŞ KİŞİDE: " +
+            _sap.map(function (c) { return "“" + c.ad + "” listende " + c.sahip + " altında, olması gereken " + c.olmasiGereken; }).join(" · ") +
+            ". Bu kayıt " + _sap[0].sahip + " kanalına gider, " + _sap[0].olmasiGereken + " “videoda yok” görünür ve " +
+            "AutoCut onun konuşmasını kesebilir. Aşağıdaki “Kişiler” listesinde adı doğru kişiye taşı.";
+          snkLog("UYARI: " + snk.uyariMetni);
+        }
+      }
+    } catch (eSap) {}
     if (!snk.uyariMetni && !snk.cekenDosya && bilinmeyen.length) {
       snk.uyariMetni = "⚠ " + ceken + " adına kayıtlı dosya bulunamadı. Bilinmeyenlerden biri SENİN kaydınsa " +
         "onu yerleştirme — sesin zaten A1'de, videoda çift/yankılı çıkar. Kişi listesine Discord adını ekleyip tekrar dene.";
@@ -6647,7 +6687,7 @@
     try { AYNA = require(path.join(extRoot, "js", "pngayna.js")); }
     catch (eAyna) { AYNA = null; logLine("PNG aynalama modülü yüklenemedi: " + (eAyna.message || eAyna)); }
     setPill("pillHost", true); setPill("pillGpu", fs.existsSync(cfg.engineExe));
-    // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Dora, Mimi, Niko)
+    // Karakter isimleri sözlüğü — sozluk.json yoksa varsayılan (Tofi, Moni, Niko, Sage, Sera, Lulu)
     SZ = pipeline.sozluk;
     /* ⚠ PAKETTEKİ YENİ İSİMLER ÖNCE BİRLEŞTİRİLİR, load()'DAN ÖNCE.
        load() kullanıcının sozluk.json'ı varsa VARSAYILAN'a hiç bakmıyor; yani pakete
@@ -6660,6 +6700,9 @@
         logLine("Sözlük güncellendi (pakete eklenen " + _szB.eklenen.length + " yeni yazım): " +
                 _szB.eklenen.join(" · "));
       else if (_szB && _szB.hata) logLine("Sözlük paket birleştirmesi yapılamadı: " + _szB.hata);
+      /* Çıkarılan isim/varyant AYRI satırda — "eklenen"e karışırsa kullanıcı "eklendi" okur. */
+      if (_szB && _szB.cikarilan && _szB.cikarilan.length)
+        logLine("Sözlükten çıkarıldı (kadrodan ayrılan / sorunlu yazım): " + _szB.cikarilan.join(" · "));
     } catch (eSzB) { logLine("Sözlük paket birleştirmesi atlandı: " + (eSzB.message || eSzB)); }
     state.dict = SZ.load(extRoot);
     // Senkron kartı modülleri (Craig kayıtlarını hizalama ve yerleştirme)
@@ -6675,6 +6718,16 @@
           logLine("Kişi listesine yeni karakter eklendi: " + _kiB.eklenen.join(" · ") +
                   " — Senkron kartından Discord adını kontrol et.");
         else if (_kiB && _kiB.hata) logLine("Kişi listesi birleştirmesi yapılamadı: " + _kiB.hata);
+        if (_kiB && _kiB.cikarilan && _kiB.cikarilan.length)
+          logLine("Kişi listesinden çıkarıldı (kadrodan ayrıldı): " + _kiB.cikarilan.join(" · "));
+        /* ⚠ ÇAKIŞMA ARTIK GÖRÜNÜR. kisiler.js'teki yorum "panel bunu uyarı satırında gösteriyor"
+           diyordu ama hiçbir yer `catismalar`ı okumuyordu (5 Kasım 2026'da fark edildi). Gerçek
+           senaryo: ParsMazi Lulu'nun kaydını ("artemis9099") daha önce "Bilinmeyen kişi"den
+           Niko'ya bağladıysa ad Lulu'ya EKLENMEZ ve sesi sessizce Niko'nun kanalına gider. */
+        if (_kiB && _kiB.catismalar && _kiB.catismalar.length)
+          logLine("⚠ Discord adı başka karaktere kayıtlı, pakettekine eklenmedi: " +
+                  _kiB.catismalar.map(function (c) { return c.ad + " → şu an " + c.sahip + " (paket: " + c.olmasiGereken + ")"; }).join(" · ") +
+                  " — doğrusu buysa Senkron → Kişiler kutusundan düzelt.");
       } catch (eKiB) { logLine("Kişi listesi birleştirmesi atlandı: " + (eKiB.message || eKiB)); }
       state.kisiler = KISI.load(extRoot);
       snkKisiDoldur();
@@ -6754,7 +6807,7 @@
     setPill("pillHost", false); setPill("pillGpu", true);
     // Önizlemede sozluk.js require edilemez — kutuyu örnekle doldur (kaydetme devre dışı)
     var ta = $("dictText");
-    if (ta) ta.value = "Tofi: toffy, tofy, topi\nMoni: money, monny\nDora: dorra, tora\nMimi: mimmi, mimy\nNiko: nico, nikko";
+    if (ta) ta.value = "Tofi: toffy, tofy, topi\nMoni: money, monny\nSage: sej, sace\nNiko: nico, nikko\nLulu: lülü, lolo";
     var db = $("dictBadge"); if (db) db.textContent = "5";
     state.styles = [{ name: "Tofi Text", path: "tofi" }, { name: "Moni Text", path: "moni" },
       { name: "Kırmızı", path: "kirmizi" }, { name: "Mavi", path: "mavi" }, { name: "Sarı", path: "sari" }, { name: "Yeşil", path: "yesil" }];
