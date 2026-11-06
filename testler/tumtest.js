@@ -2228,12 +2228,15 @@ function bitir() {
           eskiAdlar.every(function (a) { return a === a.toLowerCase() && /^[^\/\\]+\.png$/.test(a); }),
           "bulunan: " + JSON.stringify(eskiAdlar));
     /* v1.37.0: paketten kaldırılan TEK emoji de tanınmaya devam etmeli (v1.35-v1.36 projeleri).
-       Davranışla ölç: adı paketten ve kaynak klasörden düşmüş olmalı, ad kümesinde kalmalı. */
+       v1.38.0: Küsmüş Sage stüdyoda yeniden yapılıp pakete GERİ döndü. Kalıcı özellik artık şu:
+       ad, paketteki varlığından BAĞIMSIZ olarak ad kümesinde kalmalı (bir gün yine çıkarılırsa
+       v1.35-v1.36 ve v1.38+ projelerinin klipleri "yabancı" sayılıp katman biriktirmesin).
+       Pakette olup olmadığı yalnız ayrıntı satırına yazılır, testi bağlamaz. */
     var pkt37 = [];
     try { pkt37 = JSON.parse(String(fs.readFileSync(path.join(KOK, "varsayilan", "emoji-paketi.json"), "utf8")).replace(/^﻿/, "")); } catch (eP) {}
     var pktAd37 = pkt37.map(function (x) { return String(x.ad).toLowerCase(); });
-    dogru("paketten kaldırılan 'Küsmüş Sage' paket listesinde YOK ama emoji ad kümesinde VAR",
-          pkt37.length > 0 && pktAd37.indexOf("küsmüş sage.png") < 0 && eskiAdlar.indexOf("küsmüş sage.png") >= 0,
+    dogru("'Küsmüş Sage' emoji ad kümesinde kalıyor (paketten çıksa da girse de tanınır)",
+          pkt37.length > 0 && eskiAdlar.indexOf("küsmüş sage.png") >= 0,
           "paket=" + pkt37.length + " pakette=" + (pktAd37.indexOf("küsmüş sage.png") >= 0) + " kümede=" + (eskiAdlar.indexOf("küsmüş sage.png") >= 0));
   })();
 
