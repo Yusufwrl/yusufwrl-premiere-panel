@@ -2224,8 +2224,17 @@ function bitir() {
     var eskiAdlar = [];
     try { eskiAdlar = mE ? JSON.parse("[" + mE[1] + "]") : []; } catch (eJ) {}
     dogru("emoji ad kümesinde 16 eski Mimi/Dora adı var, hepsi küçük harf + .png (fonksiyonun içinde)",
-          eskiAdlar.length === 16 && eskiAdlar.every(function (a) { return a === a.toLowerCase() && /^[^\/\\]+ (mimi|dora)\.png$/.test(a); }),
+          eskiAdlar.filter(function (a) { return /^[^\/\\]+ (mimi|dora)\.png$/.test(a); }).length === 16 &&
+          eskiAdlar.every(function (a) { return a === a.toLowerCase() && /^[^\/\\]+\.png$/.test(a); }),
           "bulunan: " + JSON.stringify(eskiAdlar));
+    /* v1.37.0: paketten kaldırılan TEK emoji de tanınmaya devam etmeli (v1.35-v1.36 projeleri).
+       Davranışla ölç: adı paketten ve kaynak klasörden düşmüş olmalı, ad kümesinde kalmalı. */
+    var pkt37 = [];
+    try { pkt37 = JSON.parse(String(fs.readFileSync(path.join(KOK, "varsayilan", "emoji-paketi.json"), "utf8")).replace(/^﻿/, "")); } catch (eP) {}
+    var pktAd37 = pkt37.map(function (x) { return String(x.ad).toLowerCase(); });
+    dogru("paketten kaldırılan 'Küsmüş Sage' paket listesinde YOK ama emoji ad kümesinde VAR",
+          pkt37.length > 0 && pktAd37.indexOf("küsmüş sage.png") < 0 && eskiAdlar.indexOf("küsmüş sage.png") >= 0,
+          "paket=" + pkt37.length + " pakette=" + (pktAd37.indexOf("küsmüş sage.png") >= 0) + " kümede=" + (eskiAdlar.indexOf("küsmüş sage.png") >= 0));
   })();
 
   /* ---- ÖZET ---- */

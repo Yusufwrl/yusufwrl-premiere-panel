@@ -1073,7 +1073,7 @@
           }
           if (eskiye.length) logLine("Emoji: paketten çıkarılmış " + eskiye.length +
                                      " resim “eski” klasörüne taşındı (" + eskiye.join(", ") +
-                                     ") — yeniden adlandırılmış olabilirler.");
+                                     ") — paketten kaldırılmış ya da yeniden adlandırılmış olabilirler.");
           try { fs.writeFileSync(izYol, JSON.stringify(iz), "utf8"); } catch (eIw) {}
           if (eYeni) logLine("Emoji resimleri TAZELENDİ (" + eYeni + "): " + eYeniAd.join(", ") +
                              (eYeni > eYeniAd.length ? " …" : "") + " — düzeltilmiş hâlleri kuruldu." +
@@ -2385,6 +2385,9 @@
      2. basışta eski katman temizlenmiyor, enUstDolu yükseliyor, "Emojileri Sil" "karışık,
      dokunulmadı" diyor. Kurulum ve seçim bu listeyi HİÇ okumaz (onlar paketten ve tara()'dan).
      Kadrodan yeni biri çıkarsa adlarını BURAYA ekle, silme.
+     Aynı kural paketten TEK BİR emoji çıkarılınca da geçerli: "küsmüş sage.png" v1.35-v1.36'da
+     dağıtıldı, v1.37.0'da Yusuf'un isteğiyle kaldırıldı — o iki sürümle yapılmış projelerdeki
+     klipleri hâlâ "bizim" sayılmalı.
      ⚠ Liste FONKSİYONUN İÇİNDE: dışarıda `var` olsaydı, fonksiyon o satır çalışmadan önce
      çağrıldığında undefined.length ile düşerdi (v1.9.20 hoisting dersi). */
   function emojiAdKumesi(tarama) {
@@ -2392,7 +2395,8 @@
       "ağlayan dora.png", "ağlayan mimi.png", "aşırı sinirli dora.png", "aşırı sinirli mimi.png",
       "düşünceli dora.png", "düşünceli mimi.png", "havalı dora.png", "havalı mimi.png",
       "korkmuş dora.png", "korkmuş mimi.png", "sevgi dora.png", "sevgi mimi.png",
-      "şaşırmış dora.png", "şaşırmış mimi.png", "yalvaran dora.png", "yalvaran mimi.png"
+      "şaşırmış dora.png", "şaşırmış mimi.png", "yalvaran dora.png", "yalvaran mimi.png",
+      "küsmüş sage.png"
     ];
     var k = {}, i, ad;
     for (i = 0; i < EMOJI_ESKI_AD.length; i++) k[EMOJI_ESKI_AD[i]] = 1;
